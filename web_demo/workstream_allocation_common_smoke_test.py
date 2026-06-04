@@ -67,6 +67,25 @@ def _put_allocation(ws_id: str, body: dict):
     return client.put(f"/api/workstreams/{ws_id}/allocation", json=b)
 
 
+def _wf_approve_materials_preflight(ws_id: str) -> None:
+    """PUT WF /allocation chỉ khi PENDING_TECH_PREFLIGHT — chuyển từ PENDING_APPROVAL nếu cần."""
+    info = client.get(f"/api/workstreams/{ws_id}").json()
+    if info.get("workstream_type") != "WINDOW_FILM_INSTALLATION" or info.get("status") != "PENDING_APPROVAL":
+        return
+    mp = info.get("material_plan")
+    if isinstance(mp, str):
+        try:
+            mp = json.loads(mp or "[]")
+        except json.JSONDecodeError:
+            mp = []
+    r = client.post(
+        f"/api/workstreams/{ws_id}/approve-wf-materials",
+        json={"reason": "smoke WF material plan approved", "material_plan": mp},
+    )
+    if r.status_code != 200:
+        raise RuntimeError(f"approve-wf-materials failed {ws_id}: {r.status_code} {r.text[:500]}")
+
+
 def _ensure_multi_ws(db, request_id: str = "REQ-CMN78-WSALLOC") -> tuple[str, str, str, str, str, str]:
     """rid, ppf_id, wf_id, ttype_l1, ttype_l2, wf_wind_lot_id — LOT kính lái đúng Material Preference (không hardcode JB20)."""
     from material_preference_logic import resolve_material_preference
@@ -339,7 +358,8 @@ def main():
     add(9, "PUT PPF tick phụ qty=0 fail", r9.status_code == 400 and e9 == "PPF_INVALID_ITEM_QUANTITY", str(r9.json())[:80])
     _put_allocation(ppf_id, body6)
 
-    # 10–13 WF
+    # 10–13 WF (trước hết duyệt mã phim → PENDING_TECH_PREFLIGHT mới PUT allocation)
+    _wf_approve_materials_preflight(wf_id)
     wf_json = client.get(f"/api/workstreams/{wf_id}").json()
     wfa = wf_json.get("wf_allocation") or {}
     body10 = {

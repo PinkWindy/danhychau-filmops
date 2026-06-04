@@ -245,6 +245,9 @@ def _update_request_status_from_workstreams(db: Session, req: DbRequest):
         req.status = "IN_PROGRESS"
     elif any(s == "APPROVED" for s in statuses):
         req.status = "APPROVED"
+    elif any(s == "PENDING_TECH_PREFLIGHT" for s in statuses):
+        if getattr(req, "status", None) != "NEEDS_REVIEW":
+            req.status = "ALLOCATED"
     elif all(s == "PENDING_APPROVAL" for s in statuses):
         if getattr(req, "status", None) != "NEEDS_REVIEW":
             req.status = "ALLOCATED"  # ready for approval
@@ -1117,12 +1120,96 @@ def put_workstream_allocation_unified(ws_id: str, data: dict = Body(...), db: Se
     return _put_wf_allocation_route(ws_id, data, db)
 
 
+@app.post("/api/workstreams/{ws_id}/approve-wf-materials")
+def approve_wf_materials_only(ws_id: str, data: dict = Body(default_factory=dict), db: Session = Depends(get_db)):
+    """
+    Bước 1 (Phim cách nhiệt): Quản lý xác nhận mã phim từng hạng mục.
+    → PENDING_TECH_PREFLIGHT, rebuild wf_allocation từ định mức + material_plan (chưa khóa LOT, chưa tạo Job Card).
+    """
+    ws = db.query(DbWorkstream).filter(DbWorkstream.workstream_id == ws_id).first()
+    if not ws:
+        raise HTTPException(404, "Workstream not found")
+    if ws.workstream_type != "WINDOW_FILM_INSTALLATION":
+        raise HTTPException(400, {"error": "INVALID", "message": "Chỉ áp dụng cho WINDOW_FILM_INSTALLATION."})
+    if ws.status != "PENDING_APPROVAL":
+        raise HTTPException(
+            400,
+            {"error": "INVALID", "message": f"Chỉ duyệt mã phim khi PENDING_APPROVAL. Hiện: {ws.status}."},
+        )
+    reason = (data.get("reason") or data.get("change_reason") or "").strip()
+    if not reason:
+        raise HTTPException(400, {"error": "REASON_REQUIRED", "message": "Bắt buộc nhập reason (xác nhận lựa chọn mã phim thi công)."})
+    actor = (data.get("approved_by") or data.get("updated_by") or "QL-002").strip()
+
+    plan_in = data.get("material_plan")
+    if plan_in is not None:
+        if not isinstance(plan_in, list):
+            raise HTTPException(400, {"error": "INVALID", "message": "material_plan phải là mảng."})
+        ws.material_plan = json.dumps(plan_in, ensure_ascii=False)
+    elif not (ws.material_plan or "").strip():
+        raise HTTPException(400, {"error": "INVALID", "message": "Thiếu material_plan trên workstream."})
+
+    from wf_allocation_service import build_default_wf_allocation
+
+    alloc = build_default_wf_allocation(db, ws)
+    ws.wf_allocation_json = json.dumps(alloc, ensure_ascii=False)
+    first_sel = next((x for x in (alloc.get("items") or []) if x.get("is_selected")), None)
+    if first_sel:
+        srcs = first_sel.get("sources") or []
+        if srcs:
+            ws.allocated_source_type = (srcs[0].get("source_type") or "LOT").upper()
+            ws.allocated_source_id = srcs[0].get("source_id") or ""
+        ws.selected_material_code = first_sel.get("material_code") or ws.selected_material_code
+        ws.planned_cut_block = first_sel.get("planned_size") or ws.planned_cut_block
+        ws.planned_deduction_length_m = float(first_sel.get("required_length_m") or ws.planned_deduction_length_m or 0)
+
+    before_st = ws.status
+    ws.status = "PENDING_TECH_PREFLIGHT"
+    req = db.query(DbRequest).filter(DbRequest.request_id == ws.request_id).first()
+    if req:
+        _update_request_status_from_workstreams(db, req)
+    _audit(
+        db,
+        ws.request_id,
+        "WF_MATERIAL_PLAN_APPROVED",
+        "WORKSTREAM",
+        ws_id,
+        before_st,
+        "PENDING_TECH_PREFLIGHT",
+        reason,
+        actor,
+        ws_id,
+        ws.workstream_type,
+    )
+    db.commit()
+    db.refresh(ws)
+    return {
+        "status": "success",
+        "detail": "Đã duyệt mã phim thi công. KTV chỉnh phân bổ LOT rồi bấm Chốt phân bổ.",
+        "workstream_id": ws_id,
+        "new_status": ws.status,
+        "wf_allocation": json.loads(ws.wf_allocation_json) if ws.wf_allocation_json else alloc,
+    }
+
+
 @app.post("/api/workstreams/{ws_id}/approve")
 def approve_workstream(ws_id: str, data: dict = None, db: Session = Depends(get_db)):
     """Manager approves a single workstream → Soft Lock + Job Card created."""
     ws = db.query(DbWorkstream).filter(DbWorkstream.workstream_id == ws_id).first()
     if not ws: raise HTTPException(404, "Workstream not found")
-    if ws.status not in ("PENDING_APPROVAL",):
+    if ws.workstream_type == "WINDOW_FILM_INSTALLATION":
+        if ws.status not in ("PENDING_TECH_PREFLIGHT",):
+            raise HTTPException(
+                400,
+                detail={
+                    "error": "WF_APPROVAL_WRONG_STEP",
+                    "message": (
+                        f"Phim cách nhiệt: trước hết duyệt mã phim (POST /api/workstreams/{ws_id}/approve-wf-materials). "
+                        f"Trạng thái hiện: {ws.status}"
+                    ),
+                },
+            )
+    elif ws.status not in ("PENDING_APPROVAL",):
         raise HTTPException(400, f"Workstream in wrong status: {ws.status}")
 
     data = data or {}

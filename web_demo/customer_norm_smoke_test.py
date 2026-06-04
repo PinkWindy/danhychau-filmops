@@ -6,9 +6,10 @@ import uuid
 
 from fastapi.testclient import TestClient
 
-from database import SessionLocal, init_db
+from database import SessionLocal, init_db, DbVehicleFilmNorm
 from main import app
 from populate_db import _seed_amis_and_vehicle_norms
+from sqlalchemy import or_
 
 client = TestClient(app)
 ROWS = []
@@ -33,6 +34,17 @@ def main():
     init_db()
     db = SessionLocal()
     try:
+        for row in (
+            db.query(DbVehicleFilmNorm)
+            .filter(
+                or_(
+                    DbVehicleFilmNorm.norm_id.like("NORM-SMOKE-%"),
+                    DbVehicleFilmNorm.norm_id.like("NORM-SEED-SMOKE-%"),
+                )
+            )
+            .all()
+        ):
+            db.delete(row)
         _seed_amis_and_vehicle_norms(db)
         db.commit()
     finally:
@@ -214,6 +226,22 @@ def main():
 
     _print_table()
     failed = [x for x in ROWS if not x[2]]
+    db_clean = SessionLocal()
+    try:
+        for row in (
+            db_clean.query(DbVehicleFilmNorm)
+            .filter(
+                or_(
+                    DbVehicleFilmNorm.norm_id.like("NORM-SMOKE-%"),
+                    DbVehicleFilmNorm.norm_id.like("NORM-SEED-SMOKE-%"),
+                )
+            )
+            .all()
+        ):
+            db_clean.delete(row)
+        db_clean.commit()
+    finally:
+        db_clean.close()
     if failed:
         for n, name, _, det in failed:
             print(f"FAIL #{n} {name}: {det}")

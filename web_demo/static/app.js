@@ -586,6 +586,7 @@ const TRANG_THAI_VI = {
   'EXCEPTION_HOLD': 'Ngoại lệ — Chờ xử lý',
   'NEEDS_REVIEW': 'Cần rà soát / thiếu dữ liệu hoặc kho',
   'PENDING_APPROVAL': 'Chờ phê duyệt',
+  'PENDING_TECH_PREFLIGHT': 'KTV chỉnh LOT — chờ chốt phân bổ',
   'PENDING': 'Chờ KTV nhận',
   'COMPLETED_BY_TECHNICIAN': 'KTV đã hoàn tất',
   'ACTUAL_CONFIRMATION_REQUIRED': 'Cần xác nhận thực tế',
@@ -708,6 +709,31 @@ function loaiLuongBadge(wsType) {
   const cls = isPpf ? 'ws-type-ppf' : 'ws-type-wf';
   const label = isPpf ? '🛡 Dán Phim PPF' : '🪟 Phim Cách Nhiệt';
   return `<span class="status-badge ${cls}">${label}</span>`;
+}
+
+/** Nhãn tiếng Việt cho job_item WF (material plan) */
+function _wfJobLabelVi(ji) {
+  const m = {
+    WINDSHIELD: 'Kính lái',
+    REAR_WINDOW: 'Kính hậu',
+    FRONT_SIDE: 'Kính cửa trước',
+    REAR_SIDE_TRIANGLE: 'Kính cửa sau + tam giác',
+    SUNROOF: 'Cửa sổ trời',
+    TRIANGLE: 'Tam giác',
+    REAR_SIDE: 'Sườn sau',
+    SIDE_QUARTER: 'Tam giác cố định',
+  };
+  return m[ji] || ji || '—';
+}
+
+/** HTML tổng hợp gộp khổ (roll_cut_summary) từ API wf_allocation */
+function wfRollCutSummaryHtml(wfa) {
+  if (!wfa || !wfa.roll_cut_summary) return '';
+  const rc = wfa.roll_cut_summary;
+  if (rc.lines_html) {
+    return `<div style="margin-top:8px;padding:8px;border-radius:8px;background:rgba(255,255,255,0.04);font-size:11px;line-height:1.55"><strong style="color:var(--text-secondary)">Gộp khổ (mét cuộn):</strong><br>${rc.lines_html}</div>`;
+  }
+  return '';
 }
 
 function fmtDt(isoStr) {
@@ -2300,10 +2326,17 @@ async function taiTongQuan() {
 
 window.pheDuyetNhanhWs = async function(wsId) {
   try {
-    const data = await fetch(`/api/workstreams/${wsId}/approve`, {
-      method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({})
-    }).then(r => r.json());
-    toast('success', '✅ Phê duyệt thành công', data.detail);
+    const ws = await fetchJSON(`/api/workstreams/${encodeURIComponent(wsId)}`);
+    if (ws.workstream_type === 'WINDOW_FILM_INSTALLATION' && ws.status === 'PENDING_APPROVAL') {
+      await moModalDuyetMaPhimWF(wsId);
+      return;
+    }
+    const data = await fetchJSON(`/api/workstreams/${encodeURIComponent(wsId)}/approve`, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({}),
+    });
+    toast('success', '✅ Phê duyệt thành công', data.detail || '');
     taiTongQuan(); taiThongBao();
   } catch(e) { toast('error', 'Lỗi phê duyệt', e.message); }
 };
@@ -2712,11 +2745,13 @@ async function hienThiDon(req) {
     try {
       wssProbe = await fetch(`/api/requests/${encodeURIComponent(req.request_id)}/workstreams`).then((r) => r.json());
     } catch (e) { wssProbe = []; }
-    const hasPendingWs = (wssProbe || []).some((ws) => ws.status === 'PENDING_APPROVAL');
+    const hasPendingWs = (wssProbe || []).some(
+      (ws) => ws.status === 'PENDING_APPROVAL' || ws.status === 'PENDING_TECH_PREFLIGHT',
+    );
     if (req.is_multi_workstream || hasPendingWs) {
       document.getElementById('hitl-ws-zone').style.display = 'block';
       await hienThiThePheDuyet(req.request_id);
-      desc.textContent = 'Quản lý phê duyệt workstream (vật tư / LOT).';
+      desc.textContent = 'Quản lý duyệt mã phim WF / phê duyệt PPF; sau đó KTV chỉnh LOT (WF) rồi chốt phân bổ.';
     } else {
       document.getElementById('hitl-1-zone').style.display = 'block';
       document.getElementById('prop-source').textContent = `${req.allocated_source_type}: ${req.allocated_source_id}`;
@@ -2826,7 +2861,7 @@ async function hienThiThePheDuyet(requestId) {
       const offB = hasOff
         ? '<span style="margin-left:6px;padding:2px 8px;border-radius:6px;background:rgba(156,39,176,0.25);font-weight:700;font-size:10px">Dùng mảnh dư</span>'
         : '';
-      wfAllocHtml = `<br><span style="color:var(--text-secondary)">Phân bổ WF:</span>${splitBadge}${offB}<br>${lines.join('<br>')}`;
+      wfAllocHtml = `<br><span style="color:var(--text-secondary)">Phân bổ WF:</span>${splitBadge}${offB}<br>${lines.join('<br>')}${wfRollCutSummaryHtml(wfa)}`;
     }
     return `<div style="border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:12px;margin-bottom:10px;background:var(--bg-card)">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
@@ -2840,9 +2875,14 @@ async function hienThiThePheDuyet(requestId) {
         ${ppfAllocHtml}${wfAllocHtml}
       </div>
       <div style="display:flex;gap:6px;flex-wrap:wrap">
-        ${ws.status === 'PENDING_APPROVAL' ? `
+        ${ws.status === 'PENDING_APPROVAL' ? (isPpf ? `
           <button class="btn btn-green btn-sm" onclick="pheDuyetWs('${ws.workstream_id}')"><i class="fa-solid fa-check"></i> Phê duyệt</button>
-          <button class="btn btn-outline btn-sm" onclick="chiinhSuaWs('${ws.workstream_id}')"><i class="fa-solid fa-pen"></i> Chỉnh sửa trước duyệt</button>` : ''}
+          <button class="btn btn-outline btn-sm" onclick="chiinhSuaWs('${ws.workstream_id}')"><i class="fa-solid fa-pen"></i> Chỉnh sửa trước duyệt</button>` : `
+          <button class="btn btn-green btn-sm" onclick="moModalDuyetMaPhimWF('${ws.workstream_id}')"><i class="fa-solid fa-film"></i> Duyệt mã phim</button>
+          <button class="btn btn-outline btn-sm" onclick="chiinhSuaWs('${ws.workstream_id}')"><i class="fa-solid fa-pen"></i> Sửa mã phim / kế hoạch</button>`) : ''}
+        ${!isPpf && ws.status === 'PENDING_TECH_PREFLIGHT' ? `
+          <button class="btn btn-outline btn-sm" onclick="chiinhSuaWs('${ws.workstream_id}')"><i class="fa-solid fa-warehouse"></i> Chỉnh phân bổ LOT</button>
+          <button class="btn btn-green btn-sm" onclick="pheDuyetWs('${ws.workstream_id}')"><i class="fa-solid fa-check"></i> Chốt phân bổ</button>` : ''}
         ${ws.status === 'APPROVED' ? `<button class="btn btn-blue btn-sm" onclick="batDauWs('${ws.workstream_id}')"><i class="fa-solid fa-play"></i> KTV bắt đầu thi công</button>` : ''}
         ${ws.status === 'IN_PROGRESS' ? `<button class="btn btn-primary btn-sm" onclick="moFormXacNhan('${ws.workstream_id}')"><i class="fa-solid fa-flag-checkered"></i> Nhập thực tế & hoàn tất</button>` : ''}
         ${ws.status === 'CLOSED' ? '<span style="color:var(--teal-light);font-size:12px;font-weight:700"><i class="fa-solid fa-check-circle"></i> Đã hoàn tất & đóng</span>' : ''}
@@ -2859,7 +2899,8 @@ async function hienThiTheLuong(requestId) {
   let overall = 'IN_PROGRESS';
   if (statuses.every(s => s === 'CLOSED')) overall = 'CLOSED';
   else if (statuses.some(s => s === 'CLOSED')) overall = 'PARTIALLY_COMPLETED';
-  else if (statuses.every(s => s === 'PENDING_APPROVAL')) overall = 'PENDING_APPROVAL';
+  else if (statuses.some(s => s === 'PENDING_APPROVAL')) overall = 'PENDING_APPROVAL';
+  else if (statuses.some(s => s === 'PENDING_TECH_PREFLIGHT')) overall = 'PENDING_TECH_PREFLIGHT';
   const wsOverall = document.getElementById('ws-overall-status');
   if (wsOverall) { wsOverall.className = `status-badge status-${overall.toLowerCase().replace(/_/g,'-')}`; wsOverall.textContent = TRANG_THAI_VI[overall] || overall; }
 
@@ -2869,7 +2910,7 @@ async function hienThiTheLuong(requestId) {
     const icon = isPpf ? 'fa-shield-film' : 'fa-window-restore';
     const tenLoai = isPpf ? 'Dán Phim PPF' : 'Dán Phim Cách Nhiệt';
     const matPlan = ws.material_plan ? (Array.isArray(ws.material_plan) ? ws.material_plan : JSON.parse(ws.material_plan || '[]')) : [];
-    const progress = { 'PENDING_APPROVAL':0,'APPROVED':30,'IN_PROGRESS':60,'ACTUAL_CONFIRMATION_REQUIRED':75,'COMPLETED':90,'CLOSED':100 }[ws.status] || 0;
+    const progress = { 'PENDING_APPROVAL':0,'PENDING_TECH_PREFLIGHT':12,'APPROVED':30,'IN_PROGRESS':60,'ACTUAL_CONFIRMATION_REQUIRED':75,'COMPLETED':90,'CLOSED':100 }[ws.status] || 0;
     const tenPhim = { 'T-TYPE':'T-TYPE (Trong suốt)', 'M-TYPE':'M-TYPE (Mờ)', 'JB20':'JB20 (Cách nhiệt)', 'RT40':'RT40 (Kính lái)' };
 
     const ppfTypeCode =
@@ -2922,8 +2963,11 @@ async function hienThiTheLuong(requestId) {
         const req = parseFloat(it.required_length_m) || 0;
         const ok = req <= 0 || tot + 1e-6 >= req;
         const sl = (it.sources || []).filter((s) => (s.source_id || '').trim()).map((s) => `${s.source_id}: ${s.allocated_length_m}m`).join('<br>');
+        const psz = (it.planned_size || '').trim();
+        const dim = psz ? ` · ${_esc(psz)} cm` : '';
+        const qty = it.quantity != null && it.quantity !== '' ? it.quantity : '—';
         parts.push(
-          `<div style="margin-bottom:6px"><strong>${it.item_name}</strong> <span class="mat-code">${it.material_code}</span> — ${ok ? '<span style="color:var(--teal-light)">Đủ</span>' : '<span style="color:var(--amber)">Thiếu</span>'}<div style="font-size:11px;margin-top:2px">${sl || '—'}</div></div>`
+          `<div style="margin-bottom:6px"><strong>${it.item_name}</strong> <span class="mat-code">${it.material_code}</span>${dim} — SL <strong>${qty}</strong> — ${ok ? '<span style="color:var(--teal-light)">Đủ</span>' : '<span style="color:var(--amber)">Thiếu</span>'}<div style="font-size:11px;margin-top:2px">${sl || '—'}</div></div>`
         );
       }
       const splitBadge =
@@ -2933,7 +2977,7 @@ async function hienThiTheLuong(requestId) {
       const offBadge = hasOff
         ? ' <span style="padding:2px 7px;border-radius:6px;background:rgba(156,39,176,0.25);font-size:9px;font-weight:700">Dùng mảnh dư</span>'
         : '';
-      wfSourceBlock = `<div class="ws-info-row"><span class="ws-label">Phân bổ vật tư WF</span><span class="ws-value" style="font-size:11px">${splitBadge}${offBadge}<div style="margin-top:6px">${parts.join('')}</div></span></div>`;
+      wfSourceBlock = `<div class="ws-info-row"><span class="ws-label">Phân bổ vật tư WF</span><span class="ws-value" style="font-size:11px">${splitBadge}${offBadge}<div style="margin-top:6px">${parts.join('')}</div>${wfRollCutSummaryHtml(wfa)}</span></div>`;
     }
 
     return `<div class="ws-card ${typeClass}">
@@ -2980,7 +3024,10 @@ async function hienThiTheLuong(requestId) {
         ${ws.created_offcut_id ? `<div class="ws-info-row"><span class="ws-label">Mảnh dư tạo ra</span><span class="ws-value" style="color:var(--green-light)">${ws.created_offcut_id}</span></div>` : ''}
       </div>
       <div class="ws-card-actions">
-        ${ws.status === 'PENDING_APPROVAL' ? `<button class="btn btn-green btn-sm" onclick="pheDuyetWs('${ws.workstream_id}')"><i class="fa-solid fa-check"></i> Phê duyệt</button>` : ''}
+        ${ws.status === 'PENDING_APPROVAL' ? (isPpf ? `<button class="btn btn-green btn-sm" onclick="pheDuyetWs('${ws.workstream_id}')"><i class="fa-solid fa-check"></i> Phê duyệt</button>` : `<button class="btn btn-green btn-sm" onclick="moModalDuyetMaPhimWF('${ws.workstream_id}')"><i class="fa-solid fa-film"></i> Duyệt mã phim</button>`) : ''}
+        ${!isPpf && ws.status === 'PENDING_TECH_PREFLIGHT' ? `
+          <button class="btn btn-outline btn-sm" onclick="chiinhSuaWs('${ws.workstream_id}')"><i class="fa-solid fa-warehouse"></i> Chỉnh phân bổ LOT</button>
+          <button class="btn btn-green btn-sm" onclick="pheDuyetWs('${ws.workstream_id}')"><i class="fa-solid fa-check"></i> Chốt phân bổ</button>` : ''}
         ${ws.status === 'APPROVED' ? `<button class="btn btn-blue btn-sm" onclick="batDauWs('${ws.workstream_id}')"><i class="fa-solid fa-play"></i> KTV bắt đầu</button>` : ''}
         ${ws.status === 'IN_PROGRESS' ? `<button class="btn btn-primary btn-sm" onclick="moFormXacNhan('${ws.workstream_id}')"><i class="fa-solid fa-ruler"></i> Nhập thực tế</button>` : ''}
         <button class="btn btn-outline btn-sm" onclick="chiinhSuaWs('${ws.workstream_id}')"><i class="fa-solid fa-pen"></i> Chỉnh sửa</button>
@@ -3016,13 +3063,128 @@ async function hienThiTheLuong(requestId) {
     }
   }
 }
+window.moModalDuyetMaPhimWF = async function (wsId) {
+  let ws;
+  try {
+    ws = await fetchJSON(`/api/workstreams/${encodeURIComponent(wsId)}`);
+  } catch (e) {
+    toast('error', 'Không tải luồng', e.message);
+    return;
+  }
+  if (ws.workstream_type !== 'WINDOW_FILM_INSTALLATION') {
+    toast('warning', 'Không áp dụng', 'Chỉ luồng phim cách nhiệt.');
+    return;
+  }
+  if (ws.status !== 'PENDING_APPROVAL') {
+    toast('info', 'Trạng thái', `Luồng không ở bước duyệt mã phim (hiện: ${TRANG_THAI_VI[ws.status] || ws.status}).`);
+    return;
+  }
+  let plan = ws.material_plan;
+  if (typeof plan === 'string') {
+    try {
+      plan = JSON.parse(plan || '[]');
+    } catch {
+      plan = [];
+    }
+  }
+  if (!Array.isArray(plan)) plan = [];
+  document.getElementById('wf-material-approve-modal')?.remove();
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.id = 'wf-material-approve-modal';
+  overlay.style.display = 'flex';
+  const rows = plan
+    .map((p, i) => {
+      const ji = p.job_item || '';
+      const mc = (p.material_code || 'JB20').trim();
+      const opts = LOAI_PHIM_WF.map(
+        (o) => `<option value="${o.id}" ${o.id === mc ? 'selected' : ''}>${_esc(o.label)}</option>`,
+      ).join('');
+      return `<tr><td>${_esc(_wfJobLabelVi(ji))}</td><td><code>${_esc(ji)}</code></td><td><select class="field-input" id="wf-appr-mc-${i}" style="min-width:200px">${opts}</select></td></tr>`;
+    })
+    .join('');
+  overlay.innerHTML = `
+    <div class="demo-modal" style="max-width:580px">
+      <div class="demo-modal-header">
+        <i class="fa-solid fa-film" style="color:var(--blue-light)"></i>
+        <div>
+          <h3>Duyệt mã phim theo hạng mục</h3>
+          <p style="font-size:12px;color:var(--text-secondary);margin-top:4px">Xác nhận loại phim cho từng kính. Sau khi lưu, hệ thống hiển thị chi tiết SL, LOT gợi ý, kích thước và gộp khổ — KTV chỉnh LOT rồi bấm Chốt phân bổ.</p>
+        </div>
+      </div>
+      <div style="padding:16px 20px">
+        ${
+          plan.length
+            ? `<table class="data-table" style="font-size:12px"><thead><tr><th>Hạng mục</th><th>Mã</th><th>Mã phim thi công</th></tr></thead><tbody>${rows}</tbody></table>`
+            : '<p class="muted">Chưa có kế hoạch vật tư (material_plan). Không thể duyệt — kiểm tra lại đơn / định mức.</p>'
+        }
+        <div class="field-group" style="margin-top:14px">
+          <label>Lý do / xác nhận <span style="color:var(--red-light)">*</span></label>
+          <textarea id="wf-appr-reason" class="field-input" rows="2" placeholder="VD: Đồng ý RT40 kính lái, JB20 các kính còn lại theo đề xuất…"></textarea>
+        </div>
+      </div>
+      <div class="demo-modal-footer" style="display:flex;gap:8px">
+        <button type="button" class="btn btn-outline" onclick="document.getElementById('wf-material-approve-modal')?.remove()">Hủy</button>
+        <button type="button" class="btn btn-green" id="wf-appr-submit" ${plan.length ? '' : 'disabled'}><i class="fa-solid fa-check"></i> Xác nhận duyệt mã phim</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  const btn = document.getElementById('wf-appr-submit');
+  if (!btn) return;
+  btn.onclick = async () => {
+    const reason = (document.getElementById('wf-appr-reason')?.value || '').trim();
+    if (!reason) {
+      toast('warning', 'Thiếu lý do', 'Vui lòng nhập lý do xác nhận.');
+      return;
+    }
+    const outPlan = plan.map((p, i) => {
+      const sel = document.getElementById(`wf-appr-mc-${i}`);
+      const mc = (sel && sel.value) || p.material_code;
+      return { ...p, material_code: mc };
+    });
+    btn.disabled = true;
+    try {
+      await fetchJSON(`/api/workstreams/${encodeURIComponent(wsId)}/approve-wf-materials`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason, material_plan: outPlan }),
+      });
+      overlay.remove();
+      toast('success', 'Đã duyệt mã phim', 'KTV chỉnh phân bổ LOT, sau đó bấm Chốt phân bổ.');
+      await taiDonThiCong();
+      taiThongBao();
+      taiTongQuan();
+      if (currentRequestId) {
+        try {
+          await hienThiTheLuong(currentRequestId);
+          await hienThiThePheDuyet(currentRequestId);
+        } catch (_) {
+          /* noop */
+        }
+      }
+    } catch (e) {
+      toast('error', 'Không lưu được', e.message);
+    } finally {
+      btn.disabled = false;
+    }
+  };
+};
+
 window.pheDuyetWs = async function(wsId) {
   try {
-    const data = await fetch(`/api/workstreams/${wsId}/approve`, {
-      method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({})
-    }).then(r => r.json());
-    toast('success', '✅ Phê duyệt thành công', data.detail);
+    const data = await fetchJSON(`/api/workstreams/${encodeURIComponent(wsId)}/approve`, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({}),
+    });
+    toast('success', '✅ Phê duyệt thành công', data.detail || '');
     await taiDonThiCong(); taiThongBao(); taiTongQuan();
+    if (currentRequestId) {
+      try {
+        await hienThiTheLuong(currentRequestId);
+        await hienThiThePheDuyet(currentRequestId);
+      } catch (_) { /* noop */ }
+    }
   } catch(e) { toast('error', 'Lỗi phê duyệt', e.message); }
 };
 
@@ -3170,19 +3332,33 @@ window.chiinhSuaWs = async function(wsId) {
   const ws = await fetch(`/api/workstreams/${wsId}`).then(r => r.json());
   const isPpf = ws.workstream_type === 'PPF_INSTALLATION';
   const isWf = ws.workstream_type === 'WINDOW_FILM_INSTALLATION';
+  if (isWf && ws.status === 'PENDING_APPROVAL' && typeof window.moModalDuyetMaPhimWF === 'function') {
+    await window.moModalDuyetMaPhimWF(wsId);
+    return;
+  }
   if (
     ws.status === 'PENDING_APPROVAL' &&
-    (isPpf || isWf) &&
+    isPpf &&
     typeof window.openWorkstreamAllocationModal === 'function'
   ) {
-    let lots = [];
-    let offcuts = [];
-    if (isPpf) {
-      [lots, offcuts] = await Promise.all([
-        fetch('/api/lots').then((r) => r.json()),
-        fetch('/api/offcuts').then((r) => r.json()),
-      ]);
-    }
+    const [lots, offcuts] = await Promise.all([
+      fetch('/api/lots').then((r) => r.json()),
+      fetch('/api/offcuts').then((r) => r.json()),
+    ]);
+    _wsEditModePpf = true;
+    _wsEditDirty = false;
+    await window.openWorkstreamAllocationModal(wsId, ws, lots, offcuts);
+    return;
+  }
+  if (
+    isWf &&
+    ws.status === 'PENDING_TECH_PREFLIGHT' &&
+    typeof window.openWorkstreamAllocationModal === 'function'
+  ) {
+    const [lots, offcuts] = await Promise.all([
+      fetch('/api/lots').then((r) => r.json()),
+      fetch('/api/offcuts').then((r) => r.json()),
+    ]);
     _wsEditModePpf = true;
     _wsEditDirty = false;
     await window.openWorkstreamAllocationModal(wsId, ws, lots, offcuts);
@@ -3472,7 +3648,9 @@ async function taiBangLuong() {
         <td><small>${fmtDt(w.started_at)}</small></td>
         <td><small>${fmtDt(w.completed_at)}</small></td>
         <td style="white-space:nowrap">
-          ${w.status === 'PENDING_APPROVAL' ? `<button class="btn btn-green btn-sm" onclick="pheDuyetNhanhWs('${w.workstream_id}')">Duyệt</button>` : ''}
+          ${w.status === 'PENDING_APPROVAL' && w.workstream_type === 'WINDOW_FILM_INSTALLATION' ? `<button class="btn btn-green btn-sm" onclick="moModalDuyetMaPhimWF('${w.workstream_id}')">Duyệt mã phim</button>` : ''}
+          ${w.status === 'PENDING_APPROVAL' && w.workstream_type !== 'WINDOW_FILM_INSTALLATION' ? `<button class="btn btn-green btn-sm" onclick="pheDuyetNhanhWs('${w.workstream_id}')">Duyệt</button>` : ''}
+          ${w.status === 'PENDING_TECH_PREFLIGHT' && w.workstream_type === 'WINDOW_FILM_INSTALLATION' ? `<button class="btn btn-outline btn-sm" onclick="chiinhSuaWs('${w.workstream_id}')">LOT</button><button class="btn btn-green btn-sm" style="margin-left:4px" onclick="pheDuyetNhanhWs('${w.workstream_id}')">Chốt</button>` : ''}
           ${w.status === 'APPROVED' ? `<button class="btn btn-blue btn-sm" onclick="batDauWs('${w.workstream_id}')">Bắt đầu</button>` : ''}
           ${w.status === 'IN_PROGRESS' ? `<button class="btn btn-primary btn-sm" onclick="moFormXacNhan('${w.workstream_id}')">Hoàn tất</button>` : ''}
           <button class="btn btn-outline btn-sm" style="margin-left:4px" onclick="chiinhSuaWs('${w.workstream_id}')"><i class="fa-solid fa-pen"></i></button>

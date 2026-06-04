@@ -529,8 +529,14 @@ def put_wf_allocation(
         raise HTTPException(404, {"error": "NOT_FOUND", "message": "Workstream không tồn tại."})
     if ws.workstream_type != "WINDOW_FILM_INSTALLATION":
         raise HTTPException(400, {"error": "INVALID", "message": "Chỉ workstream Phim cách nhiệt."})
-    if ws.status != "PENDING_APPROVAL":
-        raise HTTPException(400, {"error": "INVALID", "message": f"Chỉ chỉnh khi PENDING_APPROVAL. Hiện: {ws.status}."})
+    if ws.status not in ("PENDING_TECH_PREFLIGHT",):
+        raise HTTPException(
+            400,
+            {
+                "error": "INVALID",
+                "message": f"Chỉ chỉnh phân bổ LOT khi đã duyệt mã phim (PENDING_TECH_PREFLIGHT). Hiện: {ws.status}.",
+            },
+        )
 
     prev_raw = getattr(ws, "wf_allocation_json", None) or ""
     prev_snap: Dict[str, Any]

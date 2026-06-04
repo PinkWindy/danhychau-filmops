@@ -366,20 +366,32 @@ def _purge_deprecated_window_film_norm_ids(db: Session) -> None:
             db.delete(row)
 
 
+def _purge_smoke_pattern_vehicle_film_norms(db: Session) -> int:
+    """Xóa định mức do smoke/script tạo (POST tự động) — không dùng trong vận hành."""
+    from sqlalchemy import or_
+
+    q = db.query(DbVehicleFilmNorm).filter(
+        or_(
+            DbVehicleFilmNorm.norm_id.like("NORM-SMOKE-%"),
+            DbVehicleFilmNorm.norm_id.like("NORM-SEED-SMOKE-%"),
+        )
+    )
+    n = 0
+    for row in q.all():
+        db.delete(row)
+        n += 1
+    return n
+
+
 def seed_vehicle_film_norms(db: Session) -> Dict[str, Any]:
     """
-    Không tự import Excel / không tự tạo định mức phim cách nhiệt khi seed.
-    Chỉ giữ định mức PPF mặc định (ALL) và dọn bản demo cũ.
-    Import Excel: POST /api/vehicle-norms/import-from-excel (thủ công).
+    Không import Excel tự động.
+    Xóa bản ghi định mức khớp NORM-SMOKE-* / NORM-SEED-SMOKE-* (do smoke từng POST).
+    Merge định mức PPF ALL mặc định.
+    Định mức phim cách nhiệt (WF): chỉ nhập tay hoặc POST /api/vehicle-norms/import-from-excel.
     """
     _purge_deprecated_window_film_norm_ids(db)
-    _seed_ppf_default_norm(db)
-    return {
-        "ok": True,
-        "window_film_norms": "manual_only",
-        "excel_auto_import": False,
-        "ppf_default_norm": True,
-    }
+    _purge_smoke_pattern_vehicle_film_norms(db)
     ts = _now_iso()
     _merge_norm(
         db,
@@ -416,6 +428,12 @@ def seed_vehicle_film_norms(db: Session) -> Dict[str, Any]:
         created_at=ts,
         updated_at=ts,
     )
+    return {
+        "ok": True,
+        "window_film_norms": "manual_only",
+        "excel_auto_import": False,
+        "ppf_default_norm": True,
+    }
 
 
 def seed_material_preferences(db: Session) -> None:

@@ -78,28 +78,8 @@ def _put_allocation(ws_id: str, body: dict):
     return client.put(f"/api/workstreams/{ws_id}/allocation", json=b)
 
 
-def _ensure_smoke_rx350_window_film_norm() -> None:
-    """Định mức WF không còn auto-seed — đảm bảo có bản ghi RX350 cho smoke."""
-    body = {
-        "norm_id": "NORM-SEED-SMOKE-RX350-WF",
-        "film_type": "Phim cách nhiệt",
-        "vehicle_model_code": "RX350",
-        "model_year_range": "2005-2030",
-        "windshield_size": "90x152",
-        "rear_window_size": "80x130",
-        "front_side_size": "92x130",
-        "rear_side_triangle_size": "50x152",
-        "sunroof_size": "80x80",
-        "created_by": "SMOKE-NORM-FALLBACK",
-    }
-    r = client.post("/api/vehicle-norms", json=body)
-    if r.status_code not in (200, 409):
-        raise RuntimeError(f"POST smoke norm failed: {r.status_code} {r.text[:300]}")
-
-
 def main() -> int:
     init_db()
-    _ensure_smoke_rx350_window_film_norm()
 
     add(1, 'normalize "RX350H PREMIUM CE"', normalize_vehicle_model_code("RX350H PREMIUM CE") == "RX350", "")
 
@@ -225,10 +205,35 @@ def main() -> int:
     j20 = r20.json() if r20.status_code == 200 else {}
     add(20, "offcuts/active-options JB20 (list)", r20.status_code == 200, f"count={len(j20.get('items') or [])}")
 
-    put_body = json.loads(json.dumps(wfa))
+    wf_detail = client.get(f"/api/workstreams/{wf_id}").json()
+    mp_ap = wf_detail.get("material_plan")
+    if isinstance(mp_ap, str):
+        try:
+            mp_ap = json.loads(mp_ap or "[]")
+        except json.JSONDecodeError:
+            mp_ap = []
+    if not isinstance(mp_ap, list):
+        mp_ap = []
+    r_pref = client.post(
+        f"/api/workstreams/{wf_id}/approve-wf-materials",
+        json={"reason": "smoke norm_fallback duyệt mã phim", "material_plan": mp_ap},
+    )
+    wf_after = client.get(f"/api/workstreams/{wf_id}").json()
+    wfa2 = wf_after.get("wf_allocation") or {}
+    if isinstance(wfa2, str):
+        try:
+            wfa2 = json.loads(wfa2)
+        except json.JSONDecodeError:
+            wfa2 = {}
+    put_body = json.loads(json.dumps(wfa2))
     put_body["change_reason"] = ""
     r21 = _put_allocation(wf_id, put_body)
-    add(21, "PUT WF allocation default OK", r21.status_code == 200, str(r21.json())[:120])
+    add(
+        21,
+        "approve-wf-materials + PUT WF allocation default OK",
+        r_pref.status_code == 200 and r21.status_code == 200,
+        str(r_pref.json())[:60] + " | " + str(r21.json())[:60],
+    )
 
     ok22, tail22 = _subrun("workstream_allocation_common_smoke_test.py", "WORKSTREAM ALLOCATION COMMON SMOKE TEST PASSED")
     add(22, "workstream_allocation_common_smoke_test.py", ok22, tail22[-200:])

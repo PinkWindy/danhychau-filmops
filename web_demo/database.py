@@ -596,6 +596,11 @@ def init_db():
                     "DELETE FROM vehicle_film_norms WHERE norm_id IN (?, ?)",
                     ("NORM-DEMO-RX350-WF-2024-2027", "NORM-RX350-2013-2022"),
                 )
+                # Định mức do smoke/script POST — không giữ trên DB vận hành
+                conn.execute(
+                    "DELETE FROM vehicle_film_norms WHERE norm_id LIKE ? OR norm_id LIKE ?",
+                    ("NORM-SMOKE-%", "NORM-SEED-SMOKE-%"),
+                )
         except Exception:
             pass
 
