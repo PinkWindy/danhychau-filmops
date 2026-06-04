@@ -25,16 +25,20 @@ from database import (
     DbNotification,
 )
 from vehicle_norm_logic import build_full_address, resolve_vehicle_norm, apply_auto_fill_to_plan
+from material_preference_logic import resolve_material_preference
 
 router = APIRouter(prefix="/api", tags=["customers"])
 
 PPF_DEFAULTS = {"planned_cut_block": "152x1300", "planned_deduction_length_m": 13.0}
-WINDOW_FILM_PLAN_FULL = [
-    {"job_item": "WINDSHIELD", "material_code": "RT40", "note": "Kính lái — RT40"},
-    {"job_item": "REAR_WINDOW", "material_code": "JB20"},
-    {"job_item": "FRONT_SIDE", "material_code": "JB20"},
-    {"job_item": "REAR_SIDE_TRIANGLE", "material_code": "JB20"},
-    {"job_item": "SUNROOF", "material_code": "JB20"},
+# Chỉ job_item + ghi chú — mã vật tư lấy từ DbMaterialPreference + định mức kích thước
+WINDOW_FILM_JOB_TEMPLATE = [
+    {"job_item": "WINDSHIELD", "note": "Kính lái"},
+    {"job_item": "REAR_WINDOW", "note": "Kính hậu"},
+    {"job_item": "FRONT_SIDE", "note": "Sườn trước"},
+    {"job_item": "REAR_SIDE_TRIANGLE", "note": "Sườn sau + tam giác"},
+    {"job_item": "TRIANGLE", "note": "Tam giác"},
+    {"job_item": "REAR_SIDE", "note": "Sườn sau"},
+    {"job_item": "SUNROOF", "note": "Kính trời"},
 ]
 
 
@@ -116,39 +120,14 @@ def _pick_ppf_lot(db: Session, ppf_type: str, min_m: float = 13.0):
     )
 
 
-def _pick_jb20_lot(db: Session, min_m: float):
-    return (
-        db.query(DbLotInventory)
-        .filter(
-            DbLotInventory.material_code == "JB20",
-            DbLotInventory.status == "ACTIVE",
-            DbLotInventory.is_locked == False,
-            DbLotInventory.remaining_length_m >= min_m,
-        )
-        .order_by(DbLotInventory.import_date.asc())
-        .first()
-    )
-
-
-def _pick_rt40_lot(db: Session, min_m: float = 1.0):
-    return (
-        db.query(DbLotInventory)
-        .filter(
-            DbLotInventory.material_code == "RT40",
-            DbLotInventory.status == "ACTIVE",
-            DbLotInventory.is_locked == False,
-            DbLotInventory.remaining_length_m >= min_m,
-        )
-        .order_by(DbLotInventory.import_date.asc())
-        .first()
-    )
-
-
-def _pick_jb20_offcut(db: Session, min_len: float, min_w: float = 1.51):
+def _pick_offcut_for_material(db: Session, material_code: str, min_len: float, min_w: float = 1.51):
+    mc = (material_code or "").strip()
+    if not mc:
+        return None
     return (
         db.query(DbOffcutInventory)
         .filter(
-            DbOffcutInventory.material_code == "JB20",
+            DbOffcutInventory.material_code == mc,
             DbOffcutInventory.status == "ACTIVE",
             DbOffcutInventory.is_locked == False,
             DbOffcutInventory.width_m >= min_w,
@@ -159,22 +138,55 @@ def _pick_jb20_offcut(db: Session, min_len: float, min_w: float = 1.51):
     )
 
 
-def _wf_cut_group(db: Session, vehicle_model_code: str):
+def _pick_lot_for_material(db: Session, material_code: str, min_m: float):
+    mc = (material_code or "").strip()
+    if not mc:
+        return None
     return (
-        db.query(DbCuttingGroupMatrix)
+        db.query(DbLotInventory)
         .filter(
-            DbCuttingGroupMatrix.vehicle_model_code == vehicle_model_code,
-            DbCuttingGroupMatrix.material_code == "JB20",
-            DbCuttingGroupMatrix.status == "ACTIVE",
+            DbLotInventory.material_code == mc,
+            DbLotInventory.status == "ACTIVE",
+            DbLotInventory.is_locked == False,
+            DbLotInventory.remaining_length_m >= min_m,
         )
+        .order_by(DbLotInventory.import_date.asc())
         .first()
     )
 
 
+def _wf_cut_group(db: Session, vehicle_model_code: str, material_code: Optional[str] = None):
+    q = (
+        db.query(DbCuttingGroupMatrix)
+        .filter(DbCuttingGroupMatrix.vehicle_model_code == vehicle_model_code)
+        .filter(DbCuttingGroupMatrix.status == "ACTIVE")
+    )
+    mc = (material_code or "").strip()
+    if mc:
+        row = q.filter(DbCuttingGroupMatrix.material_code == mc).first()
+        if row:
+            return row
+    return q.order_by(DbCuttingGroupMatrix.material_code).first()
+
+
+def _hydrate_wf_plan_material_preferences(db: Session, wf_plan: List[dict], film_type: str) -> None:
+    """Gán mã vật tư từ DbMaterialPreference cho các dòng chưa có sau khi ghép định mức."""
+    ft = (film_type or "").strip() or "Phim cách nhiệt"
+    for row in wf_plan:
+        ji = str(row.get("job_item") or "").strip()
+        if not ji:
+            continue
+        if (row.get("material_code") or "").strip():
+            continue
+        mp = resolve_material_preference(db, ft, ji)
+        row["material_code"] = (mp.get("preferred_material_code") or "").strip()
+        row["material_source"] = "MATERIAL_PREFERENCE" if mp.get("found") else "MISSING_PREFERENCE"
+
+
 def _material_plan_for_items(items: list) -> list:
-    allowed = {p["job_item"] for p in WINDOW_FILM_PLAN_FULL}
+    allowed = {p["job_item"] for p in WINDOW_FILM_JOB_TEMPLATE}
     out = []
-    for p in WINDOW_FILM_PLAN_FULL:
+    for p in WINDOW_FILM_JOB_TEMPLATE:
         if p["job_item"] in items and p["job_item"] in allowed:
             out.append(dict(p))
     return out
@@ -1206,14 +1218,29 @@ def register_customer_routes(app, get_db):
         if inc_ppf:
             if ppf_type not in ("T-TYPE", "M-TYPE"):
                 raise HTTPException(400, "ppf_type bắt buộc và phải là T-TYPE hoặc M-TYPE khi chọn PPF")
-        wf_items = svc.get("window_film_items") or [
+        default_wf_codes = [
             "WINDSHIELD",
             "REAR_WINDOW",
             "FRONT_SIDE",
             "REAR_SIDE_TRIANGLE",
+            "TRIANGLE",
+            "REAR_SIDE",
             "SUNROOF",
         ]
-        if inc_wf and not wf_items:
+        raw_wf = svc.get("window_film_items")
+        wf_item_codes: List[str] = []
+        client_wf_by_job: Dict[str, dict] = {}
+        if raw_wf and len(raw_wf) > 0 and isinstance(raw_wf[0], dict):
+            for x in raw_wf:
+                ji = str((x or {}).get("job_item") or "").strip()
+                if ji:
+                    wf_item_codes.append(ji)
+                    client_wf_by_job[ji] = x
+        elif raw_wf:
+            wf_item_codes = [str(x).strip() for x in raw_wf if str(x).strip()]
+        else:
+            wf_item_codes = list(default_wf_codes)
+        if inc_wf and not wf_item_codes:
             raise HTTPException(400, "Chọn ít nhất một hạng mục phim cách nhiệt")
 
         requested_at = (data.get("requested_delivery_at") or "").strip()
@@ -1310,6 +1337,7 @@ def register_customer_routes(app, get_db):
                         customer_id=customer_id,
                         dealer_id=dealer_id,
                         delivery_date=data.get("delivery_date"),
+                        plate_number=(data.get("plate_number") or data.get("plate_no") or "").strip() or None,
                         vehicle_status="ACTIVE",
                         status="ACTIVE",
                         created_at=_now(),
@@ -1329,6 +1357,7 @@ def register_customer_routes(app, get_db):
                     customer_id=customer_id,
                     dealer_id=dealer_id,
                     delivery_date=data.get("delivery_date"),
+                    plate_number=(data.get("plate_number") or data.get("plate_no") or "").strip() or None,
                     vehicle_status="ACTIVE",
                     status="ACTIVE",
                     created_at=_now(),
@@ -1342,11 +1371,10 @@ def register_customer_routes(app, get_db):
         if inc_ppf:
             job_parts.append("PPF_FULL")
         if inc_wf:
-            job_parts.extend(wf_items)
+            job_parts.extend(wf_item_codes)
         job_items_str = ";".join(job_parts)
 
-        cg = _wf_cut_group(db, vehicle_model) if inc_wf else None
-        wf_plan = _material_plan_for_items(wf_items if inc_wf else [])
+        wf_plan = _material_plan_for_items(wf_item_codes if inc_wf else [])
         model_year_val = None
         try:
             if data.get("model_year") is not None:
@@ -1406,12 +1434,57 @@ def register_customer_routes(app, get_db):
                 norm_application["override_reason"] = (
                     data.get("norm_override_reason") or data.get("override_reason") or "norm_override"
                 )
-        wf_block = "152x143"
-        wf_len = 1.43
-        if cg:
-            wf_block = f"{cg.cut_block_width_cm}x{cg.cut_block_length_cm}"
-            wf_len = float(cg.deduction_length_m or wf_len)
-
+            material_override_notes: Dict[str, str] = {}
+            if client_wf_by_job:
+                for row in wf_plan:
+                    ji = str(row.get("job_item") or "")
+                    x = client_wf_by_job.get(ji)
+                    if not x:
+                        continue
+                    prev_mc = (row.get("material_code") or "").strip()
+                    if x.get("material_code"):
+                        new_mc = str(x.get("material_code")).strip()
+                        if new_mc and new_mc != prev_mc:
+                            mo = data.get("material_overrides") or {}
+                            rsn = ""
+                            if isinstance(mo, dict):
+                                rsn = (mo.get(ji) or "").strip()
+                            rsn = rsn or (data.get("material_override_reason") or "").strip()
+                            if not rsn:
+                                raise HTTPException(
+                                    400,
+                                    f"Đổi mã vật tư ({ji}): bắt buộc material_overrides['{ji}'] hoặc material_override_reason",
+                                )
+                            row["material_code"] = new_mc
+                            row["material_source"] = "MANUAL_OVERRIDE"
+                            row["material_override_reason"] = rsn
+                            material_override_notes[ji] = rsn
+                        elif new_mc:
+                            row["material_code"] = new_mc
+                    if x.get("material_source"):
+                        row["material_source"] = x["material_source"]
+                    for k in ("size", "width_cm", "length_cm"):
+                        if k in x and x[k] is not None:
+                            row[k] = x[k]
+            if material_override_notes:
+                _audit(
+                    db,
+                    new_req_id,
+                    "REQUEST_MATERIAL_OVERRIDDEN",
+                    "REQUEST",
+                    new_req_id,
+                    None,
+                    json.dumps(material_override_notes, ensure_ascii=False),
+                    "manual-create: đổi mã vật tư so với Material Preference",
+                    actor,
+                )
+            _hydrate_wf_plan_material_preferences(db, wf_plan, film_type)
+            for row in wf_plan:
+                ms = row.get("material_source")
+                mc = (row.get("material_code") or "").strip()
+                if ms == "MISSING_PREFERENCE" or (inc_wf and not mc):
+                    needs_review = True
+                    review_notes.append(f"MISSING_MATERIAL_PREF:{row.get('job_item')}")
         stock_flags = []
         ppf_lot = None
         if inc_ppf:
@@ -1421,18 +1494,39 @@ def register_customer_routes(app, get_db):
                 stock_flags.append("OUT_OF_STOCK_PPF")
 
         wf_source_type, wf_source_id = "LOT", None
-        jb20_lot = None
-        if inc_wf:
-            oc = _pick_jb20_offcut(db, wf_len)
-            if oc:
-                wf_source_type, wf_source_id = "OFFCUT", oc.offcut_id
-            else:
-                jb20_lot = _pick_jb20_lot(db, wf_len)
-                if jb20_lot:
-                    wf_source_type, wf_source_id = "LOT", jb20_lot.lot_id
+        wf_lot_obj = None
+        primary_wf_mc = ""
+        wf_block = "152x143"
+        wf_len = 1.43
+        cg = None
+        if inc_wf and wf_plan:
+            wind = next((r for r in wf_plan if r.get("job_item") == "WINDSHIELD"), None)
+            primary_wf_mc = ((wind or wf_plan[0]).get("material_code") or "").strip()
+            cg = _wf_cut_group(db, vehicle_model, primary_wf_mc or None)
+            if cg:
+                wf_block = f"{cg.cut_block_width_cm}x{cg.cut_block_length_cm}"
+                wf_len = float(cg.deduction_length_m or wf_len)
+            if primary_wf_mc:
+                oc = _pick_offcut_for_material(db, primary_wf_mc, wf_len)
+                if oc:
+                    wf_source_type, wf_source_id = "OFFCUT", oc.offcut_id
                 else:
-                    needs_review = True
-                    stock_flags.append("OUT_OF_STOCK_JB20")
+                    wf_lot_obj = _pick_lot_for_material(db, primary_wf_mc, wf_len)
+                    if wf_lot_obj:
+                        wf_source_type, wf_source_id = "LOT", wf_lot_obj.lot_id
+                    else:
+                        needs_review = True
+                        stock_flags.append(f"OUT_OF_STOCK_{primary_wf_mc}")
+            else:
+                needs_review = True
+                stock_flags.append("MISSING_PRIMARY_WF_MATERIAL")
+
+        legacy_material = (primary_wf_mc if inc_wf else None) or (ppf_type if inc_ppf else None)
+        if inc_wf and not (legacy_material or "").strip():
+            legacy_material = next(
+                (str((r.get("material_code") or "")).strip() for r in (wf_plan or []) if str((r.get("material_code") or "")).strip()),
+                None,
+            )
 
         req = DbRequest(
             request_id=new_req_id,
@@ -1445,7 +1539,7 @@ def register_customer_routes(app, get_db):
             vin_number=data.get("vin_number") or None,
             vin_masked=vin_m or None,
             vehicle_model_code=vehicle_model,
-            material_code="JB20" if inc_wf else (ppf_type if inc_ppf else "JB20"),
+            material_code=legacy_material,
             job_items=job_items_str,
             status="NEEDS_REVIEW" if needs_review else "ALLOCATED",
             is_grouped_cut=bool(cg),
@@ -1453,7 +1547,7 @@ def register_customer_routes(app, get_db):
             planned_cut_block=PPF_DEFAULTS["planned_cut_block"] if inc_ppf else wf_block,
             planned_deduction_length_m=PPF_DEFAULTS["planned_deduction_length_m"] if inc_ppf else wf_len,
             allocated_source_type="LOT",
-            allocated_source_id=(jb20_lot.lot_id if jb20_lot else None) or (ppf_lot.lot_id if ppf_lot else None),
+            allocated_source_id=(wf_lot_obj.lot_id if wf_lot_obj else None) or (ppf_lot.lot_id if ppf_lot else None),
             is_multi_workstream=is_multi,
             requested_delivery_time=requested_at or None,
             created_at=_now(),
@@ -1500,7 +1594,7 @@ def register_customer_routes(app, get_db):
                 technician_team=teams.get("window_film_team") or "WINDOW_FILM_TEAM_B",
                 assigned_technician_id="KTV-003",
                 assigned_technician_name="Nguyễn Văn An",
-                selected_material_code="JB20",
+                selected_material_code=primary_wf_mc,
                 material_plan=json.dumps(wf_plan, ensure_ascii=False),
                 cut_group_id=cg.cut_group_id if cg else None,
                 planned_cut_block=wf_block,

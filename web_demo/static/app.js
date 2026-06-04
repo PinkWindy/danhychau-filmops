@@ -193,7 +193,7 @@ function setupEditorAddress(prefix) {
   _fillWardDatalistForCity(city ? city.value : '');
 }
 
-const DYC_MODEL_CODES = ['RX300', 'RX350', 'ES250', 'LM500H', 'CAMRY', 'FORTUNER'];
+const DYC_MODEL_CODES = ['RX300', 'RX350', 'ES250', 'LM500H', 'CAMRY', 'FORTUNER']; // fallback khi API model-options lỗi
 const DYC_MODEL_YEAR_OPTS = (() => {
   const a = [];
   for (let y = 2013; y <= 2026; y += 1) a.push(y);
@@ -327,14 +327,33 @@ function renderFilterChips(containerId, chips, onRemove) {
   });
 }
 
-function _ensureModelDatalist() {
+async function refreshModelDatalistFromApi() {
   let dl = document.getElementById('dyc-model-datalist');
   if (!dl) {
     dl = document.createElement('datalist');
     dl.id = 'dyc-model-datalist';
     document.body.appendChild(dl);
   }
+  try {
+    const j = await fetch('/api/vehicle-norms/model-options').then((r) => r.json());
+    const items = (j.items || []).filter((x) => x != null && String(x).trim() !== '');
+    if (items.length) {
+      dl.innerHTML = items.map((m) => `<option value="${_esc(String(m))}"></option>`).join('');
+      return;
+    }
+  } catch (e) {
+    console.warn('[dyc-model-datalist] GET /api/vehicle-norms/model-options failed, using fallback', e);
+  }
+  console.warn('[dyc-model-datalist] Using local fallback model list (demo only)');
   dl.innerHTML = DYC_MODEL_CODES.map((m) => `<option value="${_esc(m)}"></option>`).join('');
+}
+
+function _ensureModelDatalist() {
+  if (!document.getElementById('dyc-model-datalist')) {
+    const dl = document.createElement('datalist');
+    dl.id = 'dyc-model-datalist';
+    document.body.appendChild(dl);
+  }
 }
 
 function _yearOptionsHtml(selected) {
@@ -749,6 +768,7 @@ async function taiTaoDonTay() {
     if ([...sc.options].some(o => o.value === curC)) sc.value = curC;
     if ([...sv.options].some(o => o.value === curV)) sv.value = curV;
   } catch (e) { toast('error', 'Lỗi tải danh mục', e.message); }
+  await mcPreviewNorm();
 }
 
 function _mcIsoDelivery() {
@@ -764,6 +784,7 @@ async function taiKhachHang() {
   await ensureLocationProvincesLoaded();
   _ensureLocationDatalists();
   _ensureModelDatalist();
+  await refreshModelDatalistFromApi();
   let dlGrp = document.getElementById('dyc-dealer-group-datalist');
   if (!dlGrp) {
     dlGrp = document.createElement('datalist');
@@ -978,7 +999,7 @@ async function taiKhachHang() {
             <div class="dyc-field dyc-field-span2"><label>Tìm kiếm</label>
               <input id="flt-v-q" placeholder="Tìm theo mã xe, dòng xe, VIN, khách hàng, đại lý..." value="${_esc(fv.q)}" autocomplete="off" /></div>
             <div class="dyc-field"><label>Dòng xe</label>
-              <input id="flt-v-model" list="dyc-model-datalist" value="${_esc(fv.vehicle_model_code)}" autocomplete="off" /></div>
+              <input id="flt-v-model" list="dyc-model-datalist" placeholder="Chọn hoặc nhập dòng xe" value="${_esc(fv.vehicle_model_code)}" autocomplete="off" /></div>
             <div class="dyc-field"><label>Năm model</label>
               <select id="flt-v-year">${_yearOptionsHtml(fv.model_year)}</select></div>
             <div class="dyc-field"><label>Đại lý</label>
@@ -1042,7 +1063,7 @@ async function taiKhachHang() {
                   <option value="Phim PPF"${fn.film_type === 'Phim PPF' ? ' selected' : ''}>Phim PPF</option>
                 </select></div>
               <div class="dyc-field"><label>Dòng xe</label>
-                <input id="flt-n-model" list="dyc-model-datalist" value="${_esc(fn.vehicle_model_code)}" autocomplete="off" /></div>
+                <input id="flt-n-model" list="dyc-model-datalist" placeholder="Chọn hoặc nhập dòng xe" value="${_esc(fn.vehicle_model_code)}" autocomplete="off" /></div>
               <div class="dyc-field"><label>Năm model</label>
                 <select id="flt-n-year">${_yearOptionsHtml(fn.model_year)}</select></div>
               <div class="dyc-field"><label>Trạng thái</label>
@@ -1079,7 +1100,7 @@ async function taiKhachHang() {
             <div class="cust-filter-meta">Tổng số định mức sau lọc: <strong id="flt-n-total">${nTotal}</strong></div>
             <div class="filter-chips-row" id="flt-n-chips"></div>
           </div>
-          ${norms.length === 0 ? '<div class="empty-state cust-empty"><p>Chưa có định mức phù hợp. Có thể thêm định mức mới cho dòng xe này.</p></div>' : `
+          ${norms.length === 0 ? '<div class="empty-state cust-empty"><p>Chưa có định mức phù hợp với dòng xe đã chọn.</p></div>' : `
           <div class="table-wrap table-norms-excel-wrap"><table class="data-table table-norms-excel"><thead><tr>
             <th>Mã định mức</th>
             <th>Loại phim</th>
@@ -1812,12 +1833,119 @@ document.getElementById('mc-veh-select')?.addEventListener('change', async (e) =
   window.mcPreviewNorm?.();
 });
 
+const MC_JOB_LABEL_VI = {
+  WINDSHIELD: 'Kính lái',
+  REAR_WINDOW: 'Kính hậu',
+  FRONT_SIDE: 'Sườn trước',
+  REAR_SIDE_TRIANGLE: 'Sườn sau + tam giác',
+  TRIANGLE: 'Tam giác',
+  REAR_SIDE: 'Sườn sau',
+  SUNROOF: 'Kính trời',
+};
+
+window._mcWfDefaults = window._mcWfDefaults || {};
+
+async function mcRebuildWfDetail() {
+  const wrap = document.getElementById('mc-wf-detail-wrap');
+  const warnEl = document.getElementById('mc-wf-warn');
+  if (!wrap) return;
+  window._mcWfDefaults = {};
+  if (!document.getElementById('mc-svc-wf')?.checked) {
+    wrap.innerHTML = '';
+    if (warnEl) {
+      warnEl.style.display = 'none';
+      warnEl.textContent = '';
+    }
+    return;
+  }
+  const checked = [...document.querySelectorAll('.mc-wf-item:checked')].map((x) => x.value);
+  if (!checked.length) {
+    wrap.innerHTML = '<p class="muted" style="margin:0">Chọn ít nhất một hạng mục kính.</p>';
+    if (warnEl) warnEl.style.display = 'none';
+    return;
+  }
+  const vm = (document.getElementById('mc-veh-model')?.value || '').trim();
+  const my = (document.getElementById('mc-model-year')?.value || '').trim();
+  const ft = (document.getElementById('mc-film-type')?.value || 'Phim cách nhiệt').trim();
+  const normMap = {};
+  if (vm) {
+    try {
+      let q = `vehicle_model_code=${encodeURIComponent(vm)}&film_type=${encodeURIComponent(ft)}`;
+      if (my) q += `&model_year=${encodeURIComponent(my)}`;
+      const res = await fetch(`/api/vehicle-norms/resolve?${q}`).then((r) => r.json());
+      (res.auto_fill_items || []).forEach((it) => {
+        normMap[it.job_item] = it;
+      });
+    } catch (e) {
+      console.warn('[mcRebuildWfDetail] norm resolve', e);
+    }
+  }
+  let anyMiss = false;
+  const rows = await Promise.all(
+    checked.map(async (ji) => {
+      let pr = {};
+      try {
+        pr = await fetch(`/api/material-preferences/resolve?${new URLSearchParams({ film_type: ft, job_item: ji })}`).then((r) => r.json());
+      } catch (e) {
+        console.warn('[mcRebuildWfDetail] material resolve', ji, e);
+      }
+      const nm = normMap[ji] || {};
+      const defMc = ((nm.material_code != null && String(nm.material_code).trim()) || (pr.preferred_material_code || '').trim() || '');
+      window._mcWfDefaults[ji] = defMc;
+      const opts = new Set((pr.options || []).map((o) => o.material_code).filter(Boolean));
+      if (defMc) opts.add(defMc);
+      ['RT40', 'JB20', 'RS20', 'T-TYPE', 'M-TYPE'].forEach((c) => opts.add(c));
+      const optHtml = [...opts]
+        .filter(Boolean)
+        .map((c) => `<option value="${_esc(c)}"${c === defMc ? ' selected' : ''}>${_esc(c)}</option>`)
+        .join('');
+      const sz = nm.size || '—';
+      const w = nm.width_cm != null && nm.width_cm !== '' ? nm.width_cm : '';
+      const h = nm.length_cm != null && nm.length_cm !== '' ? nm.length_cm : '';
+      const src = (nm.material_source || (pr.found ? 'MATERIAL_PREFERENCE' : 'MISSING_PREFERENCE') || '').trim();
+      if (src === 'MISSING_PREFERENCE' || (!pr.found && !defMc)) anyMiss = true;
+      const lab = MC_JOB_LABEL_VI[ji] || ji;
+      return `<tr data-job-item="${_esc(ji)}">
+        <td><strong>${_esc(lab)}</strong><br/><small class="muted">${_esc(ji)}</small></td>
+        <td>${_esc(String(sz))}
+          <input type="hidden" class="mc-wf-size" value="${_esc(String(nm.size || ''))}" />
+          <input type="hidden" class="mc-wf-w" value="${_esc(String(w))}" />
+          <input type="hidden" class="mc-wf-h" value="${_esc(String(h))}" /></td>
+        <td><select class="mc-wf-mat field-input" data-default="${_esc(defMc)}" style="font-size:11px;max-width:140px">${optHtml}</select></td>
+        <td><span class="mc-wf-src">${_esc(src)}</span></td>
+        <td><input type="text" class="mc-wf-note field-input" placeholder="Ghi chú nếu đổi mã" style="font-size:11px;width:100%;min-width:100px" /></td>
+      </tr>`;
+    }),
+  );
+  wrap.innerHTML = `<div style="overflow-x:auto"><table class="data-table" style="font-size:11px"><thead><tr>
+    <th>Hạng mục</th><th>Kích thước định mức</th><th>Mã vật tư</th><th>Nguồn</th><th>Ghi chú đổi mã</th>
+  </tr></thead><tbody>${rows.join('')}</tbody></table></div>`;
+  if (warnEl) {
+    if (anyMiss) {
+      warnEl.style.display = 'block';
+      warnEl.textContent =
+        'Chưa cấu hình vật tư ưu tiên cho một số hạng mục — vui lòng cập nhật Quản lý kho → Vật tư ưu tiên, hoặc chọn mã thủ công.';
+    } else {
+      warnEl.style.display = 'none';
+      warnEl.textContent = '';
+    }
+  }
+}
+
 async function mcPreviewNorm() {
   const box = document.getElementById('mc-norm-preview');
   if (!box) return;
-  if (!document.getElementById('mc-svc-wf')?.checked) { box.innerHTML = ''; return; }
+  if (!document.getElementById('mc-svc-wf')?.checked) {
+    box.innerHTML = '';
+    await mcRebuildWfDetail();
+    return;
+  }
   const vm = (document.getElementById('mc-veh-model')?.value || '').trim();
-  if (!vm) { box.innerHTML = ''; return; }
+  if (!vm) {
+    box.innerHTML = '';
+    await mcRebuildWfDetail();
+    return;
+  }
   const my = (document.getElementById('mc-model-year')?.value || '').trim();
   const ft = (document.getElementById('mc-film-type')?.value || 'Phim cách nhiệt').trim();
   let q = `vehicle_model_code=${encodeURIComponent(vm)}&film_type=${encodeURIComponent(ft)}`;
@@ -1825,8 +1953,11 @@ async function mcPreviewNorm() {
   try {
     const res = await fetch(`/api/vehicle-norms/resolve?${q}`).then(r => r.json());
     if (res.found) {
-      const rows = (res.auto_fill_items || []).map(i => `${i.job_item} ${i.material_code} ${i.size}`).join('<br/>');
-      box.innerHTML = `<strong>Định mức tự động</strong> (${res.norm?.norm_id || ''})<br/>${rows}`;
+      const rows = (res.auto_fill_items || []).map((i) => {
+        const src = i.material_source ? ` <small class="muted">(${_esc(i.material_source)})</small>` : '';
+        return `${_esc(i.job_item)} ${_esc(i.material_code || '—')} ${_esc(i.size || '')}${src}`;
+      }).join('<br/>');
+      box.innerHTML = `<strong>Định mức &amp; vật tư gợi ý</strong> (${_esc(res.norm?.norm_id || '')})<br/>${rows}`;
     } else {
       box.innerHTML = '<span style="color:var(--orange)">Chưa có định mức ACTIVE. Cập nhật tại Khách hàng → Hồ sơ xe → Định mức phim.</span>';
     }
@@ -1834,6 +1965,7 @@ async function mcPreviewNorm() {
     box.textContent = 'Không gọi được API resolve.';
     console.warn(err);
   }
+  await mcRebuildWfDetail();
 }
 window.mcPreviewNorm = mcPreviewNorm;
 ['mc-veh-model', 'mc-model-year', 'mc-film-type', 'mc-svc-wf'].forEach(id => {
@@ -1850,7 +1982,47 @@ document.getElementById('mc-btn-submit')?.addEventListener('click', async () => 
   const wf = document.getElementById('mc-svc-wf').checked;
   if (!ppf && !wf) { toast('warning', 'Dịch vụ', 'Chọn ít nhất một dịch vụ'); return; }
   if (ppf && !document.getElementById('mc-ppf-type').value) { toast('warning', 'PPF', 'Chọn loại PPF'); return; }
-  const wfItems = [...document.querySelectorAll('.mc-wf-item:checked')].map(x => x.value);
+  const wfItems = [...document.querySelectorAll('.mc-wf-item:checked')].map((x) => x.value);
+  let windowFilmItems = wfItems;
+  const material_overrides = {};
+  const gReason = (document.getElementById('mc-mat-override-reason')?.value || '').trim();
+  if (wf) {
+    const rowEls = document.querySelectorAll('#mc-wf-detail-wrap tr[data-job-item]');
+    if (rowEls.length) {
+      windowFilmItems = [];
+      rowEls.forEach((tr) => {
+        const ji = tr.getAttribute('data-job-item');
+        const sel = tr.querySelector('.mc-wf-mat');
+        const mc = (sel?.value || '').trim();
+        const def = ((sel?.getAttribute('data-default') || window._mcWfDefaults[ji] || '') + '').trim();
+        const rowNote = (tr.querySelector('.mc-wf-note')?.value || '').trim();
+        if (mc && def && mc !== def) material_overrides[ji] = rowNote || gReason;
+        const wRaw = (tr.querySelector('.mc-wf-w')?.value || '').trim();
+        const hRaw = (tr.querySelector('.mc-wf-h')?.value || '').trim();
+        const w = wRaw === '' ? undefined : parseFloat(wRaw);
+        const h = hRaw === '' ? undefined : parseFloat(hRaw);
+        const sz = (tr.querySelector('.mc-wf-size')?.value || '').trim();
+        const src = (tr.querySelector('.mc-wf-src')?.textContent || '').trim() || 'MATERIAL_PREFERENCE';
+        windowFilmItems.push({
+          job_item: ji,
+          size: sz || undefined,
+          width_cm: Number.isFinite(w) ? w : undefined,
+          length_cm: Number.isFinite(h) ? h : undefined,
+          material_code: mc || undefined,
+          material_source: src,
+        });
+      });
+      for (const ji of Object.keys(material_overrides)) {
+        if (!material_overrides[ji]) {
+          toast('warning', 'Thiếu lý do', `Đổi mã vật tư (${ji}): nhập ghi chú dòng hoặc lý do chung.`);
+          return;
+        }
+      }
+    }
+  }
+  const sla = (document.getElementById('mc-sla-note')?.value || '').trim();
+  const baseNote = document.getElementById('mc-note').value.trim();
+  const noteMerged = [baseNote, sla ? `SLA: ${sla}` : ''].filter(Boolean).join(' | ') || undefined;
   const payload = {
     dealer_id: dealer,
     customer_id: document.getElementById('mc-cust-select').value || undefined,
@@ -1860,12 +2032,13 @@ document.getElementById('mc-btn-submit')?.addEventListener('click', async () => 
     vehicle_id: document.getElementById('mc-veh-select').value || undefined,
     vehicle_model: vm,
     vin_masked: document.getElementById('mc-vin-masked').value.trim() || undefined,
+    plate_number: (document.getElementById('mc-plate')?.value || '').trim() || undefined,
     requested_delivery_at: _mcIsoDelivery() || undefined,
     service_selection: {
       include_ppf: ppf,
       ppf_type: document.getElementById('mc-ppf-type').value,
       include_window_film: wf,
-      window_film_items: wfItems,
+      window_film_items: windowFilmItems,
       film_type: document.getElementById('mc-film-type')?.value || 'Phim cách nhiệt',
     },
     model_year: (() => {
@@ -1875,12 +2048,14 @@ document.getElementById('mc-btn-submit')?.addEventListener('click', async () => 
     })(),
     film_type: document.getElementById('mc-film-type')?.value || undefined,
     continue_without_norm: document.getElementById('mc-continue-no-norm')?.checked || false,
+    material_overrides: Object.keys(material_overrides).length ? material_overrides : undefined,
+    material_override_reason: gReason || undefined,
     assigned_teams: {
       ppf_team: document.getElementById('mc-team-ppf').value,
       window_film_team: document.getElementById('mc-team-wf').value,
     },
     created_by: 'AD-001',
-    note: document.getElementById('mc-note').value.trim() || undefined,
+    note: noteMerged,
   };
   try {
     const r = await fetch('/api/requests/manual-create', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
@@ -1898,7 +2073,13 @@ document.getElementById('mc-btn-draft')?.addEventListener('click', () => {
 document.getElementById('mc-btn-reset')?.addEventListener('click', () => {
   document.getElementById('mc-note').value = '';
   document.getElementById('mc-cust-masked').value = '';
-  toast('info', 'Reset', 'Form đã xóa một phần');
+  document.getElementById('mc-phone-masked').value = '';
+  document.getElementById('mc-addr-masked').value = '';
+  document.getElementById('mc-plate').value = '';
+  document.getElementById('mc-mat-override-reason').value = '';
+  document.getElementById('mc-sla-note').value = '';
+  toast('info', 'Làm mới form', 'Đã xóa các trường nhập tay (không đổi danh mục đã chọn).');
+  mcPreviewNorm();
 });
 
 // ─── ĐIỀU HƯỚNG ──────────────────────────────────────────────────────────────
@@ -2273,7 +2454,12 @@ async function hienThiDon(req) {
   if (na && normCard && normBody) {
     normCard.style.display = 'block';
     const src = na.source || '—';
-    const items = (na.applied_items || []).map(i => `${i.job_item} ${i.material_code} ${i.size}`).join('<br/>');
+    const items = (na.applied_items || [])
+      .map((i) => {
+        const src = i.material_source ? ` <small class="muted">(${_esc(i.material_source)})</small>` : '';
+        return `${_esc(i.job_item)} ${_esc(i.material_code || '—')} ${_esc(i.size || '')}${src}`;
+      })
+      .join('<br/>');
     normBody.innerHTML = `
       <div><strong>norm_id</strong>: ${na.norm_id || na.norm?.norm_id || '—'}</div>
       <div><strong>film_type</strong>: ${na.film_type || na.norm?.film_type || '—'}</div>
@@ -2285,6 +2471,54 @@ async function hienThiDon(req) {
     `;
   } else if (normCard) {
     normCard.style.display = 'none';
+  }
+  const matCard = document.getElementById('det-mat-app-card');
+  const matBody = document.getElementById('det-mat-app-body');
+  const matWarn = document.getElementById('det-mat-app-warn');
+  if (matCard && matBody) {
+    try {
+      const wss = await fetch(`/api/requests/${encodeURIComponent(req.request_id)}/workstreams`).then((r) => r.json());
+      let html = '';
+      let hasMiss = false;
+      (wss || []).forEach((ws) => {
+        const isPpf = ws.workstream_type === 'PPF_INSTALLATION';
+        let plan = ws.material_plan;
+        if (typeof plan === 'string') {
+          try {
+            plan = JSON.parse(plan || '[]');
+          } catch (e) {
+            plan = [];
+          }
+        }
+        if (!Array.isArray(plan) || !plan.length) return;
+        const title = isPpf ? 'Dán Phim PPF' : 'Dán Phim Cách Nhiệt';
+        html += `<div style="margin-bottom:12px"><strong style="color:var(--text-secondary)">${title}</strong> <small class="muted">(${_esc(ws.workstream_id)})</small>
+          <table class="data-table" style="font-size:11px;margin-top:6px"><thead><tr><th>Hạng mục</th><th>Kích thước</th><th>Mã vật tư</th><th>Nguồn</th><th>Lý do</th></tr></thead><tbody>`;
+        plan.forEach((p) => {
+          const src = (p.material_source || '—').toString();
+          if (src === 'MISSING_PREFERENCE') hasMiss = true;
+          const rs = p.material_override_reason ? _esc(p.material_override_reason) : '—';
+          html += `<tr><td>${_esc(p.job_item)}</td><td>${_esc(p.size || '—')}</td><td>${_esc(p.material_code || '—')}</td><td>${_esc(src)}</td><td>${rs}</td></tr>`;
+        });
+        html += '</tbody></table></div>';
+      });
+      matBody.innerHTML = html || '<p class="muted">Chưa có kế hoạch vật tư theo luồng.</p>';
+      matCard.style.display = html ? 'block' : 'none';
+      if (matWarn) {
+        if (hasMiss) {
+          matWarn.style.display = 'block';
+          matWarn.textContent =
+            'Có hạng mục chưa cấu hình vật tư ưu tiên. Vui lòng cập nhật Quản lý kho > Vật tư ưu tiên.';
+        } else {
+          matWarn.style.display = 'none';
+          matWarn.textContent = '';
+        }
+      }
+    } catch (e) {
+      matBody.innerHTML = `<p class="muted">${_esc(e.message)}</p>`;
+      matCard.style.display = 'block';
+      if (matWarn) matWarn.style.display = 'none';
+    }
   }
   const cgBox = document.getElementById('cutting-group-box');
   if (req.is_grouped_cut) {
@@ -2433,8 +2667,9 @@ async function hienThiTheLuong(requestId) {
           <div style="font-size:11px;font-weight:700;color:var(--text-secondary);margin-bottom:6px">Kế hoạch vật tư từng kính:</div>
           ${matPlan.map(p => `
             <div class="wf-plan-row">
-              <span class="job-name">${p.job_item === 'WINDSHIELD' ? 'Kính lái' : p.job_item === 'REAR_WINDOW' ? 'Kính hậu' : p.job_item === 'FRONT_SIDE' ? 'Kính cửa trước' : p.job_item === 'REAR_SIDE_TRIANGLE' ? 'Kính cửa sau' : p.job_item === 'SUNROOF' ? 'Cửa sổ trời' : p.job_item}</span>
+              <span class="job-name">${p.job_item === 'WINDSHIELD' ? 'Kính lái' : p.job_item === 'REAR_WINDOW' ? 'Kính hậu' : p.job_item === 'FRONT_SIDE' ? 'Kính cửa trước' : p.job_item === 'REAR_SIDE_TRIANGLE' ? 'Kính cửa sau' : p.job_item === 'SUNROOF' ? 'Cửa sổ trời' : p.job_item === 'TRIANGLE' ? 'Tam giác' : p.job_item === 'REAR_SIDE' ? 'Sườn sau' : p.job_item}</span>
               <span class="mat-code ${(p.material_code||'').toLowerCase()}">${p.material_code}</span>
+              <small class="muted">${_esc(p.material_source || '')}</small>
             </div>`).join('')}
         </div>` : ''}
 
@@ -3057,23 +3292,180 @@ function lotStatusChip(s) {
   return `<span class="lot-st-chip st-${(s || '').toLowerCase()}">${vi}</span>`;
 }
 
+async function loadMaterialPreferences() {
+  const tb = document.getElementById('inv-table-matpref');
+  if (!tb) return;
+  const q = new URLSearchParams();
+  const ft = document.getElementById('mp-film')?.value?.trim();
+  const ji = document.getElementById('mp-job')?.value?.trim();
+  const st = document.getElementById('mp-status')?.value?.trim();
+  const qq = document.getElementById('mp-q')?.value?.trim();
+  if (ft) q.set('film_type', ft);
+  if (ji) q.set('job_item', ji);
+  if (st) q.set('status', st);
+  if (qq) q.set('q', qq);
+  try {
+    const j = await fetch(`/api/material-preferences?${q.toString()}`).then((r) => r.json());
+    const items = j.items || [];
+    tb.innerHTML = items.length
+      ? items
+          .map(
+            (p) => `<tr>
+        <td><strong>${_esc(p.preference_id)}</strong></td>
+        <td>${_esc(p.film_type)}</td>
+        <td>${_esc(p.job_item)}</td>
+        <td>${_esc(p.preferred_material_code)}</td>
+        <td>${_esc(p.material_name || '—')}</td>
+        <td>${p.priority ?? '—'}</td>
+        <td>${_esc(p.status)}</td>
+        <td><small>${_esc(p.effective_from || '—')}</small></td>
+        <td><small>${_esc(p.effective_to || '—')}</small></td>
+        <td style="white-space:nowrap">
+          <button type="button" class="btn btn-outline btn-sm" onclick="openMatPrefModal('${_esc(p.preference_id)}')">Sửa</button>
+          ${p.status === 'ACTIVE'
+            ? `<button type="button" class="btn btn-outline btn-sm" onclick="toggleMatPref('${_esc(p.preference_id)}','deactivate')">Inactive</button>`
+            : `<button type="button" class="btn btn-outline btn-sm" onclick="toggleMatPref('${_esc(p.preference_id)}','activate')">Active</button>`}
+        </td>
+      </tr>`,
+          )
+          .join('')
+      : '<tr><td colspan="10" class="text-center muted">Không có cấu hình.</td></tr>';
+  } catch (e) {
+    tb.innerHTML = `<tr><td colspan="10" class="text-center muted">Lỗi tải: ${_esc(e.message)}</td></tr>`;
+  }
+}
+
+window.toggleMatPref = async function (pid, act) {
+  const reason = window.prompt(act === 'activate' ? 'Lý do kích hoạt (bắt buộc):' : 'Lý do ngưng hoạt động (bắt buộc):') || '';
+  if (!reason.trim()) {
+    toast('warning', 'Thiếu lý do', 'Vui lòng nhập reason cho audit.');
+    return;
+  }
+  const url =
+    act === 'activate'
+      ? `/api/material-preferences/${encodeURIComponent(pid)}/activate`
+      : `/api/material-preferences/${encodeURIComponent(pid)}/deactivate`;
+  try {
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason: reason.trim(), updated_by: 'WEB' }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d.detail || JSON.stringify(d));
+    toast('success', 'Đã cập nhật', pid);
+    loadMaterialPreferences();
+  } catch (e) {
+    toast('error', 'Lỗi', e.message);
+  }
+};
+
+window.openMatPrefModal = function (preferenceId) {
+  const isEdit = !!preferenceId;
+  openInvModal(
+    isEdit ? `Sửa cấu hình ${preferenceId}` : 'Thêm vật tư ưu tiên',
+    `<div class="form-grid">
+      <div class="field-group"><label>preference_id</label><input id="mpf-pid" class="field-input" value="${_esc(preferenceId || '')}" ${isEdit ? 'readonly' : ''} placeholder="MATPREF-…" /></div>
+      <div class="field-group"><label>film_type <span class="req">*</span></label><input id="mpf-ft" class="field-input" placeholder="Phim cách nhiệt hoặc PPF" /></div>
+      <div class="field-group"><label>job_item <span class="req">*</span></label><input id="mpf-ji" class="field-input" placeholder="WINDSHIELD" /></div>
+      <div class="field-group"><label>preferred_material_code <span class="req">*</span></label><input id="mpf-mc" class="field-input" /></div>
+      <div class="field-group"><label>material_name</label><input id="mpf-mn" class="field-input" /></div>
+      <div class="field-group"><label>priority</label><input type="number" id="mpf-pr" class="field-input" value="1" min="1" /></div>
+      <div class="field-group"><label>effective_from</label><input id="mpf-ef" class="field-input" /></div>
+      <div class="field-group"><label>effective_to</label><input id="mpf-et" class="field-input" /></div>
+      <div class="field-group full-width"><label>note</label><input id="mpf-note" class="field-input" /></div>
+      <div class="field-group full-width"><label>reason (bắt buộc khi sửa) <span class="req">*</span></label><input id="mpf-reason" class="field-input" placeholder="Audit" /></div>
+    </div>`,
+    `<button type="button" class="btn btn-outline" onclick="closeInvModal()">Đóng</button>
+     <button type="button" class="btn btn-primary" onclick="submitMatPref(${isEdit ? 'true' : 'false'})">${isEdit ? 'Cập nhật' : 'Tạo'}</button>`,
+  );
+  if (isEdit) {
+    fetch(`/api/material-preferences?${new URLSearchParams({ q: preferenceId })}`)
+      .then((r) => r.json())
+      .then((j) => {
+        const p = (j.items || []).find((x) => x.preference_id === preferenceId);
+        if (!p) return;
+        document.getElementById('mpf-ft').value = p.film_type || '';
+        document.getElementById('mpf-ji').value = p.job_item || '';
+        document.getElementById('mpf-mc').value = p.preferred_material_code || '';
+        document.getElementById('mpf-mn').value = p.material_name || '';
+        document.getElementById('mpf-pr').value = String(p.priority || 1);
+        document.getElementById('mpf-ef').value = p.effective_from || '';
+        document.getElementById('mpf-et').value = p.effective_to || '';
+        document.getElementById('mpf-note').value = p.note || '';
+      })
+      .catch(() => {});
+  }
+};
+
+window.submitMatPref = async function (isEdit) {
+  const pid = (document.getElementById('mpf-pid')?.value || '').trim();
+  const reason = (document.getElementById('mpf-reason')?.value || '').trim();
+  if (isEdit && !reason) {
+    toast('warning', 'Thiếu lý do', 'reason bắt buộc khi sửa');
+    return;
+  }
+  const body = {
+    film_type: document.getElementById('mpf-ft').value.trim(),
+    job_item: document.getElementById('mpf-ji').value.trim(),
+    preferred_material_code: document.getElementById('mpf-mc').value.trim(),
+    material_name: document.getElementById('mpf-mn').value.trim() || undefined,
+    priority: parseInt(document.getElementById('mpf-pr').value, 10) || 1,
+    effective_from: document.getElementById('mpf-ef').value.trim() || undefined,
+    effective_to: document.getElementById('mpf-et').value.trim() || undefined,
+    note: document.getElementById('mpf-note').value.trim() || undefined,
+    reason,
+    updated_by: 'WEB',
+  };
+  try {
+    let r;
+    if (isEdit) {
+      r = await fetch(`/api/material-preferences/${encodeURIComponent(pid)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+    } else {
+      const { reason: _rsn, updated_by: _ub, ...rest } = body;
+      if (pid) rest.preference_id = pid;
+      r = await fetch('/api/material-preferences', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...rest, created_by: 'WEB' }),
+      });
+    }
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d.detail || JSON.stringify(d));
+    toast('success', 'Đã lưu', pid || d.preference_id || '');
+    closeInvModal();
+    loadMaterialPreferences();
+  } catch (e) {
+    toast('error', 'Lỗi', e.message);
+  }
+};
+
 let _invSub = 'lots';
 async function taiQuanLyKho() {
   await loadInventorySummary();
   document.querySelectorAll('#inv-subtabs .inv-subtab').forEach(b => {
     b.classList.toggle('active', b.dataset.invSub === _invSub);
   });
-  ['inv-panel-lots','inv-panel-offcuts','inv-panel-tx','inv-panel-locked'].forEach(id => {
+  ['inv-panel-lots', 'inv-panel-offcuts', 'inv-panel-tx', 'inv-panel-matpref', 'inv-panel-locked'].forEach((id) => {
     const el = document.getElementById(id);
     if (el) el.style.display = 'none';
   });
   document.getElementById('inv-toolbar-lots').style.display = _invSub === 'lots' ? 'flex' : 'none';
   document.getElementById('inv-toolbar-offcuts').style.display = _invSub === 'offcuts' ? 'flex' : 'none';
   document.getElementById('inv-toolbar-tx').style.display = _invSub === 'tx' ? 'flex' : 'none';
+  const tbm = document.getElementById('inv-toolbar-matpref');
+  if (tbm) tbm.style.display = _invSub === 'matpref' ? 'flex' : 'none';
   if (_invSub === 'lots') { document.getElementById('inv-panel-lots').style.display = 'block'; await loadLots(); }
   else if (_invSub === 'offcuts') { document.getElementById('inv-panel-offcuts').style.display = 'block'; await loadOffcuts(); }
   else if (_invSub === 'tx') { document.getElementById('inv-panel-tx').style.display = 'block'; await loadInventoryTransactions(); }
-  else { document.getElementById('inv-panel-locked').style.display = 'block'; await renderLockedItems(); }
+  else if (_invSub === 'matpref') {
+    document.getElementById('inv-panel-matpref').style.display = 'block';
+    await loadMaterialPreferences();
+  } else { document.getElementById('inv-panel-locked').style.display = 'block'; await renderLockedItems(); }
 }
 
 async function loadInventorySummary() {
@@ -3605,6 +3997,11 @@ async function taiNhatKy() {
 
 // ─── KHỞI TẠO ─────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('tab-manual')?.addEventListener('change', (ev) => {
+    const t = ev.target;
+    if (t && t.classList && t.classList.contains('mc-wf-item')) mcPreviewNorm();
+    if (t && (t.id === 'mc-svc-wf' || t.id === 'mc-svc-ppf')) mcPreviewNorm();
+  });
   document.querySelectorAll('#inv-subtabs .inv-subtab').forEach(btn => {
     btn.addEventListener('click', () => {
       _invSub = btn.dataset.invSub;

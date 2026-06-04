@@ -171,6 +171,7 @@ def main():
     items = {x["job_item"]: x for x in (j17.get("auto_fill_items") or [])}
     ok18 = (
         items.get("WINDSHIELD", {}).get("material_code") == "RT40"
+        and items.get("WINDSHIELD", {}).get("material_source") in ("MATERIAL_PREFERENCE", "MISSING_PREFERENCE")
         and items.get("WINDSHIELD", {}).get("size") == "90x152"
         and items.get("REAR_WINDOW", {}).get("material_code") == "JB20"
         and items.get("FRONT_SIDE", {}).get("size") == "92x130"

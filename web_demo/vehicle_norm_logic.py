@@ -151,10 +151,17 @@ def norm_row_to_dict(n: DbVehicleFilmNorm) -> Dict[str, Any]:
     return {k: getattr(n, k, None) for k in keys}
 
 
-def build_auto_fill_items(norm: DbVehicleFilmNorm) -> List[Dict[str, Any]]:
+def build_auto_fill_items(
+    db,
+    norm: DbVehicleFilmNorm,
+    film_type: str,
+) -> List[Dict[str, Any]]:
+    from material_preference_logic import resolve_material_preference
+
+    ft = (film_type or "").strip() or (norm.film_type or "").strip() or "Phim cách nhiệt"
+
     def one(
         job_item: str,
-        material_code: str,
         w: Optional[float],
         h: Optional[float],
         size_str: Optional[str],
@@ -164,9 +171,13 @@ def build_auto_fill_items(norm: DbVehicleFilmNorm) -> List[Dict[str, Any]]:
         if w <= 0 or h <= 0:
             return None
         sz = (size_str or "").strip() or f"{int(w)}x{int(h)}"
+        mp = resolve_material_preference(db, ft, job_item)
+        mc = mp.get("preferred_material_code") or ""
+        src = "MATERIAL_PREFERENCE" if mp.get("found") else "MISSING_PREFERENCE"
         return {
             "job_item": job_item,
-            "material_code": material_code,
+            "material_code": mc,
+            "material_source": src,
             "size": sz,
             "width_cm": w,
             "length_cm": h,
@@ -174,19 +185,18 @@ def build_auto_fill_items(norm: DbVehicleFilmNorm) -> List[Dict[str, Any]]:
 
     out: List[Dict[str, Any]] = []
     for item in (
-        one("WINDSHIELD", "RT40", norm.windshield_width_cm, norm.windshield_length_cm, norm.windshield_size),
-        one("REAR_WINDOW", "JB20", norm.rear_window_width_cm, norm.rear_window_length_cm, norm.rear_window_size),
-        one("FRONT_SIDE", "JB20", norm.front_side_width_cm, norm.front_side_length_cm, norm.front_side_size),
+        one("WINDSHIELD", norm.windshield_width_cm, norm.windshield_length_cm, norm.windshield_size),
+        one("REAR_WINDOW", norm.rear_window_width_cm, norm.rear_window_length_cm, norm.rear_window_size),
+        one("FRONT_SIDE", norm.front_side_width_cm, norm.front_side_length_cm, norm.front_side_size),
         one(
             "REAR_SIDE_TRIANGLE",
-            "JB20",
             norm.rear_side_triangle_width_cm,
             norm.rear_side_triangle_length_cm,
             norm.rear_side_triangle_size,
         ),
-        one("TRIANGLE", "JB20", norm.triangle_width_cm, norm.triangle_length_cm, norm.triangle_size),
-        one("REAR_SIDE", "JB20", norm.rear_side_width_cm, norm.rear_side_length_cm, norm.rear_side_size),
-        one("SUNROOF", "JB20", norm.sunroof_width_cm, norm.sunroof_length_cm, norm.sunroof_size),
+        one("TRIANGLE", norm.triangle_width_cm, norm.triangle_length_cm, norm.triangle_size),
+        one("REAR_SIDE", norm.rear_side_width_cm, norm.rear_side_length_cm, norm.rear_side_size),
+        one("SUNROOF", norm.sunroof_width_cm, norm.sunroof_length_cm, norm.sunroof_size),
     ):
         if item:
             out.append(item)
@@ -230,10 +240,11 @@ def resolve_vehicle_norm(
     norm = find_active_vehicle_norm(db, vehicle_model_code, model_year, film_type)
     if not norm:
         return {"found": False, "norm": None, "auto_fill_items": []}
+    ft = (film_type or "").strip() or (norm.film_type or "").strip()
     return {
         "found": True,
         "norm": norm_row_to_dict(norm),
-        "auto_fill_items": build_auto_fill_items(norm),
+        "auto_fill_items": build_auto_fill_items(db, norm, ft),
     }
 
 
@@ -254,6 +265,8 @@ def apply_auto_fill_to_plan(base_plan: List[dict], auto_fill: List[dict]) -> Lis
         it = idx.get(cp.get("job_item"))
         if it:
             cp["material_code"] = it.get("material_code", cp.get("material_code"))
+            if it.get("material_source"):
+                cp["material_source"] = it.get("material_source")
             cp["size"] = it.get("size")
             cp["width_cm"] = it.get("width_cm")
             cp["length_cm"] = it.get("length_cm")

@@ -218,6 +218,24 @@ class DbVehicleFilmNorm(Base):
     note = Column(Text)
 
 
+class DbMaterialPreference(Base):
+    """Ưu tiên mã vật tư theo loại phim + hạng mục kính (hoặc PPF)."""
+    __tablename__ = "material_preferences"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    preference_id = Column(String, unique=True, index=True, nullable=False)
+    film_type = Column(String, nullable=False, index=True)
+    job_item = Column(String, nullable=False, index=True)
+    preferred_material_code = Column(String, nullable=False)
+    material_name = Column(String)
+    priority = Column(Integer, default=1)
+    status = Column(String, default="ACTIVE")
+    effective_from = Column(String)
+    effective_to = Column(String)
+    note = Column(Text)
+    created_at = Column(String)
+    updated_at = Column(String)
+
+
 class DbWorkstream(Base):
     """
     One workstream per service type per request.

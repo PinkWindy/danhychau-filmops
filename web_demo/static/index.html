@@ -268,83 +268,101 @@
   <div class="tab-pane" id="tab-manual">
     <div class="section-header">
       <h2><span aria-hidden="true">📝</span> Tạo đơn thi công thủ công</h2>
-      <p>Không qua OCR — chọn đại lý, khách, xe và dịch vụ PPF / phim cách nhiệt.</p>
+      <p>Tạo đơn không qua OCR — chọn đại lý, khách hàng, xe và dịch vụ thi công.</p>
     </div>
     <div class="manual-create-layout">
-      <div class="panel" style="max-width:920px;margin:0 auto">
-        <div class="panel-header"><h3>Thông tin đơn</h3></div>
+      <div class="panel" style="max-width:960px;margin:0 auto">
+        <div class="panel-header"><h3>Tạo đơn</h3></div>
         <div class="manual-form" style="padding:16px">
-          <div class="manual-section"><h4>1. Đại lý</h4>
+          <div class="manual-section">
+            <h4>1. Thông tin đại lý</h4>
             <div class="form-row">
-              <label>Chọn đại lý</label>
+              <label>Đại lý</label>
               <select id="mc-dealer-select"><option value="">— Chọn —</option></select>
-              <button type="button" class="btn btn-outline btn-sm" id="mc-btn-quick-dealer">+ Tạo đại lý nhanh</button>
+              <button type="button" class="btn btn-outline btn-sm" id="mc-btn-quick-dealer">Tạo đại lý nhanh</button>
             </div>
             <p class="muted" id="mc-dealer-hint" style="font-size:11px"></p>
           </div>
-          <div class="manual-section"><h4>2. Khách hàng</h4>
+          <div class="manual-section">
+            <h4>2. Thông tin khách hàng</h4>
             <div class="form-row">
               <label>Khách hàng</label>
               <select id="mc-cust-select"><option value="">— Chọn —</option></select>
-              <button type="button" class="btn btn-outline btn-sm" id="mc-btn-quick-cust">+ Tạo KH nhanh</button>
+              <button type="button" class="btn btn-outline btn-sm" id="mc-btn-quick-cust">Tạo khách hàng nhanh</button>
             </div>
             <div class="form-grid-2">
-              <div><label>customer_masked</label><input type="text" id="mc-cust-masked" placeholder="KH_MASKED_…" /></div>
-              <div><label>phone_masked</label><input type="text" id="mc-phone-masked" /></div>
-              <div style="grid-column:1/-1"><label>address_masked</label><input type="text" id="mc-addr-masked" /></div>
+              <div><label>Tên khách hàng</label><input type="text" id="mc-cust-masked" placeholder="Tên hiển thị / mã che" /><small class="muted code-badge">customer_masked</small></div>
+              <div><label>Số điện thoại</label><input type="text" id="mc-phone-masked" placeholder="SĐT (tuỳ chọn)" /><small class="muted code-badge">phone_masked</small></div>
+              <div style="grid-column:1/-1"><label>Địa chỉ khách hàng</label><input type="text" id="mc-addr-masked" placeholder="Địa chỉ" /><small class="muted code-badge">address_masked</small></div>
             </div>
           </div>
-          <div class="manual-section"><h4>3. Xe</h4>
+          <div class="manual-section">
+            <h4>3. Thông tin xe</h4>
             <div class="form-row">
               <label>Hồ sơ xe</label>
               <select id="mc-veh-select"><option value="">— Chọn —</option></select>
-              <button type="button" class="btn btn-outline btn-sm" id="mc-btn-quick-veh">+ Tạo xe nhanh</button>
+              <button type="button" class="btn btn-outline btn-sm" id="mc-btn-quick-veh">Tạo xe nhanh</button>
             </div>
             <div class="form-grid-2">
-              <div><label>vehicle_model_code</label><input type="text" id="mc-veh-model" placeholder="LEXUS_RX350" /></div>
+              <div><label>Dòng xe</label><input type="text" id="mc-veh-model" placeholder="VD: LEXUS_RX350 hoặc RX350" /><small class="muted code-badge">vehicle_model_code</small></div>
               <div><label>Năm model</label><input type="number" id="mc-model-year" placeholder="2022" min="1990" max="2035" /></div>
-              <div><label>vin_masked</label><input type="text" id="mc-vin-masked" /></div>
-              <div><label>Loại phim (định mức)</label><input type="text" id="mc-film-type" value="Phim cách nhiệt" /></div>
+              <div><label>Số khung / VIN</label><input type="text" id="mc-vin-masked" placeholder="VIN (tuỳ chọn)" /><small class="muted code-badge">vin_masked</small></div>
+              <div><label>Biển số nếu có</label><input type="text" id="mc-plate" placeholder="51A-12345" /><small class="muted code-badge">plate_number</small></div>
+              <div style="grid-column:1/-1"><label>Loại phim (tra định mức)</label><input type="text" id="mc-film-type" value="Phim cách nhiệt" /></div>
             </div>
             <div id="mc-norm-preview" class="muted" style="font-size:11px;margin-top:8px;padding:8px;border-radius:8px;background:rgba(0,0,0,0.2)"></div>
-            <label class="chk" style="margin-top:8px;display:block"><input type="checkbox" id="mc-continue-no-norm" /> Tiếp tục nếu chưa có định mức (NEEDS_REVIEW)</label>
+            <label class="chk" style="margin-top:8px;display:block"><input type="checkbox" id="mc-continue-no-norm" /> Tiếp tục nếu chưa có định mức (đơn sẽ NEEDS_REVIEW)</label>
           </div>
-          <div class="manual-section"><h4>4. Thời gian giao xe</h4>
+          <div class="manual-section">
+            <h4>4. Thời gian giao xe</h4>
             <div class="form-grid-2">
-              <div><label>Ngày</label><input type="date" id="mc-deliv-date" /></div>
-              <div><label>Giờ</label><input type="time" id="mc-deliv-time" /></div>
+              <div><label>Ngày yêu cầu giao xe</label><input type="date" id="mc-deliv-date" /></div>
+              <div><label>Giờ yêu cầu giao xe</label><input type="time" id="mc-deliv-time" value="17:30" /></div>
             </div>
-            <p class="muted" style="font-size:11px">Có thể để trống — hệ thống đánh dấu NEEDS_REVIEW.</p>
+            <div style="margin-top:8px"><label>Ghi chú SLA</label><input type="text" id="mc-sla-note" placeholder="Tuỳ chọn" style="width:100%;max-width:480px" /></div>
+            <p class="muted" style="font-size:11px">Để trống ngày/giờ — hệ thống đánh dấu cần rà soát (NEEDS_REVIEW).</p>
           </div>
-          <div class="manual-section"><h4>5. Dịch vụ</h4>
-            <label class="chk"><input type="checkbox" id="mc-svc-ppf" checked /> Có phim PPF</label>
+          <div class="manual-section">
+            <h4>5. Dịch vụ thi công</h4>
+            <label class="chk"><input type="checkbox" id="mc-svc-ppf" checked /> Dán Phim PPF</label>
             <div id="mc-ppf-box" style="margin:8px 0 12px 16px">
-              <label>PPF type</label>
-              <select id="mc-ppf-type"><option value="T-TYPE">T-TYPE — trong</option><option value="M-TYPE">M-TYPE — mờ</option></select>
-              <p class="muted" style="font-size:11px">Block: 152×1300 cm · Khấu trừ: 13,0 m (readonly)</p>
+              <label>Loại PPF</label>
+              <select id="mc-ppf-type"><option value="T-TYPE">T-TYPE — PPF trong</option><option value="M-TYPE">M-TYPE — PPF mờ</option></select>
+              <p class="muted" style="font-size:11px;margin-top:6px">Định mức PPF dự kiến: <strong>152 × 1300 cm</strong> · Chiều dài trừ kho dự kiến: <strong>13,0 m</strong></p>
             </div>
-            <label class="chk"><input type="checkbox" id="mc-svc-wf" checked /> Có phim cách nhiệt</label>
+            <label class="chk"><input type="checkbox" id="mc-svc-wf" checked /> Dán Phim Cách Nhiệt</label>
             <div id="mc-wf-box" style="margin:8px 0 0 16px;font-size:12px">
-              <label class="chk"><input type="checkbox" class="mc-wf-item" value="WINDSHIELD" checked /> Kính lái — RT40</label>
-              <label class="chk"><input type="checkbox" class="mc-wf-item" value="REAR_WINDOW" checked /> Kính hậu — JB20</label>
-              <label class="chk"><input type="checkbox" class="mc-wf-item" value="FRONT_SIDE" checked /> Sườn trước — JB20</label>
-              <label class="chk"><input type="checkbox" class="mc-wf-item" value="REAR_SIDE_TRIANGLE" checked /> Sườn sau + tam giác — JB20</label>
-              <label class="chk"><input type="checkbox" class="mc-wf-item" value="SUNROOF" checked /> Sunroof — JB20</label>
+              <p class="muted" style="margin:0 0 6px 0">Chọn hạng mục kính — kích thước &amp; mã vật tư cập nhật theo định mức xe và cấu hình ưu tiên kho.</p>
+              <div class="mc-wf-check-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:6px">
+                <label class="chk"><input type="checkbox" class="mc-wf-item" value="WINDSHIELD" checked /> Kính lái</label>
+                <label class="chk"><input type="checkbox" class="mc-wf-item" value="REAR_WINDOW" checked /> Kính hậu</label>
+                <label class="chk"><input type="checkbox" class="mc-wf-item" value="FRONT_SIDE" checked /> Sườn trước</label>
+                <label class="chk"><input type="checkbox" class="mc-wf-item" value="REAR_SIDE_TRIANGLE" checked /> Sườn sau + tam giác</label>
+                <label class="chk"><input type="checkbox" class="mc-wf-item" value="TRIANGLE" checked /> Tam giác</label>
+                <label class="chk"><input type="checkbox" class="mc-wf-item" value="REAR_SIDE" checked /> Sườn sau</label>
+                <label class="chk"><input type="checkbox" class="mc-wf-item" value="SUNROOF" checked /> Kính trời</label>
+              </div>
+              <div id="mc-wf-detail-wrap" style="margin-top:12px"></div>
+              <p class="muted" id="mc-wf-warn" style="display:none;margin-top:8px;color:var(--orange-light)"></p>
+              <div style="margin-top:10px"><label>Ghi chú khi đổi mã vật tư (bắt buộc nếu đổi khác mặc định)</label><input type="text" id="mc-mat-override-reason" placeholder="Lý do thay đổi vật tư — audit REQUEST_MATERIAL_OVERRIDDEN" style="width:100%;max-width:520px" /></div>
             </div>
           </div>
-          <div class="manual-section"><h4>6. Đội thi công</h4>
+          <div class="manual-section">
+            <h4>6. Đội thi công</h4>
             <div class="form-grid-2">
-              <div><label>PPF team</label><select id="mc-team-ppf"><option>PPF_TEAM_A</option><option>PPF_TEAM_B</option></select></div>
-              <div><label>Window film team</label><select id="mc-team-wf"><option>WINDOW_FILM_TEAM_B</option><option>WINDOW_FILM_TEAM_A</option></select></div>
+              <div><label>Đội PPF</label><select id="mc-team-ppf"><option>PPF_TEAM_A</option><option>PPF_TEAM_B</option></select></div>
+              <div><label>Đội phim cách nhiệt</label><select id="mc-team-wf"><option>WINDOW_FILM_TEAM_B</option><option>WINDOW_FILM_TEAM_A</option></select></div>
             </div>
           </div>
-          <div class="manual-section"><h4>7. Ghi chú</h4>
+          <div class="manual-section">
+            <h4>7. Ghi chú</h4>
+            <label>Ghi chú nội bộ</label>
             <textarea id="mc-note" rows="2" style="width:100%"></textarea>
           </div>
           <div class="form-actions" style="display:flex;gap:10px;flex-wrap:wrap;margin-top:16px">
             <button type="button" class="btn btn-primary" id="mc-btn-submit"><i class="fa-solid fa-check"></i> Tạo đơn</button>
-            <button type="button" class="btn btn-outline" id="mc-btn-draft">Lưu nháp (local)</button>
-            <button type="button" class="btn btn-outline" id="mc-btn-reset">Reset</button>
+            <button type="button" class="btn btn-outline" id="mc-btn-draft">Lưu nháp</button>
+            <button type="button" class="btn btn-outline" id="mc-btn-reset">Làm mới form</button>
           </div>
         </div>
       </div>
@@ -453,6 +471,12 @@
             <div class="detail-card" id="det-norm-card" style="display:none;margin-top:10px">
               <h4><i class="fa-solid fa-ruler-combined"></i> Định mức áp dụng</h4>
               <div id="det-norm-body" style="font-size:12px"></div>
+            </div>
+
+            <div class="detail-card" id="det-mat-app-card" style="display:none;margin-top:10px">
+              <h4><i class="fa-solid fa-boxes-stacked"></i> Vật tư áp dụng</h4>
+              <div id="det-mat-app-warn" class="hitl-alert" style="display:none;margin-bottom:8px;border-color:rgba(255,193,7,0.45);background:rgba(255,193,7,0.1)"></div>
+              <div id="det-mat-app-body" style="font-size:12px"></div>
             </div>
 
             <div class="action-card">
@@ -680,6 +704,7 @@
       <button type="button" class="inv-subtab active" data-inv-sub="lots">LOT</button>
       <button type="button" class="inv-subtab" data-inv-sub="offcuts">Mảnh dư</button>
       <button type="button" class="inv-subtab" data-inv-sub="tx">Giao dịch kho</button>
+      <button type="button" class="inv-subtab" data-inv-sub="matpref">Vật tư ưu tiên</button>
       <button type="button" class="inv-subtab" data-inv-sub="locked">Đang khóa</button>
     </div>
     <div class="inv-toolbar" id="inv-toolbar-lots">
@@ -690,7 +715,18 @@
       <button type="button" class="btn btn-primary btn-sm" onclick="openImportOffcutModal()"><i class="fa-solid fa-scissors"></i> Nhập mảnh dư thủ công</button>
       <button type="button" class="btn btn-outline btn-sm" onclick="openReleaseLockModal('OFFCUT','')"><i class="fa-solid fa-unlock"></i> Mở khóa</button>
     </div>
-    <div class="inv-toolbar" id="inv-toolbar-tx" style="display:none">
+    <div class="inv-toolbar" id="inv-toolbar-matpref" style="display:none;flex-wrap:wrap;gap:8px;align-items:center">
+      <input type="text" id="mp-film" class="field-input" placeholder="Loại phim" style="max-width:160px;padding:6px 10px;font-size:12px" />
+      <input type="text" id="mp-job" class="field-input" placeholder="Hạng mục (WINDSHIELD…)" style="max-width:200px;padding:6px 10px;font-size:12px" />
+      <select id="mp-status" class="field-input" style="max-width:140px;padding:6px 10px;font-size:12px">
+        <option value="">Mọi trạng thái</option>
+        <option value="ACTIVE">Active</option>
+        <option value="INACTIVE">Inactive</option>
+      </select>
+      <input type="text" id="mp-q" class="field-input" placeholder="Mã vật tư / tìm nhanh" style="max-width:180px;padding:6px 10px;font-size:12px" />
+      <button type="button" class="btn btn-outline btn-sm" onclick="loadMaterialPreferences()"><i class="fa-solid fa-filter"></i> Lọc</button>
+      <button type="button" class="btn btn-primary btn-sm" onclick="openMatPrefModal('')"><i class="fa-solid fa-plus"></i> Thêm cấu hình</button>
+    </div>
       <select id="inv-filter-tx-type" class="field-input" style="max-width:220px;padding:6px 10px;font-size:12px">
         <option value="">Mọi loại giao dịch</option>
         <option value="IMPORT_LOT">IMPORT_LOT</option>
@@ -745,6 +781,17 @@
         <div class="table-wrap"><table class="data-table">
           <thead><tr><th>transaction_id</th><th>transaction_type</th><th>source</th><th>material_code</th><th>before→after</th><th>reason</th><th>performed_by</th><th>performed_at</th></tr></thead>
           <tbody id="inv-table-tx"></tbody>
+        </table></div>
+      </div>
+    </div>
+    <div id="inv-panel-matpref" class="inv-panel" style="display:none">
+      <div class="panel"><div class="panel-header"><h3><i class="fa-solid fa-sliders"></i> Vật tư ưu tiên theo hạng mục kính</h3></div>
+        <p class="muted" style="font-size:12px;padding:0 16px">Cấu hình mặc định khi tạo đơn &amp; tra định mức — Active/Inactive rõ ràng; sửa / kích hoạt cần <strong>lý do</strong> (audit).</p>
+        <div class="table-wrap"><table class="data-table" style="font-size:11px">
+          <thead><tr>
+            <th>Mã cấu hình</th><th>Loại phim</th><th>Hạng mục</th><th>Mã vật tư</th><th>Tên</th><th>Ưu tiên</th><th>TT</th><th>Từ</th><th>Đến</th><th>Thao tác</th>
+          </tr></thead>
+          <tbody id="inv-table-matpref"></tbody>
         </table></div>
       </div>
     </div>

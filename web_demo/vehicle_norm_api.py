@@ -9,9 +9,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
 
-from database import DbVehicleFilmNorm, DbAuditLog
+from database import DbVehicleFilmNorm, DbVehicleProfile, DbAuditLog
 from vehicle_norm_logic import (
-    build_auto_fill_items,
     hydrate_norm_sizes_from_strings,
     norm_row_to_dict,
     resolve_vehicle_norm,
@@ -188,6 +187,20 @@ def register_vehicle_norm_routes(app, get_db):
         rows = query.order_by(DbVehicleFilmNorm.norm_id).all()
         items = [norm_row_to_dict(r) for r in rows]
         return _wrap_norm_list(items, with_meta, applied)
+
+    @router.get("/vehicle-norms/model-options")
+    def vehicle_norm_model_options(db: Session = Depends(get_db)):
+        codes: set[str] = set()
+        for (c,) in db.query(DbVehicleFilmNorm.vehicle_model_code).distinct().all():
+            s = (c or "").strip()
+            if s:
+                codes.add(s)
+        for (c,) in db.query(DbVehicleProfile.vehicle_model_code).distinct().all():
+            s = (c or "").strip()
+            if s:
+                codes.add(s)
+        items = sorted(codes, key=lambda x: (x.lower(), x))
+        return {"items": items, "total": len(items)}
 
     @router.get("/vehicle-norms/resolve")
     def resolve_norm(

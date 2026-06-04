@@ -3,7 +3,22 @@ import csv
 import json
 import datetime
 from sqlalchemy import text
-from database import SessionLocal, init_db, DbDealer, DbCustomer, DbVehicleProfile, DbLotInventory, DbOffcutInventory, DbCuttingGroupMatrix, DbRequest, DbAuditLog, DbWorkstream, DbNotification, DbInventoryTransaction
+from database import (
+    SessionLocal,
+    init_db,
+    DbDealer,
+    DbCustomer,
+    DbVehicleProfile,
+    DbLotInventory,
+    DbOffcutInventory,
+    DbCuttingGroupMatrix,
+    DbRequest,
+    DbAuditLog,
+    DbWorkstream,
+    DbNotification,
+    DbInventoryTransaction,
+    DbMaterialPreference,
+)
 
 def map_lot_id(old_id):
     if not old_id:
@@ -142,6 +157,37 @@ def _seed_amis_and_vehicle_norms(db):
                 source_channel="DIRECT",
                 customer_type="END_CUSTOMER",
                 crm_status="NEW_PENDING_VERIFICATION",
+                created_at=ts,
+            )
+        )
+
+
+def _seed_material_preferences(db):
+    """Ưu tiên mã vật tư theo hạng mục — demo RT40/JB20 qua DB, không hardcode trong API."""
+    ts = datetime.datetime.utcnow().isoformat() + "Z"
+    seeds = [
+        ("MATPREF-WINDSHIELD", "Phim cách nhiệt", "WINDSHIELD", "RT40", "Phim cách nhiệt Konica RT40", 1),
+        ("MATPREF-REAR", "Phim cách nhiệt", "REAR_WINDOW", "JB20", "Phim cách nhiệt JB20", 1),
+        ("MATPREF-FRONT", "Phim cách nhiệt", "FRONT_SIDE", "JB20", "Phim cách nhiệt JB20", 1),
+        ("MATPREF-RST", "Phim cách nhiệt", "REAR_SIDE_TRIANGLE", "JB20", "Phim cách nhiệt JB20", 1),
+        ("MATPREF-TRI", "Phim cách nhiệt", "TRIANGLE", "JB20", "Phim cách nhiệt JB20", 1),
+        ("MATPREF-RS", "Phim cách nhiệt", "REAR_SIDE", "JB20", "Phim cách nhiệt JB20", 1),
+        ("MATPREF-SUN", "Phim cách nhiệt", "SUNROOF", "JB20", "Phim cách nhiệt JB20", 1),
+        ("MATPREF-PPF-T", "PPF", "PPF_BODY", "T-TYPE", "PPF trong T-TYPE", 1),
+        ("MATPREF-PPF-M", "PPF", "PPF_BODY", "M-TYPE", "PPF mờ M-TYPE", 2),
+    ]
+    for pid, ft, ji, mc, mname, pr in seeds:
+        if db.query(DbMaterialPreference).filter(DbMaterialPreference.preference_id == pid).first():
+            continue
+        db.add(
+            DbMaterialPreference(
+                preference_id=pid,
+                film_type=ft,
+                job_item=ji,
+                preferred_material_code=mc,
+                material_name=mname,
+                priority=pr,
+                status="ACTIVE",
                 created_at=ts,
             )
         )

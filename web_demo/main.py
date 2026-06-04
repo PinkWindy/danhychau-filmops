@@ -21,6 +21,7 @@ from inventory_api import register_inventory_routes, assert_source_valid_for_wf6
 from customer_api import register_customer_routes
 from vehicle_norm_api import register_vehicle_norm_routes
 from location_api import register_location_routes
+from material_preference_api import register_material_preference_routes
 from vehicle_norm_logic import resolve_vehicle_norm
 
 _log = logging.getLogger("uvicorn.error")
@@ -32,11 +33,12 @@ async def lifespan(app: FastAPI):
     try:
         init_db()
         _log.info("DYC init_db() completed (schema / migrations).")
-        from populate_db import _seed_amis_and_vehicle_norms
+        from populate_db import _seed_amis_and_vehicle_norms, _seed_material_preferences
         from film_norm_excel_import import try_import_excel_norms
         db = SessionLocal()
         try:
             _seed_amis_and_vehicle_norms(db)
+            _seed_material_preferences(db)
             db.commit()
             _log.info("DYC AMIS seed checked.")
             imp = try_import_excel_norms(db)
@@ -85,6 +87,7 @@ def get_db():
 register_inventory_routes(app, get_db)
 register_customer_routes(app, get_db)
 register_vehicle_norm_routes(app, get_db)
+register_material_preference_routes(app, get_db)
 register_location_routes(app)
 
 def _now():
@@ -101,13 +104,7 @@ PPF_DEFAULTS = {
     "default_material": "T-TYPE",
 }
 
-WINDOW_FILM_PLAN = [
-    {"job_item": "WINDSHIELD",         "material_code": "RT40", "note": "Kính lái cố định dùng RT40"},
-    {"job_item": "REAR_WINDOW",        "material_code": "JB20"},
-    {"job_item": "FRONT_SIDE",         "material_code": "JB20"},
-    {"job_item": "REAR_SIDE_TRIANGLE", "material_code": "JB20"},
-    {"job_item": "SUNROOF",            "material_code": "JB20"},
-]
+WINDOW_FILM_PLAN = []  # legacy — dùng build_default_window_film_plan_json(db) khi có session
 
 # ─── HELPERS ──────────────────────────────────────────────────────────────────
 def _add_notif(db: Session, title: str, body: str, notif_type: str,
@@ -140,6 +137,8 @@ def _audit(db: Session, request_id, transaction_type, source_type, source_id,
 
 def _create_workstreams_for_request(db: Session, req: DbRequest) -> list:
     """Auto-create PPF + Window Film workstreams for a request."""
+    from material_preference_logic import build_default_window_film_plan_json, resolve_material_preference
+
     today = datetime.date.today().strftime("%Y%m%d")
     wss = []
 
@@ -163,6 +162,18 @@ def _create_workstreams_for_request(db: Session, req: DbRequest) -> list:
     db.add(ppf_ws)
     wss.append(ppf_ws)
 
+    wf_ft = "Phim cách nhiệt"
+    wf_plan_json = build_default_window_film_plan_json(db, wf_ft)
+    wf_sel_res = resolve_material_preference(db, wf_ft, "WINDSHIELD")
+    try:
+        _plan_list = json.loads(wf_plan_json) if wf_plan_json else []
+    except json.JSONDecodeError:
+        _plan_list = []
+    _wind_plan = next((x for x in _plan_list if x.get("job_item") == "WINDSHIELD"), None)
+    wf_sel_mc = (wf_sel_res.get("preferred_material_code") or "").strip() or (
+        ((_wind_plan or {}).get("material_code") or "").strip()
+    )
+
     # 2. Window Film Workstream
     wf_ws = DbWorkstream(
         workstream_id=f"WS-WF-{today}-{req.request_id[-3:]}",
@@ -172,8 +183,8 @@ def _create_workstreams_for_request(db: Session, req: DbRequest) -> list:
         technician_team="WINDOW_FILM_TEAM_B",
         assigned_technician_id="KTV-003",
         assigned_technician_name="Nguyễn Văn An",
-        selected_material_code="JB20",
-        material_plan=json.dumps(WINDOW_FILM_PLAN, ensure_ascii=False),
+        selected_material_code=wf_sel_mc or None,
+        material_plan=wf_plan_json,
         cut_group_id="CG_RX350_SIDE_REAR",
         planned_cut_block="152x143",
         planned_deduction_length_m=1.43,
