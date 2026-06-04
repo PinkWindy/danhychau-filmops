@@ -20,6 +20,7 @@ from database import (
 )
 from vehicle_norm_logic import (
     apply_auto_fill_to_plan,
+    normalize_vehicle_model_code,
     resolve_vehicle_norm_with_year_fallback,
 )
 from customer_api import (
@@ -158,6 +159,7 @@ def _apply_payload_to_draft_row(draft: DbOcrDraft, payload: dict) -> None:
     draft.extracted_dealer_name = payload.get("dealer_name")
     draft.extracted_customer_name = payload.get("customer_name") or payload.get("customer_masked")
     draft.extracted_vehicle_model = payload.get("model_name") or payload.get("vehicle_model_code")
+    draft.sales_consultant = (payload.get("sales_consultant") or "").strip() or None
     draft.extracted_vin = payload.get("vin_number") or payload.get("vin_masked")
     draft.extracted_plate = ""
     draft.extracted_film_type = payload.get("item_description") or "Phim cách nhiệt"
@@ -265,6 +267,7 @@ def confirm_lexus_test_ocr(
     )
     vin_m = (data.get("vin") or payload.get("vin_number") or payload.get("vin_masked") or "").strip()
     vehicle_model = (data.get("vehicle_model") or payload.get("vehicle_model_code") or "RX350").strip()
+    vm_norm = normalize_vehicle_model_code(vehicle_model) or vehicle_model.upper()
     model_year = 2026
     try:
         if data.get("model_year") is not None:
@@ -324,7 +327,7 @@ def confirm_lexus_test_ocr(
                 vehicle_id=vehicle_id,
                 vin_number=vin_m or f"JTJBARBZ9N{sfx}00000"[:17],
                 vin_masked=vin_m or f"JTJBARBZ9N{sfx}00000"[:17],
-                vehicle_model_code=vehicle_model,
+                vehicle_model_code=vm_norm,
                 model_name=payload.get("model_name") or vehicle_model,
                 model_year=model_year,
                 customer_id=customer_id,
@@ -347,7 +350,7 @@ def confirm_lexus_test_ocr(
             actor,
         )
 
-    norm_res = resolve_vehicle_norm_with_year_fallback(db, vehicle_model, model_year, film_type)
+    norm_res = resolve_vehicle_norm_with_year_fallback(db, vm_norm, model_year, film_type)
     wf_plan = _material_plan_for_items(wf_codes)
     norm_application: Dict[str, Any] = {
         "found": norm_res.get("found"),
@@ -356,10 +359,16 @@ def confirm_lexus_test_ocr(
         "applied_items": [],
         "source": "AUTO_FROM_VEHICLE_NORM" if norm_res.get("found") else None,
         "film_type": film_type,
-        "vehicle_model_code": vehicle_model,
+        "vehicle_model_code": vm_norm,
+        "vehicle_model_code_raw": norm_res.get("vehicle_model_code_raw"),
+        "vehicle_model_code_requested": norm_res.get("vehicle_model_code_requested"),
         "model_year": model_year,
-        "year_exact_match": norm_res.get("year_exact_match"),
+        "model_year_requested": norm_res.get("model_year_requested"),
+        "model_year_resolved": norm_res.get("model_year_resolved"),
+        "resolution_strategy": norm_res.get("resolution_strategy"),
+        "warning": norm_res.get("warning"),
         "warnings": list(norm_res.get("warnings") or []),
+        "year_exact_match": norm_res.get("year_exact_match"),
     }
 
     needs_review = False
@@ -374,8 +383,8 @@ def confirm_lexus_test_ocr(
     else:
         needs_review = True
         review_notes.append("NO_VEHICLE_NORM_ACTIVE")
-        norm_application["warning"] = (
-            f"Chưa có định mức active cho {vehicle_model} năm {model_year}."
+        norm_application["warning"] = norm_res.get("warning") or (
+            f"Chưa có định mức active cho {vm_norm} năm {model_year}."
         )
 
     _hydrate_wf_plan_material_preferences(db, wf_plan, film_type)
@@ -407,7 +416,7 @@ def confirm_lexus_test_ocr(
     if wf_plan:
         wind = next((r for r in wf_plan if r.get("job_item") == "WINDSHIELD"), None)
         primary_wf_mc = ((wind or wf_plan[0]).get("material_code") or "").strip()
-        cg = _wf_cut_group(db, vehicle_model, primary_wf_mc or None)
+        cg = _wf_cut_group(db, vm_norm, primary_wf_mc or None)
         if cg:
             wf_block = f"{cg.cut_block_width_cm}x{cg.cut_block_length_cm}"
             wf_len = float(cg.deduction_length_m or wf_len)
@@ -456,7 +465,7 @@ def confirm_lexus_test_ocr(
         vehicle_id=vehicle_id,
         vin_number=vin_m or None,
         vin_masked=vin_m or None,
-        vehicle_model_code=vehicle_model,
+        vehicle_model_code=vm_norm,
         material_code=primary_wf_mc or None,
         job_items=job_items_str,
         status=status,
@@ -471,6 +480,8 @@ def confirm_lexus_test_ocr(
         created_at=_now(),
         source_channel="OCR",
         approved_by=None,
+        model_name=(payload.get("model_name") or "").strip() or None,
+        sales_consultant=(payload.get("sales_consultant") or "").strip() or None,
         service_selection_json=json.dumps(service_selection_out, ensure_ascii=False),
         norm_application_json=json.dumps(norm_application, ensure_ascii=False),
         exception_reason="; ".join(review_notes) if review_notes else None,

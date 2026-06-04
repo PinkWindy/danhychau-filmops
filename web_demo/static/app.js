@@ -78,6 +78,30 @@ function buildFullAddress(parts) {
   return out.join(', ');
 }
 
+/** Đồng bộ vehicle_norm_logic.normalize_vehicle_model_code (Python). */
+window.normalizeVehicleModelCode = function normalizeVehicleModelCode(value) {
+  if (value == null) return '';
+  let raw = String(value).trim().toUpperCase();
+  if (!raw) return '';
+  let s = raw.replace(/\s+/g, '_');
+  while (s.includes('__')) s = s.replace(/__/g, '_');
+  if (s.startsWith('LEXUS_')) s = s.slice(6);
+  if (s.includes('_')) {
+    const parts = s.split('_').filter(Boolean);
+    const hit = parts.find((p) => /^[A-Z]{2,12}\d{2,4}/.test(p));
+    s = hit || parts[0] || s;
+  }
+  const m = s.match(/^([A-Z]{2,12})(\d{2,4})(H|PHEV|HYBRID)?$/);
+  if (m) {
+    const [, letters, digits, suf] = m;
+    if (suf === 'H') return letters + digits;
+    return letters + digits;
+  }
+  const m2 = s.match(/^([A-Z]{2,12})(\d{2,4})$/);
+  if (m2) return m2[1] + m2[2];
+  return s;
+};
+
 async function ensureLocationProvincesLoaded() {
   const st = window.DYC_LOCATION_MASTER;
   if (st.loaded) return;
@@ -1872,7 +1896,8 @@ async function mcRebuildWfDetail() {
     if (warnEl) warnEl.style.display = 'none';
     return;
   }
-  const vm = (document.getElementById('mc-veh-model')?.value || '').trim();
+  const vmRaw = (document.getElementById('mc-veh-model')?.value || '').trim();
+  const vm = (window.normalizeVehicleModelCode && window.normalizeVehicleModelCode(vmRaw)) || vmRaw;
   const my = (document.getElementById('mc-model-year')?.value || '').trim();
   const ft = (document.getElementById('mc-film-type')?.value || 'Phim cách nhiệt').trim();
   const normMap = {};
@@ -1948,7 +1973,8 @@ async function mcPreviewNorm() {
     await mcRebuildWfDetail();
     return;
   }
-  const vm = (document.getElementById('mc-veh-model')?.value || '').trim();
+  const vmRaw = (document.getElementById('mc-veh-model')?.value || '').trim();
+  const vm = (window.normalizeVehicleModelCode && window.normalizeVehicleModelCode(vmRaw)) || vmRaw;
   if (!vm) {
     box.innerHTML = '';
     await mcRebuildWfDetail();
@@ -1965,7 +1991,7 @@ async function mcPreviewNorm() {
         const src = i.material_source ? ` <small class="muted">(${_esc(i.material_source)})</small>` : '';
         return `${_esc(i.job_item)} ${_esc(i.material_code || '—')} ${_esc(i.size || '')}${src}`;
       }).join('<br/>');
-      box.innerHTML = `<strong>Định mức &amp; vật tư gợi ý</strong> (${_esc(res.norm?.norm_id || '')})<br/>${rows}`;
+      box.innerHTML = `<strong>Định mức &amp; vật tư gợi ý</strong> (${_esc(res.norm_id || res.norm?.norm_id || '')})<br/>${rows}`;
     } else {
       box.innerHTML = '<span style="color:var(--orange)">Chưa có định mức ACTIVE. Cập nhật tại Khách hàng → Hồ sơ xe → Định mức phim.</span>';
     }
@@ -1984,7 +2010,8 @@ window.mcPreviewNorm = mcPreviewNorm;
 document.getElementById('mc-btn-submit')?.addEventListener('click', async () => {
   const dealer = document.getElementById('mc-dealer-select').value;
   if (!dealer) { toast('warning', 'Thiếu đại lý', 'Chọn hoặc tạo đại lý nhanh'); return; }
-  const vm = document.getElementById('mc-veh-model').value.trim();
+  const vmRaw = document.getElementById('mc-veh-model').value.trim();
+  const vm = (window.normalizeVehicleModelCode && window.normalizeVehicleModelCode(vmRaw)) || vmRaw;
   if (!vm) { toast('warning', 'Thiếu model', 'Nhập vehicle_model_code'); return; }
   const ppf = document.getElementById('mc-svc-ppf').checked;
   const wf = document.getElementById('mc-svc-wf').checked;
@@ -2472,8 +2499,8 @@ async function taiDonThiCong() {
             <div class="req-badges">${trangThaiBadge(r.status)}</div>
           </div>`).join('');
     if (currentRequestId) {
-      const sel = reqs.find(r => r.request_id === currentRequestId);
-      if (sel) hienThiDon(sel);
+      const sel = reqs.find((r) => r.request_id === currentRequestId);
+      if (sel) await hienThiDon(sel);
     }
   } catch(e) { toast('error', 'Lỗi tải đơn thi công', e.message); }
 }
@@ -2484,6 +2511,12 @@ window.chonDon = function(reqId) {
 };
 
 async function hienThiDon(req) {
+  try {
+    const detail = await fetch(`/api/requests/${encodeURIComponent(req.request_id)}`).then((r) => r.json());
+    req = { ...req, ...detail };
+  } catch (e) {
+    /* giữ bản danh sách nếu API lỗi */
+  }
   document.getElementById('no-req-selected').style.display = 'none';
   document.getElementById('req-demo-board').style.display = 'block';
   document.getElementById('board-req-title').textContent = req.request_id;
@@ -2517,6 +2550,8 @@ async function hienThiDon(req) {
   if (phEl) phEl.textContent = req.customer_phone || req.phone || req.phone_masked || '—';
   const addrEl = document.getElementById('det-customer-address');
   if (addrEl) addrEl.textContent = req.customer_address || req.address || req.address_masked || '—';
+  const socEl = document.getElementById('det-sales-consultant');
+  if (socEl) socEl.textContent = (req.sales_consultant || '').trim() || '—';
   document.getElementById('det-model').textContent = _reqSvcModel(req);
   document.getElementById('det-vin').textContent = (req.vin_number || req.vin_masked || '—').trim() || '—';
   document.getElementById('det-deadline').textContent = fmtDt(req.requested_delivery_time);
@@ -2528,24 +2563,37 @@ async function hienThiDon(req) {
   }
   if (na && normCard && normBody) {
     normCard.style.display = 'block';
-    const src = na.source || '—';
+    const strat = na.resolution_strategy || '—';
+    const src =
+      na.source ||
+      (na.norm_id && String(na.norm_id).includes('XLS') ? 'EXCEL_IMPORT' : '—');
     const items = (na.applied_items || [])
       .map((i) => {
-        const src = i.material_source ? ` <small class="muted">(${_esc(i.material_source)})</small>` : '';
-        return `${_esc(i.job_item)} ${_esc(i.material_code || '—')} ${_esc(i.size || '')}${src}`;
+        const src2 = i.material_source ? ` <small class="muted">(${_esc(i.material_source)})</small>` : '';
+        return `${_esc(i.job_item)} ${_esc(i.material_code || '—')} ${_esc(i.size || '')}${src2}`;
       })
       .join('<br/>');
-    const warnList = Array.isArray(na.warnings) && na.warnings.length
-      ? `<div class="hitl-alert" style="margin-top:8px">${na.warnings.map((w) => _esc(w)).join('<br/>')}</div>`
-      : '';
+    const yrReq = na.model_year_requested != null ? na.model_year_requested : na.model_year;
+    const yrRes = na.model_year_resolved != null ? na.model_year_resolved : '—';
+    const vmLine = na.vehicle_model_code_requested || na.vehicle_model_code || na.norm?.vehicle_model_code || '—';
+    const warnCombined =
+      strat !== 'EXACT_YEAR' && na.warning
+        ? `<div class="hitl-alert" style="margin-top:8px;border-color:rgba(255,193,7,0.45);background:rgba(255,193,7,0.1)">${_esc(na.warning)}</div>`
+        : '';
+    const warnList =
+      strat !== 'EXACT_YEAR' && Array.isArray(na.warnings) && na.warnings.length
+        ? `<div class="hitl-alert" style="margin-top:8px">${na.warnings.map((w) => _esc(w)).join('<br/>')}</div>`
+        : '';
     normBody.innerHTML = `
-      <div><strong>norm_id</strong>: ${na.norm_id || na.norm?.norm_id || '—'}</div>
-      <div><strong>film_type</strong>: ${na.film_type || na.norm?.film_type || '—'}</div>
-      <div><strong>model</strong>: ${na.vehicle_model_code || na.norm?.vehicle_model_code || '—'} · <strong>range</strong>: ${na.model_year_range || na.norm?.model_year_range || '—'}</div>
-      <div><strong>source</strong>: ${src}</div>
+      <div><strong>norm_id</strong>: ${_esc(na.norm_id || na.norm?.norm_id || '—')}</div>
+      <div><strong>film_type</strong>: ${_esc(na.film_type || na.norm?.film_type || '—')}</div>
+      <div><strong>model</strong>: ${_esc(String(vmLine))}</div>
+      <div><strong>requested year</strong>: ${_esc(String(yrReq != null ? yrReq : '—'))} · <strong>resolved year</strong>: ${_esc(String(yrRes))}</div>
+      <div><strong>source</strong>: ${_esc(String(src))}</div>
+      <div><strong>strategy</strong>: ${_esc(String(strat))}</div>
       ${na.override_reason ? `<div><strong>override_reason</strong>: ${_esc(na.override_reason)}</div>` : ''}
       <div style="margin-top:6px">${items || '<span class="muted">Không có auto_fill_items</span>'}</div>
-      ${na.warning ? `<div class="hitl-alert" style="margin-top:8px">${_esc(na.warning)}</div>` : ''}
+      ${warnCombined}
       ${warnList}
     `;
   } else if (normCard) {
@@ -3127,10 +3175,14 @@ window.chiinhSuaWs = async function(wsId) {
     (isPpf || isWf) &&
     typeof window.openWorkstreamAllocationModal === 'function'
   ) {
-    const [lots, offcuts] = await Promise.all([
-      fetch('/api/lots').then((r) => r.json()),
-      fetch('/api/offcuts').then((r) => r.json()),
-    ]);
+    let lots = [];
+    let offcuts = [];
+    if (isPpf) {
+      [lots, offcuts] = await Promise.all([
+        fetch('/api/lots').then((r) => r.json()),
+        fetch('/api/offcuts').then((r) => r.json()),
+      ]);
+    }
     _wsEditModePpf = true;
     _wsEditDirty = false;
     await window.openWorkstreamAllocationModal(wsId, ws, lots, offcuts);

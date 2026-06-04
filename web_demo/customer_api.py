@@ -24,7 +24,12 @@ from database import (
     DbCuttingGroupMatrix,
     DbNotification,
 )
-from vehicle_norm_logic import build_full_address, resolve_vehicle_norm, apply_auto_fill_to_plan
+from vehicle_norm_logic import (
+    build_full_address,
+    normalize_vehicle_model_code,
+    resolve_vehicle_norm_with_year_fallback,
+    apply_auto_fill_to_plan,
+)
 from material_preference_logic import resolve_material_preference
 
 router = APIRouter(prefix="/api", tags=["customers"])
@@ -1208,6 +1213,7 @@ def register_customer_routes(app, get_db):
         vehicle_model = (data.get("vehicle_model") or data.get("vehicle_model_code") or "").strip()
         if not vehicle_model:
             raise HTTPException(400, "vehicle_model bắt buộc")
+        vm_code = normalize_vehicle_model_code(vehicle_model) or vehicle_model.upper()
 
         svc = data.get("service_selection") or {}
         inc_ppf = bool(svc.get("include_ppf"))
@@ -1332,7 +1338,7 @@ def register_customer_routes(app, get_db):
                         vehicle_id=vehicle_id,
                         vin_number=internal_vin,
                         vin_masked=vin_m or internal_vin,
-                        vehicle_model_code=vehicle_model,
+                        vehicle_model_code=vm_code,
                         model_name=data.get("model_name") or vehicle_model,
                         customer_id=customer_id,
                         dealer_id=dealer_id,
@@ -1352,7 +1358,7 @@ def register_customer_routes(app, get_db):
                     vehicle_id=vehicle_id,
                     vin_number=internal_vin,
                     vin_masked=vin_m or internal_vin,
-                    vehicle_model_code=vehicle_model,
+                    vehicle_model_code=vm_code,
                     model_name=data.get("model_name") or vehicle_model,
                     customer_id=customer_id,
                     dealer_id=dealer_id,
@@ -1398,17 +1404,23 @@ def register_customer_routes(app, get_db):
             or "Phim cách nhiệt"
         )
         if inc_wf:
-            res = resolve_vehicle_norm(db, vehicle_model, model_year_val, film_type)
+            res = resolve_vehicle_norm_with_year_fallback(db, vm_code, model_year_val, film_type)
             norm_application = {
                 "found": res["found"],
-                "norm_id": (res.get("norm") or {}).get("norm_id") if res.get("norm") else None,
+                "norm_id": res.get("norm_id") or ((res.get("norm") or {}).get("norm_id") if res.get("norm") else None),
                 "norm": res.get("norm"),
                 "applied_items": res.get("auto_fill_items") or [],
                 "source": "AUTO_FROM_VEHICLE_NORM" if res["found"] else None,
                 "film_type": film_type,
-                "vehicle_model_code": vehicle_model,
-                "model_year_range": (res.get("norm") or {}).get("model_year_range"),
+                "vehicle_model_code": (res.get("vehicle_model_code_requested") or vehicle_model),
+                "vehicle_model_code_raw": res.get("vehicle_model_code_raw"),
+                "vehicle_model_code_requested": res.get("vehicle_model_code_requested"),
                 "model_year": model_year_val,
+                "model_year_requested": res.get("model_year_requested"),
+                "model_year_resolved": res.get("model_year_resolved"),
+                "resolution_strategy": res.get("resolution_strategy"),
+                "warning": res.get("warning"),
+                "warnings": list(res.get("warnings") or []),
             }
             if res["found"]:
                 wf_plan = apply_auto_fill_to_plan(wf_plan, res["auto_fill_items"])
@@ -1502,7 +1514,7 @@ def register_customer_routes(app, get_db):
         if inc_wf and wf_plan:
             wind = next((r for r in wf_plan if r.get("job_item") == "WINDSHIELD"), None)
             primary_wf_mc = ((wind or wf_plan[0]).get("material_code") or "").strip()
-            cg = _wf_cut_group(db, vehicle_model, primary_wf_mc or None)
+            cg = _wf_cut_group(db, vm_code, primary_wf_mc or None)
             if cg:
                 wf_block = f"{cg.cut_block_width_cm}x{cg.cut_block_length_cm}"
                 wf_len = float(cg.deduction_length_m or wf_len)
@@ -1538,7 +1550,7 @@ def register_customer_routes(app, get_db):
             vehicle_id=vehicle_id,
             vin_number=data.get("vin_number") or None,
             vin_masked=vin_m or None,
-            vehicle_model_code=vehicle_model,
+            vehicle_model_code=vm_code,
             material_code=legacy_material,
             job_items=job_items_str,
             status="NEEDS_REVIEW" if needs_review else "ALLOCATED",
@@ -1552,6 +1564,8 @@ def register_customer_routes(app, get_db):
             requested_delivery_time=requested_at or None,
             created_at=_now(),
             source_channel="MANUAL",
+            model_name=(data.get("model_name") or vehicle_model).strip() or None,
+            sales_consultant=(data.get("sales_consultant") or "").strip() or None,
             exception_reason="; ".join(review_notes + stock_flags) if (review_notes or stock_flags) else None,
             service_selection_json=json.dumps(svc, ensure_ascii=False),
             norm_application_json=json.dumps(norm_application, ensure_ascii=False) if norm_application else None,

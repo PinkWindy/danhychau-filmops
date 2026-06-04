@@ -8,7 +8,14 @@ from typing import Any, Dict, List, Optional, Tuple
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from database import DbLotInventory, DbOffcutInventory, DbRequest, DbWorkstream
+from database import DbLotInventory, DbOffcutInventory, DbRequest, DbVehicleProfile, DbWorkstream
+from inventory_api import LOT_TERMINAL, _norm_lot_status
+from vehicle_norm_logic import normalize_vehicle_model_code, resolve_vehicle_norm_with_year_fallback
+
+# Đồng bộ inventory_api — LOT demo không gợi ý mặc định
+LOT_DEMO_IDS_HIDE_FROM_ACTIVE_OPTIONS = frozenset(
+    {"LOT-DEMO-CLEARED-001", "LOT-DEMO-DEPLETED-001", "LOT-DEMO-LOCKED-001"}
+)
 
 WINDOW_FILM_JOB_TEMPLATE: List[Dict[str, str]] = [
     {"job_item": "WINDSHIELD", "item_name": "Kính lái"},
@@ -41,6 +48,60 @@ def _job_items_from_request(req: Optional[DbRequest]) -> set:
     return {x.strip() for x in (req.job_items or "").split(";") if x.strip()}
 
 
+def _effective_vm_and_year(db: Session, req: Optional[DbRequest]) -> Tuple[str, Optional[int]]:
+    if not req:
+        return "", None
+    veh = None
+    if req.vehicle_id:
+        veh = db.query(DbVehicleProfile).filter(DbVehicleProfile.vehicle_id == req.vehicle_id).first()
+    raw_vm = (req.vehicle_model_code or "").strip()
+    if not raw_vm and veh:
+        raw_vm = (veh.vehicle_model_code or "").strip()
+    if not raw_vm and veh:
+        raw_vm = (veh.model_name or "").strip()
+    vm = normalize_vehicle_model_code(raw_vm) or raw_vm.upper()
+    my = None
+    if veh and veh.model_year is not None:
+        my = int(veh.model_year)
+    return vm, my
+
+
+def _pick_default_lot(
+    db: Session,
+    material_code: str,
+    min_len_m: float,
+    min_width_m: float,
+    request_id: str,
+) -> Optional[DbLotInventory]:
+    mc = (material_code or "").strip()
+    if not mc or min_len_m <= 0:
+        return None
+    lr = (request_id or "").strip()
+    for lot in (
+        db.query(DbLotInventory)
+        .filter(DbLotInventory.material_code == mc)
+        .order_by(DbLotInventory.import_date.asc())
+        .all()
+    ):
+        if lot.lot_id in LOT_DEMO_IDS_HIDE_FROM_ACTIVE_OPTIONS:
+            continue
+        eff = _norm_lot_status(lot)
+        if eff in LOT_TERMINAL or eff == "DEPLETED":
+            continue
+        if eff not in ("NEW", "IN_USE"):
+            continue
+        rem = float(lot.remaining_length_m or 0)
+        if rem <= 1e-9 or rem + 1e-9 < min_len_m:
+            continue
+        wm = float(lot.original_width_m or 0)
+        if min_width_m > 0 and wm > 0 and wm + 1e-9 < min_width_m:
+            continue
+        if lot.is_locked and (lot.locked_by_request_id or "").strip() and lr and (lot.locked_by_request_id or "").strip() != lr:
+            continue
+        return lot
+    return None
+
+
 def build_default_wf_allocation(db: Session, ws: DbWorkstream) -> Dict[str, Any]:
     req = db.query(DbRequest).filter(DbRequest.request_id == ws.request_id).first()
     svc_jobs = _service_wf_jobs(req)
@@ -53,44 +114,58 @@ def build_default_wf_allocation(db: Session, ws: DbWorkstream) -> Dict[str, Any]
             plan_list = []
     plan_by = {str(p.get("job_item")): p for p in plan_list if isinstance(p, dict)}
 
+    vm, my = _effective_vm_and_year(db, req)
+    norm_res = resolve_vehicle_norm_with_year_fallback(db, vm, my, "Phim cách nhiệt")
+    auto_by = {str(x.get("job_item")): x for x in (norm_res.get("auto_fill_items") or []) if x.get("job_item")}
+
+    MAIN_DEFAULT = {"WINDSHIELD", "REAR_WINDOW", "FRONT_SIDE", "REAR_SIDE_TRIANGLE"}
+    rid = (ws.request_id or "").strip()
+
     items: List[Dict[str, Any]] = []
     for tmpl in WINDOW_FILM_JOB_TEMPLATE:
         ji = tmpl["job_item"]
-        row = plan_by.get(ji) or {}
-        mc = (row.get("material_code") or ws.selected_material_code or "").strip()
-        w_cm = float(row.get("width_cm") or 0)
-        l_cm = float(row.get("length_cm") or 0)
-        in_svc = (ji in svc_jobs) if svc_jobs else (ji in job_fallback if job_fallback else bool(mc))
-        is_sel = bool(in_svc and mc and w_cm > 0 and l_cm > 0)
-        qty = 1
-        req_m = round((l_cm / 100.0) * qty, 4) if is_sel else 0.0
-        sz = (row.get("size") or "").strip() or (f"{int(w_cm)}x{int(l_cm)}" if w_cm and l_cm else "")
+        row = dict(plan_by.get(ji) or {})
+        af = auto_by.get(ji) or {}
+        w_cm = float(row.get("width_cm") or af.get("width_cm") or 0)
+        l_cm = float(row.get("length_cm") or af.get("length_cm") or 0)
+        mc = (row.get("material_code") or af.get("material_code") or "").strip()
+        sz = (row.get("size") or af.get("size") or "").strip()
+        if w_cm > 0 and l_cm > 0 and not sz:
+            sz = f"{int(w_cm)}x{int(l_cm)}"
+
+        has_norm_size = w_cm > 0 and l_cm > 0
+        if svc_jobs:
+            in_svc = ji in svc_jobs
+        else:
+            in_svc = ji in job_fallback if job_fallback else (ji in MAIN_DEFAULT)
+
+        if ji in MAIN_DEFAULT:
+            want = has_norm_size and in_svc
+        else:
+            want = has_norm_size and in_svc and ji in svc_jobs
+
+        is_sel = bool(want and mc)
+        qty = 1 if is_sel else 0
+        req_m = round((l_cm / 100.0) * max(1, qty), 4) if is_sel else 0.0
         sources: List[Dict[str, Any]] = []
         if is_sel and mc and req_m > 0:
-            lot = (
-                db.query(DbLotInventory)
-                .filter(
-                    DbLotInventory.material_code == mc,
-                    DbLotInventory.status == "ACTIVE",
-                )
-                .order_by(DbLotInventory.import_date.asc())
-                .first()
-            )
             sid = (ws.allocated_source_id or "").strip() if (ws.allocated_source_type or "").upper() == "LOT" else ""
             if sid:
                 sources = [{"source_type": "LOT", "source_id": sid, "allocated_length_m": req_m, "note": ""}]
-            elif lot and (lot.remaining_length_m or 0) + 1e-6 >= req_m:
-                sources = [{"source_type": "LOT", "source_id": lot.lot_id, "allocated_length_m": req_m, "note": ""}]
             else:
-                sources = [{"source_type": "LOT", "source_id": "", "allocated_length_m": req_m, "note": ""}]
+                lot = _pick_default_lot(db, mc, req_m, 1.51, rid)
+                if lot:
+                    sources = [{"source_type": "LOT", "source_id": lot.lot_id, "allocated_length_m": req_m, "note": ""}]
+                else:
+                    sources = [{"source_type": "LOT", "source_id": "", "allocated_length_m": req_m, "note": ""}]
         items.append(
             {
                 "item_code": ji,
                 "item_name": tmpl["item_name"],
                 "is_selected": is_sel,
-                "quantity": qty if is_sel else 0,
-                "material_code": mc,
-                "planned_size": sz,
+                "quantity": qty,
+                "material_code": mc if is_sel else "",
+                "planned_size": sz if is_sel else "",
                 "required_width_cm": w_cm if is_sel else 0.0,
                 "required_length_cm": l_cm if is_sel else 0.0,
                 "required_length_m": req_m if is_sel else 0.0,
@@ -260,6 +335,12 @@ def _wf_snapshot_differs(prev: Dict[str, Any], new: Dict[str, Any]) -> bool:
         if (it.get("material_code") or "") != (o.get("material_code") or ""):
             return True
         if abs(float(it.get("required_length_m") or 0) - float(o.get("required_length_m") or 0)) > 1e-6:
+            return True
+        if abs(float(it.get("required_width_cm") or 0) - float(o.get("required_width_cm") or 0)) > 1e-6:
+            return True
+        if abs(float(it.get("required_length_cm") or 0) - float(o.get("required_length_cm") or 0)) > 1e-6:
+            return True
+        if (str(it.get("planned_size") or "").strip() != str(o.get("planned_size") or "").strip()):
             return True
         ns, osrc = it.get("sources") or [], o.get("sources") or []
         if len(ns) != len(osrc):

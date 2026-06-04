@@ -184,6 +184,8 @@ class DbRequest(Base):
     contract_no = Column(String)
     request_date = Column(String)
     ocr_source_image = Column(String)
+    model_name = Column(String)
+    sales_consultant = Column(String)
 
 
 class DbVehicleFilmNorm(Base):
@@ -397,6 +399,7 @@ class DbOcrDraft(Base):
     created_request_id = Column(String)
     created_at = Column(String)
     extra_payload_json = Column(Text)
+    sales_consultant = Column(String)
 
 
 class DbInventoryTransaction(Base):
@@ -563,12 +566,15 @@ def init_db():
             ("contract_no", "TEXT"),
             ("request_date", "TEXT"),
             ("ocr_source_image", "TEXT"),
+            ("model_name", "TEXT"),
+            ("sales_consultant", "TEXT"),
         ]
         for col, col_def in request_more_cols:
             _add_column_if_missing(conn, "requests", col, col_def)
 
         ocr_draft_cols = [
             ("extra_payload_json", "TEXT"),
+            ("sales_consultant", "TEXT"),
         ]
         for col, col_def in ocr_draft_cols:
             _add_column_if_missing(conn, "ocr_drafts", col, col_def)

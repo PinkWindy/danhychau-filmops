@@ -22,7 +22,7 @@ from customer_api import register_customer_routes
 from vehicle_norm_api import register_vehicle_norm_routes
 from location_api import register_location_routes
 from material_preference_api import register_material_preference_routes
-from vehicle_norm_logic import resolve_vehicle_norm
+from vehicle_norm_logic import normalize_vehicle_model_code, resolve_vehicle_norm_with_year_fallback
 from ocr_lexus_test_data import (
     confirm_lexus_test_ocr,
     is_lexus_test_draft_id,
@@ -638,6 +638,12 @@ def get_request(request_id: str, db: Session = Depends(get_db)):
                 d["vin_number"] = (veh.vin_number or "").strip() or None
             if not (d.get("vin_masked") or "").strip():
                 d["vin_masked"] = (veh.vin_masked or veh.vin_number or "").strip() or None
+            if veh.model_year is not None:
+                d["model_year"] = int(veh.model_year)
+            if not (d.get("model_name") or "").strip():
+                d["model_name"] = (veh.model_name or "").strip() or None
+        if not (d.get("sales_consultant") or "").strip():
+            d["sales_consultant"] = getattr(req, "sales_consultant", None) or None
         deal = db.query(DbDealer).filter(DbDealer.dealer_id == req.dealer_id).first()
         if deal and not (d.get("dealer_name") or "").strip():
             d["dealer_name"] = (deal.dealer_name or "").strip() or None
@@ -1707,7 +1713,8 @@ def confirm_ocr(draft_id: str, data: dict, db: Session = Depends(get_db)):
     new_req_id = f"REQ-{today.strftime('%Y%m%d')}-{str(cnt+1).zfill(3)}"
     services = draft.extracted_services or "PPF,WINDOW_FILM"
     is_multi = "PPF" in services and "WINDOW_FILM" in services
-    vmodel = (data.get("vehicle_model") or draft.extracted_vehicle_model or "LEXUS_RX350").strip()
+    vmodel_raw = (data.get("vehicle_model") or draft.extracted_vehicle_model or "LEXUS_RX350").strip()
+    vm_code = normalize_vehicle_model_code(vmodel_raw) or vmodel_raw.upper()
     my_raw = data.get("model_year")
     try:
         model_year = int(my_raw) if my_raw is not None else None
@@ -1718,21 +1725,41 @@ def confirm_ocr(draft_id: str, data: dict, db: Session = Depends(get_db)):
             model_year = int(str(draft.extracted_delivery_time)[:4])
         except Exception:
             model_year = None
+    sales_sc = (data.get("sales_consultant") or getattr(draft, "sales_consultant", None) or "").strip()
+    if not sales_sc and draft.extra_payload_json:
+        try:
+            pl = json.loads(draft.extra_payload_json)
+            if isinstance(pl, dict):
+                sales_sc = (pl.get("sales_consultant") or "").strip()
+        except Exception:
+            pass
+    disp_model = (data.get("model_name") or vmodel_raw).strip()
     norm_payload = None
     if "WINDOW_FILM" in services:
         ft = (data.get("film_type") or "Phim cách nhiệt").strip()
-        res = resolve_vehicle_norm(db, vmodel, model_year, ft)
+        res = resolve_vehicle_norm_with_year_fallback(db, vm_code, model_year, ft)
         norm_payload = {
             "found": res["found"],
+            "norm_id": res.get("norm_id") or ((res.get("norm") or {}).get("norm_id") if res.get("norm") else None),
             "norm": res.get("norm"),
             "applied_items": res.get("auto_fill_items") or [],
             "source": "AUTO_FROM_VEHICLE_NORM" if res["found"] else "OCR_DEFAULT",
-            "vehicle_model_code_resolve": vmodel,
-            "model_year": model_year,
             "film_type": ft,
+            "vehicle_model_code": vm_code,
+            "vehicle_model_code_raw": res.get("vehicle_model_code_raw"),
+            "vehicle_model_code_requested": res.get("vehicle_model_code_requested"),
+            "model_year": model_year,
+            "model_year_requested": res.get("model_year_requested"),
+            "model_year_resolved": res.get("model_year_resolved"),
+            "resolution_strategy": res.get("resolution_strategy"),
+            "warning": res.get("warning"),
+            "warnings": res.get("warnings") or [],
         }
         if not res["found"]:
-            norm_payload["warning"] = "Chưa có định mức ACTIVE cho dòng xe/năm model — kiểm tra Hồ sơ xe > Định mức phim."
+            norm_payload["warning"] = norm_payload.get("warning") or (
+                "Chưa có định mức active cho dòng xe/năm model này. "
+                "Vui lòng cập nhật Hồ sơ xe > Định mức phim."
+            )
     new_req = DbRequest(
         request_id=new_req_id,
         dealer_id="DEALER_LEXUS_SG",
@@ -1740,16 +1767,18 @@ def confirm_ocr(draft_id: str, data: dict, db: Session = Depends(get_db)):
         customer_name=data.get("customer_name", draft.extracted_customer_name),
         vehicle_id="VEH_001",
         vin_number=data.get("vin", draft.extracted_vin),
-        vehicle_model_code=vmodel,
+        vehicle_model_code=vm_code,
         material_code="JB20",
         job_items=draft.extracted_job_items,
         status="DRAFT", is_grouped_cut=False, is_multi_workstream=is_multi,
         requested_delivery_time=draft.extracted_delivery_time,
         created_at=_now(),
         source_channel="OCR",
+        model_name=disp_model,
+        sales_consultant=sales_sc or None,
         service_selection_json=json.dumps(
             {"include_ppf": "PPF" in services, "include_window_film": "WINDOW_FILM" in services,
-             "extracted_services": services}, ensure_ascii=False),
+             "extracted_services": services, "display_model_name": disp_model}, ensure_ascii=False),
         norm_application_json=json.dumps(norm_payload, ensure_ascii=False) if norm_payload else None,
     )
     db.add(new_req)

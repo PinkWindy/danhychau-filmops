@@ -10,6 +10,152 @@
       .replace(/"/g, '&quot;');
   }
 
+  function normVm(value) {
+    if (typeof window.normalizeVehicleModelCode === 'function') return window.normalizeVehicleModelCode(value);
+    return String(value == null ? '' : value).trim();
+  }
+
+  async function loadWfActiveOptions(requestId, materialCode, stype, minLenM, minWidthM) {
+    const mc = (materialCode || '').trim();
+    if (!mc) return [];
+    const p = new URLSearchParams({
+      material_code: mc,
+      min_length_m: String(minLenM != null ? minLenM : 0),
+      min_width_m: String(minWidthM != null ? minWidthM : 0),
+    });
+    if (requestId) p.set('request_id', requestId);
+    const path = (stype || 'LOT').toUpperCase() === 'OFFCUT' ? '/api/inventory/offcuts/active-options' : '/api/inventory/lots/active-options';
+    try {
+      const j = await fetch(path + '?' + p.toString()).then((r) => r.json());
+      return j.items || [];
+    } catch (e) {
+      console.warn('[WF modal] active-options', e);
+      return [];
+    }
+  }
+
+  function wfOptsHtml(stype, items, curId) {
+    const cur = curId || '';
+    const st = (stype || 'LOT').toUpperCase();
+    if (st === 'OFFCUT') {
+      return (
+        `<option value="">— Chọn mảnh dư —</option>` +
+        (items || [])
+          .map((o) => {
+            const id = o.source_id || o.offcut_id || '';
+            return `<option value="${esc(id)}" ${id === cur ? 'selected' : ''}>${esc(o.display_name || id)}</option>`;
+          })
+          .join('')
+      );
+    }
+    return (
+      `<option value="">— Chọn LOT —</option>` +
+      (items || [])
+        .map((l) => {
+          const id = l.source_id || l.lot_id || '';
+          return `<option value="${esc(id)}" ${id === cur ? 'selected' : ''}>${esc(l.display_name || id)}</option>`;
+        })
+        .join('')
+    );
+  }
+
+  async function enrichWfAllocationFromNorm(ws, alloc) {
+    let req = {};
+    try {
+      req = await fetch(`/api/requests/${encodeURIComponent(ws.request_id)}`).then((r) => r.json());
+    } catch (e) {
+      return { req: {}, normRes: {} };
+    }
+    const vmRaw = (req.vehicle_model_code || '').trim() || (req.model_name || '').trim();
+    const vm = normVm(vmRaw) || vmRaw;
+    const my = req.model_year != null && req.model_year !== '' ? Number(req.model_year) : null;
+    const ft = 'Phim cách nhiệt';
+    const q = new URLSearchParams({ vehicle_model_code: vm || vmRaw, film_type: ft });
+    if (my != null && !Number.isNaN(my)) q.set('model_year', String(my));
+    let normRes = {};
+    try {
+      normRes = await fetch('/api/vehicle-norms/resolve?' + q.toString()).then((r) => r.json());
+    } catch (e) {
+      console.warn('[WF modal] norm resolve', e);
+    }
+    const afBy = {};
+    (normRes.auto_fill_items || []).forEach((x) => {
+      if (x.job_item) afBy[x.job_item] = x;
+    });
+    const prefCache = {};
+    async function pref(jobItem) {
+      if (prefCache[jobItem] !== undefined) return prefCache[jobItem];
+      prefCache[jobItem] = await fetch(
+        '/api/material-preferences/resolve?' + new URLSearchParams({ film_type: ft, job_item: jobItem })
+      ).then((r) => r.json());
+      return prefCache[jobItem];
+    }
+    const MAIN = { WINDSHIELD: 1, REAR_WINDOW: 1, FRONT_SIDE: 1, REAR_SIDE_TRIANGLE: 1 };
+    let svc = req.service_selection;
+    if (!svc && req.service_selection_json) {
+      try {
+        svc = JSON.parse(req.service_selection_json);
+      } catch (e) {
+        svc = {};
+      }
+    }
+    const wfSet = new Set((svc && svc.window_film_items ? svc.window_film_items : []).map(String));
+    for (const it of alloc.items || []) {
+      const ji = it.item_code;
+      const af = afBy[ji];
+      const pr = await pref(ji);
+      const hasNormDims =
+        af && (parseFloat(af.width_cm) || 0) > 0 && (parseFloat(af.length_cm) || 0) > 0;
+      if (hasNormDims) {
+        if (!(it.planned_size || '').trim()) it.planned_size = af.size || '';
+        if (!(parseFloat(it.required_width_cm) > 0)) it.required_width_cm = parseFloat(af.width_cm) || 0;
+        if (!(parseFloat(it.required_length_cm) > 0)) it.required_length_cm = parseFloat(af.length_cm) || 0;
+      }
+      const defMc = ((af && af.material_code) || '').trim() || ((pr && pr.preferred_material_code) || '').trim();
+      if (!(it.material_code || '').trim() && defMc) it.material_code = defMc;
+      const inSvc = wfSet.size ? wfSet.has(ji) : true;
+      const isMain = Object.prototype.hasOwnProperty.call(MAIN, ji);
+      if (isMain && hasNormDims && inSvc) {
+        it.is_selected = !!(it.material_code || '').trim();
+        if (it.is_selected && (!it.quantity || parseInt(it.quantity, 10) < 1)) it.quantity = 1;
+      } else if (!isMain && hasNormDims && inSvc && wfSet.has(ji)) {
+        it.is_selected = !!(it.material_code || '').trim();
+        if (it.is_selected && (!it.quantity || parseInt(it.quantity, 10) < 1)) it.quantity = 1;
+      }
+      if (it.is_selected) {
+        const qtz = Math.max(1, parseInt(it.quantity, 10) || 1);
+        it.quantity = qtz;
+        const lcmF = parseFloat(it.required_length_cm) || 0;
+        if (lcmF > 0) it.required_length_m = Math.round((lcmF / 100) * qtz * 10000) / 10000;
+      }
+    }
+    return { req, normRes };
+  }
+
+  async function prefetchWfSourceDropdowns(ctx) {
+    const rid = (ctx.ws.request_id || '').trim();
+    ctx.wfRowOpts = ctx.wfRowOpts || {};
+    const tasks = [];
+    for (const it of ctx.alloc.items || []) {
+      if (!it.is_selected) continue;
+      const mc = (it.material_code || '').trim();
+      if (!mc) continue;
+      const minL = parseFloat(it.required_length_m) || 0;
+      const minW = (parseFloat(it.required_width_cm) || 0) / 100;
+      const srcs = it.sources && it.sources.length ? it.sources : [{ source_type: 'LOT', source_id: '' }];
+      srcs.forEach((src, j) => {
+        const st = (src.source_type || 'LOT').toUpperCase();
+        const k = `${it.item_code}:${j}:${st}`;
+        tasks.push(
+          loadWfActiveOptions(rid, mc, st, minL, minW).then((rows) => {
+            ctx.wfRowOpts[k] = rows;
+          })
+        );
+      });
+    }
+    await Promise.all(tasks);
+  }
+
   function isPpfCtx(ctx) {
     return ctx && ctx.ws && ctx.ws.workstream_type === 'PPF_INSTALLATION';
   }
@@ -81,7 +227,15 @@
       const sel = document.getElementById(`wa_sel_${it.item_code}`);
       if (sel && !sel.disabled) it.is_selected = !!sel.checked;
       if (isPpfCtx(ctx) && it.item_code === 'FULL_VEHICLE_PPF') it.is_selected = true;
-      it.quantity = parseInt(document.getElementById(`wa_qty_${it.item_code}`)?.value || '0', 10) || 0;
+      if (!isPpfCtx(ctx)) {
+        if (sel && !sel.disabled && !sel.checked) {
+          it.quantity = 0;
+        } else {
+          it.quantity = parseInt(document.getElementById(`wa_qty_${it.item_code}`)?.value || '0', 10) || 0;
+        }
+      } else {
+        it.quantity = parseInt(document.getElementById(`wa_qty_${it.item_code}`)?.value || '0', 10) || 0;
+      }
       it.planned_cut_block = document.getElementById(`wa_block_${it.item_code}`)?.value || it.planned_cut_block || '';
       const rq = document.getElementById(`wa_reqm_${it.item_code}`)?.value;
       it.required_length_m = rq === '' || rq == null ? it.required_length_m || 0 : parseFloat(rq);
@@ -169,6 +323,7 @@
 
   function renderWfBody(ctx) {
     const { alloc, lots, offcuts, ws } = ctx;
+    const rowOpts = ctx.wfRowOpts || {};
     let rows = '';
     for (const it of alloc.items || []) {
       rows += `<tr style="background:rgba(255,255,255,0.03)">
@@ -186,8 +341,10 @@
       const srcs = it.sources && it.sources.length ? it.sources : [{ source_type: 'LOT', source_id: '', allocated_length_m: 0, note: '' }];
       srcs.forEach((src, j) => {
         const st = (src.source_type || 'LOT').toUpperCase();
-        const opts = sourceOptionsMat(mc, st, lots, offcuts, src.source_id);
-        rows += `<tr data-wa-src-item="${it.item_code}" data-wa-src-idx="${j}" data-wa-row-mat="${esc(mc)}">
+        const optKey = `${it.item_code}:${j}:${st}`;
+        const optItems = rowOpts[optKey] || [];
+        const opts = wfOptsHtml(st, optItems, src.source_id);
+        rows += `<tr data-wa-src-item="${it.item_code}" data-wa-src-idx="${j}" data-wa-row-mat="${esc(mc)}" data-wa-opt-key="${esc(optKey)}">
           <td colspan="12" style="padding:6px 10px 6px 28px;background:rgba(0,30,80,0.2)">
             <div style="display:grid;grid-template-columns:72px 110px minmax(180px,1.2fr) 88px minmax(120px,1fr) 40px;gap:8px;align-items:center">
               <span style="font-size:11px;color:var(--text-secondary)">↳ #${j + 1}</span>
@@ -281,12 +438,31 @@
         window._wsEditDirty = true;
         if (el.classList.contains('wa-src-type')) {
           const row = el.closest('tr[data-wa-src-item]');
-          const st = el.value;
-          const mat = isPpfCtx(ctx)
-            ? document.getElementById('wa-ppf-type').value
-            : (document.getElementById(`wa_mat_${row.getAttribute('data-wa-src-item')}`)?.value || row.getAttribute('data-wa-row-mat') || '');
-          const sel = row.querySelector('.wa-src-id');
-          sel.innerHTML = sourceOptionsMat(mat, st, ctx.lots, ctx.offcuts, '');
+          const code = row.getAttribute('data-wa-src-item');
+          const j = parseInt(row.getAttribute('data-wa-src-idx') || '0', 10);
+          const st = (el.value || 'LOT').toUpperCase();
+          const ctx0 = window.__waEditorCtx;
+          if (isPpfCtx(ctx0)) {
+            const mat = document.getElementById('wa-ppf-type').value;
+            const sel = row.querySelector('.wa-src-id');
+            sel.innerHTML = sourceOptionsMat(mat, st, ctx0.lots, ctx0.offcuts, '');
+            refreshSummary(ctx0);
+            return;
+          }
+          const mat = (document.getElementById(`wa_mat_${code}`)?.value || '').trim() || row.getAttribute('data-wa-row-mat') || '';
+          const it = ctx0.alloc.items.find((x) => x.item_code === code);
+          const minL = it ? parseFloat(it.required_length_m) || 0 : 0;
+          const minW = it && it.required_width_cm ? parseFloat(it.required_width_cm) / 100 : 0;
+          const k = `${code}:${j}:${st}`;
+          loadWfActiveOptions(ctx0.ws.request_id, mat, st, minL, minW).then((items) => {
+            ctx0.wfRowOpts = ctx0.wfRowOpts || {};
+            ctx0.wfRowOpts[k] = items;
+            const sel = row.querySelector('.wa-src-id');
+            if (sel) sel.innerHTML = wfOptsHtml(st, items, '');
+            refreshSummary(ctx0);
+          });
+          refreshSummary(ctx0);
+          return;
         }
         refreshSummary(ctx);
       });
@@ -300,10 +476,26 @@
       bx.addEventListener('change', () => {
         window._wsEditDirty = true;
         const a = readAllocFromDom(ctx);
+        for (const x of a.items || []) {
+          const elx = document.getElementById(`wa_sel_${x.item_code}`);
+          if (!isPpfCtx(ctx) && elx && !elx.disabled) {
+            if (elx.checked) {
+              if (!x.quantity || parseInt(x.quantity, 10) < 1) x.quantity = 1;
+            } else x.quantity = 0;
+          }
+        }
         ctx.alloc = a;
-        body.innerHTML = (isPpfCtx(ctx) ? renderPpfBody(ctx) : renderWfBody(ctx)) + renderReasonBlock();
-        wire(ctx);
-        refreshSummary(ctx);
+        const afterChk = () => {
+          body.innerHTML = (isPpfCtx(ctx) ? renderPpfBody(ctx) : renderWfBody(ctx)) + renderReasonBlock();
+          wire(ctx);
+          refreshSummary(ctx);
+        };
+        if (!isPpfCtx(ctx)) {
+          ctx.wfRowOpts = {};
+          prefetchWfSourceDropdowns(ctx).then(afterChk);
+        } else {
+          afterChk();
+        }
       });
     });
     body.onclick = (e) => {
@@ -317,10 +509,18 @@
           it.sources.push({ source_type: 'LOT', source_id: '', allocated_length_m: 0, note: '' });
         }
         ctx.alloc = a;
-        body.innerHTML = (isPpfCtx(ctx) ? renderPpfBody(ctx) : renderWfBody(ctx)) + renderReasonBlock();
-        wire(ctx);
-        refreshSummary(ctx);
-        window._wsEditDirty = true;
+        const rerender = () => {
+          body.innerHTML = (isPpfCtx(ctx) ? renderPpfBody(ctx) : renderWfBody(ctx)) + renderReasonBlock();
+          wire(ctx);
+          refreshSummary(ctx);
+          window._wsEditDirty = true;
+        };
+        if (!isPpfCtx(ctx)) {
+          ctx.wfRowOpts = {};
+          prefetchWfSourceDropdowns(ctx).then(rerender);
+        } else {
+          rerender();
+        }
         return;
       }
       const del = e.target.closest('.wa-del-src');
@@ -332,21 +532,35 @@
         const it = a.items.find((x) => x.item_code === code);
         if (it && it.sources && it.sources.length > idx && it.sources.length > 1) it.sources.splice(idx, 1);
         ctx.alloc = a;
-        body.innerHTML = (isPpfCtx(ctx) ? renderPpfBody(ctx) : renderWfBody(ctx)) + renderReasonBlock();
-        wire(ctx);
-        refreshSummary(ctx);
-        window._wsEditDirty = true;
+        const rerenderDel = () => {
+          body.innerHTML = (isPpfCtx(ctx) ? renderPpfBody(ctx) : renderWfBody(ctx)) + renderReasonBlock();
+          wire(ctx);
+          refreshSummary(ctx);
+          window._wsEditDirty = true;
+        };
+        if (!isPpfCtx(ctx)) {
+          ctx.wfRowOpts = {};
+          prefetchWfSourceDropdowns(ctx).then(rerenderDel);
+        } else {
+          rerenderDel();
+        }
+        return;
       }
       if (e.target.closest('[data-wa-reset]')) {
         fetch(`/api/workstreams/${ctx.wsId}`)
           .then((r) => r.json())
-          .then((ws2) => {
+          .then(async (ws2) => {
             const alloc = JSON.parse(
               JSON.stringify(ws2.workstream_type === 'PPF_INSTALLATION' ? ws2.ppf_allocation || {} : ws2.wf_allocation || {})
             );
             if (ws2.workstream_type === 'PPF_INSTALLATION') autoSecondLot(alloc, ctx.lots);
             ctx.alloc = alloc;
             ctx.ws = ws2;
+            if (ws2.workstream_type !== 'PPF_INSTALLATION') {
+              ctx.wfRowOpts = {};
+              await enrichWfAllocationFromNorm(ws2, ctx.alloc);
+              await prefetchWfSourceDropdowns(ctx);
+            }
             body.innerHTML = (isPpfCtx(ctx) ? renderPpfBody(ctx) : renderWfBody(ctx)) + renderReasonBlock();
             wire(ctx);
             refreshSummary(ctx);
@@ -418,7 +632,11 @@
       return;
     }
     if (isPpf) autoSecondLot(alloc, lots);
-    window.__waEditorCtx = { wsId, ws, lots, offcuts, alloc };
+    window.__waEditorCtx = { wsId, ws, lots, offcuts, alloc, wfRowOpts: {} };
+    if (!isPpf) {
+      await enrichWfAllocationFromNorm(ws, alloc);
+      await prefetchWfSourceDropdowns(window.__waEditorCtx);
+    }
     document.getElementById('ws-edit-title').textContent = isPpf
       ? 'Chỉnh sửa vật tư PPF trước duyệt'
       : 'Chỉnh sửa vật tư Phim cách nhiệt trước duyệt';

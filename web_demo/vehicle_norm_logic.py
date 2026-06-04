@@ -119,13 +119,79 @@ def model_year_in_range(year: Optional[int], range_str: Optional[str]) -> bool:
     return True
 
 
+def normalize_vehicle_model_code(value: Optional[str]) -> str:
+    """
+    Chuẩn hóa mã dòng xe để khớp bảng định mức (RX350, ES250, …).
+    Ví dụ: RX350H PREMIUM CE → RX350, LEXUS_RX350 → RX350, LM500H → LM500.
+    """
+    if value is None:
+        return ""
+    raw = str(value).strip().upper()
+    if not raw:
+        return ""
+    s = raw.replace(" ", "_")
+    while "__" in s:
+        s = s.replace("__", "_")
+    if s.startswith("LEXUS_"):
+        s = s[len("LEXUS_") :]
+    # Lấy segment đầu có dạng chữ+số (bỏ mô tả marketing sau dấu _)
+    if "_" in s:
+        parts = [p for p in s.split("_") if p]
+        hit = next((p for p in parts if re.match(r"^[A-Z]{2,12}\d{2,4}", p)), None)
+        if hit:
+            s = hit
+        else:
+            s = parts[0]
+    m = re.match(r"^([A-Z]{2,12})(\d{2,4})(H|PHEV|HYBRID)?$", s)
+    if m:
+        letters, digits, suf = m.group(1), m.group(2), (m.group(3) or "")
+        if suf == "H":
+            return f"{letters}{digits}"
+        return f"{letters}{digits}"
+    m2 = re.match(r"^([A-Z]{2,12})(\d{2,4})$", s)
+    if m2:
+        return m2.group(1) + m2.group(2)
+    return s
+
+
+def parse_norm_year_bounds(range_str: Optional[str]) -> Tuple[Optional[int], Optional[int]]:
+    """Trả (lo, hi) từ model_year_range; (None, None) = không giới hạn năm (ALL / rỗng)."""
+    if not range_str:
+        return None, None
+    rs = str(range_str).strip().upper()
+    if not rs or rs == "ALL":
+        return None, None
+    nums = [int(x) for x in re.findall(r"\d{4}", str(range_str))]
+    if len(nums) >= 2:
+        return min(nums[0], nums[1]), max(nums[0], nums[1])
+    if len(nums) == 1:
+        return nums[0], nums[0]
+    return None, None
+
+
+def _year_in_norm_bounds(y: int, lo: Optional[int], hi: Optional[int]) -> bool:
+    if lo is None and hi is None:
+        return True
+    if lo is None:
+        return y <= (hi if hi is not None else y)
+    if hi is None:
+        return y >= lo
+    return lo <= y <= hi
+
+
 def candidate_model_codes(vehicle_model_code: str) -> List[str]:
     c = (vehicle_model_code or "").strip().upper()
     out: List[str] = []
     if c:
         out.append(c)
     if c.startswith("LEXUS_"):
-        out.append(c.replace("LEXUS_", "", 1))
+        tail = c.replace("LEXUS_", "", 1)
+        if tail and tail not in out:
+            out.append(tail)
+    elif re.match(r"^[A-Z]{2,12}\d", c):
+        lx = f"LEXUS_{c}"
+        if lx not in out:
+            out.append(lx)
     if "_" in c:
         tail = c.split("_")[-1]
         if tail and tail not in out:
@@ -137,6 +203,138 @@ def candidate_model_codes(vehicle_model_code: str) -> List[str]:
             seen.add(x)
             uniq.append(x)
     return uniq
+
+
+def _query_active_norms_for_models(db: Session, vehicle_model_code: str, film_type: str) -> List[DbVehicleFilmNorm]:
+    ft = (film_type or "").strip()
+    candidates = list(candidate_model_codes(vehicle_model_code))
+    if ft.upper() == "PPF" or "PPF" in ft.upper():
+        if "ALL" not in candidates:
+            candidates.append("ALL")
+    q = (
+        db.query(DbVehicleFilmNorm)
+        .filter(DbVehicleFilmNorm.status == "ACTIVE")
+        .filter(DbVehicleFilmNorm.vehicle_model_code.in_(candidates))
+    )
+    if ft and not (ft.upper() == "PPF" or "PPF" in ft.upper()):
+        q = q.filter(DbVehicleFilmNorm.film_type == ft)
+    return (
+        q.order_by(
+            case((DbVehicleFilmNorm.norm_id.like("NORM-XLS-%"), 0), else_=1),
+            DbVehicleFilmNorm.norm_id,
+        ).all()
+    )
+
+
+def select_vehicle_norm_with_year_strategy(
+    db: Session,
+    vehicle_model_code: str,
+    model_year: Optional[int],
+    film_type: str,
+) -> Tuple[Optional[DbVehicleFilmNorm], str, Optional[int], Optional[str], Optional[str]]:
+    """
+    Chọn định mức ACTIVE theo: exact năm → năm hiệu lực gần nhất ≤ requested → năm sẵn có gần nhất > requested.
+    Trả (norm_row, resolution_strategy, model_year_resolved, warning_vn, vehicle_model_code_used).
+    """
+    vm_in = (vehicle_model_code or "").strip()
+    vm = normalize_vehicle_model_code(vm_in) or vm_in.upper()
+    ft = (film_type or "").strip() or "Phim cách nhiệt"
+    rows = _query_active_norms_for_models(db, vm, ft)
+    parsed: List[Tuple[DbVehicleFilmNorm, Optional[int], Optional[int]]] = []
+    for r in rows:
+        lo, hi = parse_norm_year_bounds(r.model_year_range)
+        parsed.append((r, lo, hi))
+    if not parsed:
+        return None, "NOT_FOUND", None, None, vm
+
+    Y = int(model_year) if model_year is not None else None
+
+    def _pick_max_hi(cands: List[Tuple[DbVehicleFilmNorm, Optional[int], Optional[int]]]) -> Optional[DbVehicleFilmNorm]:
+        best = None
+        best_key: Optional[Tuple[int, str]] = None
+        for r, lo, hi in cands:
+            eff_hi = hi if hi is not None else (lo if lo is not None else -10**9)
+            key = (eff_hi, r.norm_id or "")
+            if best_key is None or key > best_key:
+                best_key = key
+                best = r
+        return best
+
+    def _pick_min_lo(cands: List[Tuple[DbVehicleFilmNorm, Optional[int], Optional[int]]]) -> Optional[DbVehicleFilmNorm]:
+        best = None
+        best_key: Optional[Tuple[int, str]] = None
+        for r, lo, hi in cands:
+            eff_lo = lo if lo is not None else (hi if hi is not None else 10**9)
+            key = (eff_lo, r.norm_id or "")
+            if best_key is None or key < best_key:
+                best_key = key
+                best = r
+        return best
+
+    if Y is None:
+        all_bounds = [(r, lo, hi) for r, lo, hi in parsed if lo is None and hi is None]
+        if all_bounds:
+            ch = _pick_max_hi(all_bounds)
+            return ch, "EXACT_YEAR", None, None, vm
+        ch2 = _pick_max_hi(parsed)
+        lo2, hi2 = next(((lo, hi) for r, lo, hi in parsed if r.norm_id == ch2.norm_id), (None, None))
+        yr = hi2 or lo2
+        return ch2, "LATEST_AVAILABLE_YEAR", yr, None, vm
+
+    exact = [(r, lo, hi) for r, lo, hi in parsed if _year_in_norm_bounds(Y, lo, hi)]
+    if exact:
+        ch = _pick_max_hi(exact)
+        return ch, "EXACT_YEAR", Y, None, vm
+
+    prior = [(r, lo, hi) for r, lo, hi in parsed if hi is not None and hi <= Y]
+    if prior:
+        ch = _pick_max_hi(prior)
+        lo3, hi3 = next(((lo, hi) for r, lo, hi in parsed if r.norm_id == ch.norm_id), (None, None))
+        yr_res = hi3
+        warn = (
+            f"Không có định mức năm {Y}, đang dùng định mức mới nhất trong các bản có hiệu lực đến năm {yr_res}."
+            if yr_res is not None
+            else f"Không có định mức năm {Y}, đang dùng định mức gần nhất."
+        )
+        return ch, "LATEST_PRIOR_YEAR", yr_res, warn, vm
+
+    future = [(r, lo, hi) for r, lo, hi in parsed if lo is not None and lo > Y]
+    if future:
+        ch = _pick_min_lo(future)
+        lo4, _hi4 = next(((lo, hi) for r, lo, hi in parsed if r.norm_id == ch.norm_id), (None, None))
+        warn = f"Không có định mức cho năm {Y} trở về trước; đang dùng bản có hiệu lực từ năm {lo4}."
+        return ch, "LATEST_AVAILABLE_YEAR", lo4, warn, vm
+
+    ch = _pick_max_hi(parsed)
+    lo5, hi5 = next(((lo, hi) for r, lo, hi in parsed if r.norm_id == ch.norm_id), (None, None))
+    yr5 = hi5 or lo5
+    warn = f"Không có định mức active khớp năm {Y}; đang dùng bản catalog gần nhất (năm tham chiếu {yr5})."
+    return ch, "LATEST_AVAILABLE_YEAR", yr5, warn, vm
+
+
+def find_active_vehicle_norm(
+    db: Session,
+    vehicle_model_code: str,
+    model_year: Optional[int],
+    film_type: str,
+) -> Optional[DbVehicleFilmNorm]:
+    vm = normalize_vehicle_model_code(vehicle_model_code) or (vehicle_model_code or "").strip().upper()
+    row, strat, _yr, _w, _vmu = select_vehicle_norm_with_year_strategy(db, vm, model_year, film_type)
+    if strat == "NOT_FOUND":
+        return None
+    return row
+
+
+def find_nearest_active_vehicle_norm(
+    db: Session,
+    vehicle_model_code: str,
+    model_year: Optional[int],
+    film_type: str,
+) -> Optional[DbVehicleFilmNorm]:
+    """Giữ tên hàm — ủy quyền cho select_vehicle_norm_with_year_strategy."""
+    vm = normalize_vehicle_model_code(vehicle_model_code) or (vehicle_model_code or "").strip().upper()
+    row, strat, _, _, _ = select_vehicle_norm_with_year_strategy(db, vm, model_year, film_type)
+    return row if strat != "NOT_FOUND" else None
 
 
 def norm_row_to_dict(n: DbVehicleFilmNorm) -> Dict[str, Any]:
@@ -206,104 +404,19 @@ def build_auto_fill_items(
     return out
 
 
-def find_active_vehicle_norm(
-    db: Session,
-    vehicle_model_code: str,
-    model_year: Optional[int],
-    film_type: str,
-) -> Optional[DbVehicleFilmNorm]:
-    ft = (film_type or "").strip()
-    candidates = list(candidate_model_codes(vehicle_model_code))
-    # Định mức PPF mặc định toàn hệ thống (ALL / ALL) — bảng vehicle_film_norms
-    if ft.upper() == "PPF" or "PPF" in ft.upper():
-        if "ALL" not in candidates:
-            candidates.append("ALL")
-    q = (
-        db.query(DbVehicleFilmNorm)
-        .filter(DbVehicleFilmNorm.status == "ACTIVE")
-        .filter(DbVehicleFilmNorm.vehicle_model_code.in_(candidates))
-    )
-    if ft:
-        q = q.filter(DbVehicleFilmNorm.film_type == ft)
-    rows = (
-        q.order_by(
-            case((DbVehicleFilmNorm.norm_id.like("NORM-XLS-%"), 0), else_=1),
-            DbVehicleFilmNorm.norm_id,
-        )
-        .all()
-    )
-    for row in rows:
-        if model_year_in_range(model_year, row.model_year_range):
-            return row
-    return None
-
-
 def resolve_vehicle_norm(
     db: Session,
     vehicle_model_code: str,
     model_year: Optional[int],
     film_type: str,
 ) -> Dict[str, Any]:
-    norm = find_active_vehicle_norm(db, vehicle_model_code, model_year, film_type)
-    if not norm:
-        return {"found": False, "norm": None, "auto_fill_items": []}
-    ft = (film_type or "").strip() or (norm.film_type or "").strip()
+    full = resolve_vehicle_norm_with_year_fallback(db, vehicle_model_code, model_year, film_type)
     return {
-        "found": True,
-        "norm": norm_row_to_dict(norm),
-        "auto_fill_items": build_auto_fill_items(db, norm, ft),
+        "found": full.get("found"),
+        "norm_id": full.get("norm_id"),
+        "norm": full.get("norm"),
+        "auto_fill_items": full.get("auto_fill_items") or [],
     }
-
-
-def _range_year_distance(model_year: Optional[int], range_str: Optional[str]) -> Optional[int]:
-    """Khoảng cách tối thiểu từ model_year tới biên hoặc tâm khoảng năm trong chuỗi định mức."""
-    if model_year is None:
-        return 0
-    nums = [int(x) for x in re.findall(r"\d{4}", str(range_str or ""))]
-    if len(nums) >= 2:
-        lo, hi = min(nums[0], nums[1]), max(nums[0], nums[1])
-        if lo <= int(model_year) <= hi:
-            return 0
-        return min(abs(int(model_year) - lo), abs(int(model_year) - hi))
-    if len(nums) == 1:
-        return abs(int(model_year) - nums[0])
-    return 9999
-
-
-def find_nearest_active_vehicle_norm(
-    db: Session,
-    vehicle_model_code: str,
-    model_year: Optional[int],
-    film_type: str,
-) -> Optional[DbVehicleFilmNorm]:
-    """Khi không khớp năm trong range, chọn bản ACTIVE gần nhất theo vehicle_model_code + film_type."""
-    ft = (film_type or "").strip()
-    candidates = list(candidate_model_codes(vehicle_model_code))
-    if ft.upper() == "PPF" or "PPF" in ft.upper():
-        if "ALL" not in candidates:
-            candidates.append("ALL")
-    rows = (
-        db.query(DbVehicleFilmNorm)
-        .filter(DbVehicleFilmNorm.status == "ACTIVE")
-        .filter(DbVehicleFilmNorm.vehicle_model_code.in_(candidates))
-    )
-    if ft:
-        rows = rows.filter(DbVehicleFilmNorm.film_type == ft)
-    rows = rows.order_by(DbVehicleFilmNorm.norm_id).all()
-    if not rows:
-        return None
-    if model_year is None:
-        return rows[0]
-    best: Optional[DbVehicleFilmNorm] = None
-    best_d = 10**9
-    for row in rows:
-        d = _range_year_distance(model_year, row.model_year_range)
-        if d is None:
-            continue
-        if d < best_d:
-            best_d = d
-            best = row
-    return best
 
 
 def resolve_vehicle_norm_with_year_fallback(
@@ -313,46 +426,56 @@ def resolve_vehicle_norm_with_year_fallback(
     film_type: str,
 ) -> Dict[str, Any]:
     """
-    Ưu tiên định mức khớp đúng model_year trong range; nếu không có thì fallback bản ACTIVE gần nhất.
-    Trả thêm year_exact_match, warnings phục vụ OCR / API resolve.
+    Resolve định mức theo vehicle_model_code (đã normalize), fallback năm theo business rule.
     """
-    vm = (vehicle_model_code or "").strip()
+    raw_in = (vehicle_model_code or "").strip()
     ft = (film_type or "").strip() or "Phim cách nhiệt"
     warnings: List[str] = []
-
-    norm = find_active_vehicle_norm(db, vm, model_year, ft)
-    if norm:
-        nft = ft or (norm.film_type or "").strip()
-        return {
-            "found": True,
-            "year_exact_match": True,
-            "norm": norm_row_to_dict(norm),
-            "auto_fill_items": build_auto_fill_items(db, norm, nft),
-            "warnings": warnings,
-        }
-
-    near = find_nearest_active_vehicle_norm(db, vm, model_year, ft)
-    if near:
-        nft = ft or (near.film_type or "").strip()
-        warnings.append(
-            f"Không có định mức khớp chính xác năm model; đã áp dụng norm gần nhất ({near.model_year_range})."
+    norm, strategy, yr_res, warn_one, vm_used = select_vehicle_norm_with_year_strategy(
+        db, raw_in, model_year, ft
+    )
+    if warn_one:
+        warnings.append(warn_one)
+    if not norm:
+        ytxt = str(model_year) if model_year is not None else "—"
+        wnf = (
+            "Chưa có định mức active cho dòng xe/năm model này. "
+            "Vui lòng cập nhật Hồ sơ xe > Định mức phim."
         )
+        warnings.append(wnf)
         return {
-            "found": True,
+            "found": False,
+            "norm_id": None,
             "year_exact_match": False,
-            "norm": norm_row_to_dict(near),
-            "auto_fill_items": build_auto_fill_items(db, near, nft),
+            "norm": None,
+            "auto_fill_items": [],
             "warnings": warnings,
+            "vehicle_model_code_raw": raw_in,
+            "vehicle_model_code_requested": vm_used,
+            "model_year_requested": model_year,
+            "model_year_resolved": None,
+            "resolution_strategy": "NOT_FOUND",
+            "warning": wnf,
         }
 
-    ytxt = str(model_year) if model_year is not None else "—"
-    warnings.append(f"Chưa có định mức active cho {vm} năm {ytxt}.")
+    nft = ft or (norm.film_type or "").strip() or "Phim cách nhiệt"
+    norm_dict = norm_row_to_dict(norm)
+    out_warn = warn_one if strategy != "EXACT_YEAR" else None
+    if out_warn:
+        warnings = [w for w in warnings if w]
     return {
-        "found": False,
-        "year_exact_match": False,
-        "norm": None,
-        "auto_fill_items": [],
-        "warnings": warnings,
+        "found": True,
+        "norm_id": norm_dict.get("norm_id"),
+        "year_exact_match": strategy == "EXACT_YEAR",
+        "norm": norm_dict,
+        "auto_fill_items": build_auto_fill_items(db, norm, nft),
+        "warnings": [w for w in warnings if w],
+        "vehicle_model_code_raw": raw_in,
+        "vehicle_model_code_requested": vm_used,
+        "model_year_requested": model_year,
+        "model_year_resolved": yr_res if yr_res is not None else model_year,
+        "resolution_strategy": strategy,
+        "warning": out_warn,
     }
 
 
