@@ -200,6 +200,24 @@ Mở lại URL Render — danh sách đơn, kho, v.v. sẽ có dữ liệu demo.
 
 ---
 
+## Reset database demo trên Render (tùy chọn — **chỉ môi trường demo**)
+
+**Cảnh báo:** Không bật trên production thật. Endpoint xóa/seed lại toàn bộ SQLite.
+
+1. Trên Render → Web Service → **Environment**, thêm tạm thời:
+   - `ALLOW_DB_RESET=true`
+   - `ADMIN_RESET_TOKEN=` (chuỗi bí mật dài, chỉ bạn biết)
+2. Gọi (sau khi deploy):
+
+   `POST /api/admin/reset-database-standard-seed`  
+   Header: `X-Admin-Reset-Token: <cùng giá trị ADMIN_RESET_TOKEN>`
+
+3. Sau khi reset xong: **tắt** `ALLOW_DB_RESET` hoặc **đổi** `ADMIN_RESET_TOKEN`.
+
+Nếu thiếu env hoặc token sai → HTTP **403**.
+
+---
+
 ## Phần D — Kiểm tra nhanh sau khi lên mạng
 
 1. Mở URL `https://...onrender.com` — thấy giao diện chủ.

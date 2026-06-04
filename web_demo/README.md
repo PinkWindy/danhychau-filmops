@@ -10,6 +10,32 @@ uvicorn main:app --reload --host 127.0.0.1 --port 8000
 
 Mở trình duyệt: `http://127.0.0.1:8000/static/index.html` (hoặc URL gốc tùy cấu hình `main.py`).
 
+## Reset database demo (seed chuẩn)
+
+Chạy trong thư mục `web_demo` (script tự kiểm tra cwd). Script backup `warehouse_demo.db` vào `backups/`, xóa file DB runtime (và `-wal`/`-shm` nếu xóa được), tạo schema + seed idempotent.
+
+```bash
+cd web_demo
+python reset_database_full_seed.py
+python database_seed_integrity_smoke_test.py
+```
+
+PowerShell (Windows) — nếu cần xóa file DB thủ công trước khi seed:
+
+```powershell
+cd "D:\Quản lý vận hành DYC\web_demo"
+New-Item -ItemType Directory -Force -Path ".\backups" | Out-Null
+Copy-Item ".\warehouse_demo.db" ".\backups\warehouse_demo_$(Get-Date -Format yyyyMMdd_HHmmss).db" -ErrorAction SilentlyContinue
+Remove-Item ".\warehouse_demo.db" -Force -ErrorAction SilentlyContinue
+Remove-Item ".\warehouse_demo.db-wal" -Force -ErrorAction SilentlyContinue
+Remove-Item ".\warehouse_demo.db-shm" -Force -ErrorAction SilentlyContinue
+python reset_database_full_seed.py
+python database_seed_integrity_smoke_test.py
+python generate_database_standard_seed_report.py
+```
+
+Script **`generate_database_standard_seed_report.py`** (không reset DB): đếm bảng + phân tích Excel + kiểm tra norm/PPF/material/OCR/demo request, chạy smoke subprocess, ghi [`audit/database-standard-seed-report.md`](./audit/database-standard-seed-report.md). Chạy khi cần nghiệm thu; **không cần reset** nếu DB đã seed chuẩn và bạn chỉ muốn làm mới báo cáo (script vẫn chạy smoke — có thể làm thay đổi tồn kho sau bước đếm, xem ghi chú trong báo cáo).
+
 ## Cấu trúc thư mục (tóm tắt)
 
 | Mục | Mô tả |

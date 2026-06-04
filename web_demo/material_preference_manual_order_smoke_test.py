@@ -34,9 +34,10 @@ def _subrun(script: str, expect_line: str) -> tuple:
     import os
 
     d = os.path.dirname(__file__)
-    p = subprocess.run([sys.executable, script], cwd=d, capture_output=True, text=True)
+    p = subprocess.run([sys.executable, script], cwd=d, capture_output=True, text=True, encoding="utf-8", errors="replace")
+    out = (p.stdout or "") + "\n" + (p.stderr or "")
     ok = p.returncode == 0 and expect_line in (p.stdout or "")
-    return ok, (p.stderr or p.stdout)[-400:]
+    return ok, out[-400:]
 
 
 def main():

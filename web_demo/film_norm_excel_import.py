@@ -23,10 +23,17 @@ except ImportError:
 
 def _default_xlsx_paths() -> list[str]:
     base = os.path.dirname(os.path.abspath(__file__))
+    # Ưu tiên file chuẩn cạnh repo (DYC), sau đó bản copy trong web_demo/data
     return [
-        os.path.join(base, "data", "film_norms_chuan.xlsx"),
         os.path.join(os.path.dirname(base), "Phim cách nhiệt - Định mức chuẩn.xlsx"),
+        os.path.join(base, "data", "film_norms_chuan.xlsx"),
     ]
+
+
+def _canonical_excel_path() -> str:
+    """Đường dẫn chuẩn cho báo cáo nghiệm thu (ưu tiên file gốc repo)."""
+    p = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "Phim cách nhiệt - Định mức chuẩn.xlsx")
+    return os.path.normpath(p)
 
 
 def _cell_str(v: Any) -> str:
@@ -41,6 +48,12 @@ def _cell_str(v: Any) -> str:
     return s
 
 
+def _film_slug(s: str) -> str:
+    t = re.sub(r"[^\w]+", "_", (s or "").strip(), flags=re.UNICODE)
+    t = re.sub(r"_+", "_", t).strip("_").upper()[:24] or "FILM"
+    return t
+
+
 def _parse_wxl(s: str) -> Tuple[str, float, float]:
     if not s or s in ("0", "0.0", "-"):
         return "", 0.0, 0.0
@@ -48,6 +61,121 @@ def _parse_wxl(s: str) -> Tuple[str, float, float]:
     if not m:
         return s, 0.0, 0.0
     return s, float(m.group(1)), float(m.group(2))
+
+
+def analyze_excel_norm_workbook(xlsx_path: Optional[str] = None) -> dict:
+    """
+    Đọc file Excel định mức, thống kê dòng hợp lệ / skip — không ghi database.
+    Trả dict: ok, path, total_body_rows, skipped_*, valid_data_rows, error.
+    """
+    if load_workbook is None:
+        return {
+            "ok": False,
+            "path": xlsx_path or "",
+            "total_body_rows": 0,
+            "skipped_empty_rows": 0,
+            "skipped_missing_vehicle_code": 0,
+            "skipped_invalid_model_year": 0,
+            "valid_data_rows": 0,
+            "error": "openpyxl chưa cài (pip install openpyxl)",
+        }
+
+    path = xlsx_path
+    if not path:
+        for p in _default_xlsx_paths():
+            if os.path.isfile(p):
+                path = p
+                break
+    if not path or not os.path.isfile(path):
+        return {
+            "ok": False,
+            "path": path or "",
+            "total_body_rows": 0,
+            "skipped_empty_rows": 0,
+            "skipped_missing_vehicle_code": 0,
+            "skipped_invalid_model_year": 0,
+            "valid_data_rows": 0,
+            "error": f"Không tìm thấy file Excel: {path}",
+        }
+
+    wb = load_workbook(path, read_only=True, data_only=True)
+    try:
+        ws = wb[wb.sheetnames[0]]
+        rows = list(ws.iter_rows(values_only=True))
+    finally:
+        wb.close()
+
+    if not rows:
+        return {
+            "ok": False,
+            "path": path,
+            "total_body_rows": 0,
+            "skipped_empty_rows": 0,
+            "skipped_missing_vehicle_code": 0,
+            "skipped_invalid_model_year": 0,
+            "valid_data_rows": 0,
+            "error": "Sheet trống",
+        }
+
+    header = [str(c).strip() if c is not None else "" for c in rows[0]]
+    col = {h: i for i, h in enumerate(header)}
+
+    def idx(*names: str) -> Optional[int]:
+        for n in names:
+            if n in col:
+                return col[n]
+        return None
+
+    i_film = idx("Loại phim")
+    i_car = idx("Dòng xe")
+    i_year = idx("Năm Model")
+    if i_film is None or i_car is None or i_year is None:
+        return {
+            "ok": False,
+            "path": path,
+            "total_body_rows": max(0, len(rows) - 1),
+            "skipped_empty_rows": 0,
+            "skipped_missing_vehicle_code": 0,
+            "skipped_invalid_model_year": 0,
+            "valid_data_rows": 0,
+            "error": f"Thiếu cột bắt buộc trong header: {header}",
+        }
+
+    skip_empty = 0
+    skip_no_v = 0
+    skip_year = 0
+    valid = 0
+    total_body = max(0, len(rows) - 1)
+
+    for r in rows[1:]:
+        if not r or all(_cell_str(c) == "" for c in r):
+            skip_empty += 1
+            continue
+        vcode = _cell_str(r[i_car]).upper().replace(" ", "")
+        if not vcode:
+            skip_no_v += 1
+            continue
+        yraw = r[i_year]
+        try:
+            year_int = int(float(yraw)) if yraw is not None and str(yraw).strip() != "" else None
+        except (TypeError, ValueError):
+            skip_year += 1
+            continue
+        if year_int is None:
+            skip_year += 1
+            continue
+        valid += 1
+
+    return {
+        "ok": True,
+        "path": path,
+        "total_body_rows": total_body,
+        "skipped_empty_rows": skip_empty,
+        "skipped_missing_vehicle_code": skip_no_v,
+        "skipped_invalid_model_year": skip_year,
+        "valid_data_rows": valid,
+        "error": None,
+    }
 
 
 def try_import_excel_norms(db, xlsx_path: Optional[str] = None) -> dict:
@@ -123,7 +251,6 @@ def try_import_excel_norms(db, xlsx_path: Optional[str] = None) -> dict:
             skip += 1
             continue
         myr = str(year_int)
-        nid = f"NORM-XLS-{vcode}-{year_int}"
 
         def col_val(ci: Optional[int]) -> str:
             if ci is None or ci >= len(r):
@@ -138,7 +265,15 @@ def try_import_excel_norms(db, xlsx_path: Optional[str] = None) -> dict:
         sz_rs, w_rs, l_rs = _parse_wxl(col_val(i_rs))
         sz_tri, w_tri, l_tri = _parse_wxl(col_val(i_tri))
 
-        existing = db.query(DbVehicleFilmNorm).filter(DbVehicleFilmNorm.norm_id == nid).first()
+        slug = _film_slug(film)
+        nid = f"NORM-XLS-{slug}-{vcode}-{year_int}"
+        existing = (
+            db.query(DbVehicleFilmNorm)
+            .filter(DbVehicleFilmNorm.film_type == film)
+            .filter(DbVehicleFilmNorm.vehicle_model_code == vcode)
+            .filter(DbVehicleFilmNorm.model_year_range == myr)
+            .first()
+        )
         fields = dict(
             film_type=film,
             vehicle_model_code=vcode,
@@ -166,12 +301,14 @@ def try_import_excel_norms(db, xlsx_path: Optional[str] = None) -> dict:
             triangle_length_cm=l_tri,
             status="ACTIVE",
             updated_at=ts,
-            note="Import Excel film_norms_chuan.xlsx",
+            note=f"Import Excel chuẩn ({os.path.basename(path)})",
         )
 
         if existing:
             for k, v in fields.items():
                 setattr(existing, k, v)
+            if not (existing.norm_id or "").strip():
+                existing.norm_id = nid
             upd += 1
         else:
             db.add(

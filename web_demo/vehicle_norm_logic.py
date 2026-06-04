@@ -107,6 +107,9 @@ def model_year_in_range(year: Optional[int], range_str: Optional[str]) -> bool:
         return True
     if not range_str:
         return True
+    rs = str(range_str).strip()
+    if rs.upper() == "ALL":
+        return True
     nums = [int(x) for x in re.findall(r"\d{4}", str(range_str))]
     if len(nums) >= 2:
         lo, hi = min(nums[0], nums[1]), max(nums[0], nums[1])
@@ -210,7 +213,11 @@ def find_active_vehicle_norm(
     film_type: str,
 ) -> Optional[DbVehicleFilmNorm]:
     ft = (film_type or "").strip()
-    candidates = candidate_model_codes(vehicle_model_code)
+    candidates = list(candidate_model_codes(vehicle_model_code))
+    # Định mức PPF mặc định toàn hệ thống (ALL / ALL) — bảng vehicle_film_norms
+    if ft.upper() == "PPF" or "PPF" in ft.upper():
+        if "ALL" not in candidates:
+            candidates.append("ALL")
     q = (
         db.query(DbVehicleFilmNorm)
         .filter(DbVehicleFilmNorm.status == "ACTIVE")
@@ -271,7 +278,10 @@ def find_nearest_active_vehicle_norm(
 ) -> Optional[DbVehicleFilmNorm]:
     """Khi không khớp năm trong range, chọn bản ACTIVE gần nhất theo vehicle_model_code + film_type."""
     ft = (film_type or "").strip()
-    candidates = candidate_model_codes(vehicle_model_code)
+    candidates = list(candidate_model_codes(vehicle_model_code))
+    if ft.upper() == "PPF" or "PPF" in ft.upper():
+        if "ALL" not in candidates:
+            candidates.append("ALL")
     rows = (
         db.query(DbVehicleFilmNorm)
         .filter(DbVehicleFilmNorm.status == "ACTIVE")

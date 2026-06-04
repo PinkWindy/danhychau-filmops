@@ -59,7 +59,7 @@ def ensure_locked_lot_demo():
 def ensure_locked_offcut_demo():
     db = SessionLocal()
     try:
-        oc = db.query(DbOffcutInventory).filter(DbOffcutInventory.offcut_id == "SUBLOT-DEMO-LOCKED-001").first()
+        oc = db.query(DbOffcutInventory).filter(DbOffcutInventory.offcut_id == "SUBLOT-DEMO-LOCKED").first()
         if oc:
             oc.is_locked = True
             oc.locked_by_request_id = "REQ-DEMO-CANCELLED"
@@ -315,7 +315,7 @@ def main() -> int:
     ensure_locked_offcut_demo()
     r14 = client.post(
         "/api/inventory/locks/release",
-        json={"source_type": "OFFCUT", "source_id": "SUBLOT-DEMO-LOCKED-001", "reason": ""},
+        json={"source_type": "OFFCUT", "source_id": "SUBLOT-DEMO-LOCKED", "reason": ""},
     )
     ok14 = r14.status_code == 400
     add(14, "Release Lock thiếu reason phải fail", ok14, "" if ok14 else _fail_detail(r14, "release no reason"))
@@ -326,15 +326,15 @@ def main() -> int:
         "/api/inventory/locks/release",
         json={
             "source_type": "OFFCUT",
-            "source_id": "SUBLOT-DEMO-LOCKED-001",
+            "source_id": "SUBLOT-DEMO-LOCKED",
             "reason": "smoke test release",
             "performed_by": "SMOKE-TEST",
         },
     )
     oc_chk = None
     if r15.status_code == 200:
-        ocs = client.get("/api/inventory/offcuts", params={"q": "SUBLOT-DEMO-LOCKED-001"}).json()
-        oc_chk = next((x for x in ocs if x["offcut_id"] == "SUBLOT-DEMO-LOCKED-001"), None)
+        ocs = client.get("/api/inventory/offcuts", params={"q": "SUBLOT-DEMO-LOCKED"}).json()
+        oc_chk = next((x for x in ocs if x["offcut_id"] == "SUBLOT-DEMO-LOCKED"), None)
     ok15 = r15.status_code == 200 and oc_chk and oc_chk.get("is_locked") is False
     add(15, "Release Lock thành công, is_locked=false", ok15, "" if ok15 else _fail_detail(r15, "release"))
     _print_row(15, "Release Lock thành công, is_locked=false", ok15, "")

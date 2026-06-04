@@ -2,7 +2,7 @@ import os, uuid, datetime, json, logging, traceback
 from contextlib import asynccontextmanager
 from typing import Optional
 
-from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Query, Body
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Query, Body, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -38,14 +38,16 @@ async def lifespan(app: FastAPI):
     try:
         init_db()
         _log.info("DYC init_db() completed (schema / migrations).")
-        from populate_db import _seed_amis_and_vehicle_norms, _seed_material_preferences
         from film_norm_excel_import import try_import_excel_norms
+        from standard_seed_data import seed_all_demo_data_if_missing_canonical, try_location_master_import_warn_only
+
         db = SessionLocal()
         try:
-            _seed_amis_and_vehicle_norms(db)
-            _seed_material_preferences(db)
-            db.commit()
-            _log.info("DYC AMIS seed checked.")
+            if seed_all_demo_data_if_missing_canonical(db):
+                db.commit()
+                _log.info("DYC standard_seed: đã seed dữ liệu demo chuẩn (DB trống).")
+            else:
+                db.rollback()
             imp = try_import_excel_norms(db)
             db.commit()
             if imp.get("ok"):
@@ -59,9 +61,10 @@ async def lifespan(app: FastAPI):
             else:
                 _log.warning("DYC Excel norms import: %s", imp.get("error"))
         except Exception:
-            _log.exception("DYC seed AMIS / Excel norms skipped or partial.")
+            _log.exception("DYC seed / Excel norms skipped or partial.")
         finally:
             db.close()
+        try_location_master_import_warn_only()
     except Exception:
         _log.exception("DYC init_db() failed — một số API có thể lỗi cho đến khi sửa DB.")
     yield
@@ -88,6 +91,35 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+@app.post("/api/admin/reset-database-standard-seed")
+def admin_reset_database_standard_seed(request: Request):
+    """
+    Reset DB + seed chuẩn (demo). Bắt buộc ALLOW_DB_RESET=true và header X-Admin-Reset-Token.
+    Không bật trên production thật.
+    """
+    import secrets
+    from pathlib import Path
+
+    if os.getenv("ALLOW_DB_RESET", "").lower() != "true":
+        raise HTTPException(status_code=403, detail="ALLOW_DB_RESET is not enabled")
+    expected = (os.getenv("ADMIN_RESET_TOKEN") or "").strip()
+    if not expected:
+        raise HTTPException(status_code=403, detail="ADMIN_RESET_TOKEN is not set")
+    got = (request.headers.get("X-Admin-Reset-Token") or "").strip()
+    if not secrets.compare_digest(got, expected):
+        raise HTTPException(status_code=403, detail="Invalid or missing X-Admin-Reset-Token")
+    from reset_database_full_seed import run_full_reset_sequence
+
+    here = Path(__file__).resolve().parent
+    out = run_full_reset_sequence(here)
+    return {
+        "status": "success",
+        "message": "Database reset + standard seed completed (demo only).",
+        "backup_path": out.get("backup_path"),
+        "counts": out.get("counts"),
+    }
 
 register_inventory_routes(app, get_db)
 register_customer_routes(app, get_db)

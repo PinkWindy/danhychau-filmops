@@ -393,15 +393,18 @@ def main():
     if oc_list:
         w11 = next((x for x in body11["items"] if x["item_code"] == "WINDSHIELD"), None)
         if w11:
+            oc_len = float(oc_list[0].get("length_m") or 0)
+            need_m = float(w11.get("required_length_m") or 0) or 1.52
+            take_m = min(need_m, oc_len)
             w11["sources"] = [
                 {
                     "source_type": "OFFCUT",
                     "source_id": oc_list[0]["source_id"],
-                    "allocated_length_m": min(1.0, float(oc_list[0].get("length_m") or 1)),
+                    "allocated_length_m": take_m,
                     "note": "offcut",
                 }
             ]
-            w11["required_length_m"] = min(1.0, float(oc_list[0].get("length_m") or 1))
+            w11["required_length_m"] = take_m
         body11["change_reason"] = "smoke11 offcut"
         r11 = _put_allocation(wf_id, body11)
         ok11 = r11.status_code == 200
