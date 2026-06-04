@@ -233,10 +233,11 @@ def _audit_inv(
 ):
     sfx = (workstream_id or request_id or "INV")[-4:].upper()
     ts = datetime.date.today().strftime("%Y%m%d")
+    u1, u2 = _uid(), _uid()
     db.add(
         DbAuditLog(
-            log_id=f"AUD-{ts}-{sfx}-{_uid()[:4]}",
-            transaction_id=f"TXN-{ts}-{sfx}-{_uid()[:4]}",
+            log_id=f"AUD-{ts}-{sfx}-{u1}",
+            transaction_id=f"TXN-{ts}-{sfx}-{u2}",
             request_id=request_id,
             workstream_id=workstream_id,
             workstream_type=None,
