@@ -3,11 +3,42 @@
 > **Bạn chưa từng dùng Git/GitHub?** Đọc file riêng, giải thích rất chậm và ưu tiên bấm chuột:  
 > **[HUONG-DAN-GITHUB-NGUOI-MOI.md](./HUONG-DAN-GITHUB-NGUOI-MOI.md)**
 
+## Thư mục `web_demo/audit/` (báo cáo — không phải runtime)
+
+- **`audit/`** nằm **cùng cấp** với `main.py`, `static/`, `data/`: chỉ dùng cho **tài liệu nghiệm thu**, **báo cáo smoke/UAT**, file markdown tiền tố **`BAOCAO-`**. Chi tiết: [`audit/README.md`](./audit/README.md).
+- **Audit log nghiệp vụ thật** (thao tác user, thay đổi dữ liệu có `reason`, v.v.) nằm trong **SQLite** `warehouse_demo.db`, bảng **`audit_logs`** (ORM: `DbAuditLog`) — xem trên UI tab **Nhật ký kiểm toán**. Việc có/không có thư mục `audit/` **không ảnh hưởng** tới việc khởi động hay chạy FastAPI.
+- Các script Python `*_smoke_test.py` vẫn ở **root** `web_demo/` (không đặt trong `audit/`).
+
 Mục tiêu: có một **URL công khai** (HTTPS) mở được trang demo, API chạy ổn.
 
 **Công cụ dùng trong bài này:** GitHub (lưu code) + Render (chạy server Python). **Vercel** chỉ nhắc ở cuối (tùy chọn), vì app của bạn là FastAPI + SQLite — phù hợp Render hơn.
 
 **Quan trọng:** Trong repo phải có **cả hai** thư mục `web_demo/` **và** `knowledge/` (cùng cấp). Script `populate_db.py` đọc CSV từ `knowledge/`. Không được chỉ upload mỗi thư mục `web_demo` nếu thiếu `knowledge/`.
+
+---
+
+## Cập nhật danh mục Tỉnh/Thành phố — Phường/Xã
+
+**Bước 1:** Đặt file Excel vào:
+
+`web_demo/data/Danh-muc-Phuong-xa_moi.xlsx`
+
+**Bước 2:** Trên máy build/deploy, trong thư mục `web_demo`:
+
+```bash
+python location_master_import.py
+```
+
+**Bước 3:** Kiểm tra file sinh ra:
+
+`web_demo/static/location_master.json`
+
+**Bước 4:** Khởi động lại dịch vụ (Render: **Manual Deploy** hoặc push trigger tùy cấu hình).
+
+**Lưu ý:**
+
+- App vẫn khởi động nếu chưa có `location_master.json`; API `/api/location/provinces` và `/api/location/wards` trả `{ "items": [] }` và server ghi log cảnh báo.
+- Người dùng vẫn có thể gõ tay Tỉnh/Thành phố và Phường/Xã; danh mục chỉ phục vụ gợi ý (datalist), không ép validate.
 
 ---
 
@@ -64,6 +95,8 @@ venv/
 *.db-journal
 .idea/
 ```
+
+*(Trong thư mục `web_demo/` cũng có file `.gitignore` tương tự — tiện khi clone chỉ làm việc trong `web_demo` hoặc submodule.)*
 
 Sau đó:
 

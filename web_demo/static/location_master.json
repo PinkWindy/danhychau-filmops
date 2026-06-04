@@ -1,0 +1,20 @@
+{
+  "generated_from": "Danh-muc-Phuong-xa_moi.xlsx",
+  "province_column": "D",
+  "ward_column": "J",
+  "items_count": 5,
+  "provinces_count": 3,
+  "data": {
+    "Tỉnh Đồng Nai": [
+      "Xã An Phước"
+    ],
+    "Thành phố Hà Nội": [
+      "Phường Ba Đình",
+      "Phường Hoàn Kiếm"
+    ],
+    "Thành phố Hồ Chí Minh": [
+      "Phường An Phú",
+      "Phường Cầu Ông Lãnh"
+    ]
+  }
+}

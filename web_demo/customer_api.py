@@ -4,16 +4,17 @@ import datetime
 import json
 import uuid
 import re
-from typing import Any, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import or_
+from sqlalchemy import and_, exists, func, not_, or_
 from sqlalchemy.orm import Session
 
 from database import (
     DbDealer,
     DbCustomer,
     DbVehicleProfile,
+    DbVehicleFilmNorm,
     DbRequest,
     DbWorkstream,
     DbJobCard,
@@ -256,6 +257,48 @@ def _serialize_customer(c: DbCustomer) -> dict:
     }
 
 
+def _serialize_vehicle(v: DbVehicleProfile) -> dict:
+    return {
+        "vehicle_id": v.vehicle_id,
+        "vin_number": v.vin_number,
+        "vin_masked": v.vin_masked or "",
+        "plate_number": v.plate_number or "",
+        "vehicle_model_code": v.vehicle_model_code or "",
+        "model_name": v.model_name or "",
+        "model_year": getattr(v, "model_year", None),
+        "color": v.color or "",
+        "customer_id": v.customer_id or "",
+        "dealer_id": v.dealer_id or "",
+        "delivery_date": v.delivery_date or "",
+        "vehicle_status": getattr(v, "vehicle_status", None) or v.status or "ACTIVE",
+        "status": v.status or "ACTIVE",
+        "created_at": v.created_at,
+        "updated_at": getattr(v, "updated_at", None),
+        "note": v.note,
+    }
+
+
+def _parse_bool_query(v: Optional[str]) -> Optional[bool]:
+    if v is None or str(v).strip() == "":
+        return None
+    s = str(v).strip().lower()
+    if s in ("true", "1", "yes", "on"):
+        return True
+    if s in ("false", "0", "no", "off"):
+        return False
+    return None
+
+
+def _with_meta_flag(with_meta: Optional[str]) -> bool:
+    return str(with_meta or "").strip().lower() in ("1", "true", "yes")
+
+
+def _wrap_list(items: list, with_meta: Optional[str], applied: dict) -> Any:
+    if _with_meta_flag(with_meta):
+        return {"items": items, "total": len(items), "filters_applied": applied}
+    return items
+
+
 def _open_requests_count_dealer(db: Session, dealer_id: str) -> int:
     return (
         db.query(DbRequest)
@@ -306,23 +349,90 @@ def register_customer_routes(app, get_db):
         q: Optional[str] = None,
         status: Optional[str] = None,
         dealer_group: Optional[str] = None,
+        city: Optional[str] = None,
+        ward: Optional[str] = None,
+        has_amis_code: Optional[str] = None,
+        has_tax_code: Optional[str] = None,
+        with_meta: Optional[str] = None,
     ):
+        applied: Dict[str, Any] = {}
         query = db.query(DbDealer)
-        if q:
-            like = f"%{q}%"
+        if q and str(q).strip():
+            qs = str(q).strip()
+            like = f"%{qs}%"
+            applied["q"] = qs
             query = query.filter(
                 or_(
-                    DbDealer.dealer_id.like(like),
-                    DbDealer.dealer_name.like(like),
-                    DbDealer.legal_name.like(like),
+                    DbDealer.dealer_id.ilike(like),
+                    DbDealer.dealer_name.ilike(like),
+                    func.coalesce(DbDealer.legal_name, "").ilike(like),
+                    func.coalesce(DbDealer.tax_code, "").ilike(like),
+                    func.coalesce(DbDealer.contact_phone, "").ilike(like),
+                    func.coalesce(DbDealer.address, "").ilike(like),
+                    func.coalesce(DbDealer.full_address, "").ilike(like),
+                    func.coalesce(DbDealer.amis_customer_code, "").ilike(like),
+                    func.coalesce(DbDealer.dealer_group, "").ilike(like),
                 )
             )
-        if status:
-            query = query.filter(DbDealer.status == status)
-        if dealer_group:
-            query = query.filter(DbDealer.dealer_group == dealer_group)
+        if status and str(status).strip():
+            st = str(status).strip()
+            applied["status"] = st
+            query = query.filter(DbDealer.status == st)
+        if dealer_group and str(dealer_group).strip():
+            dg = str(dealer_group).strip()
+            applied["dealer_group"] = dg
+            query = query.filter(func.coalesce(DbDealer.dealer_group, "").ilike(f"%{dg}%"))
+        if city and str(city).strip():
+            cv = str(city).strip()
+            applied["city"] = cv
+            clike = f"%{cv}%"
+            query = query.filter(
+                or_(
+                    func.coalesce(DbDealer.city, "").ilike(clike),
+                    func.coalesce(DbDealer.full_address, "").ilike(clike),
+                )
+            )
+        if ward and str(ward).strip():
+            wv = str(ward).strip()
+            applied["ward"] = wv
+            wlike = f"%{wv}%"
+            query = query.filter(
+                or_(
+                    func.coalesce(DbDealer.ward, "").ilike(wlike),
+                    func.coalesce(DbDealer.full_address, "").ilike(wlike),
+                )
+            )
+        ha = _parse_bool_query(has_amis_code)
+        if ha is True:
+            applied["has_amis_code"] = True
+            query = query.filter(
+                and_(
+                    DbDealer.amis_customer_code.isnot(None),
+                    func.length(func.trim(DbDealer.amis_customer_code)) > 0,
+                )
+            )
+        elif ha is False:
+            applied["has_amis_code"] = False
+            query = query.filter(
+                func.length(func.trim(func.coalesce(DbDealer.amis_customer_code, ""))) == 0
+            )
+        ht = _parse_bool_query(has_tax_code)
+        if ht is True:
+            applied["has_tax_code"] = True
+            query = query.filter(
+                and_(
+                    DbDealer.tax_code.isnot(None),
+                    func.length(func.trim(DbDealer.tax_code)) > 0,
+                )
+            )
+        elif ht is False:
+            applied["has_tax_code"] = False
+            query = query.filter(
+                func.length(func.trim(func.coalesce(DbDealer.tax_code, ""))) == 0
+            )
         rows = query.order_by(DbDealer.dealer_id).all()
-        return [_serialize_dealer(d) for d in rows]
+        items = [_serialize_dealer(d) for d in rows]
+        return _wrap_list(items, with_meta, applied)
 
     @router.post("/dealers")
     def create_dealer(data: dict, db: Session = Depends(get_db)):
@@ -480,25 +590,102 @@ def register_customer_routes(app, get_db):
         source_dealer_id: Optional[str] = None,
         customer_type: Optional[str] = None,
         crm_status: Optional[str] = None,
+        status: Optional[str] = None,
+        source_channel: Optional[str] = None,
+        city: Optional[str] = None,
+        ward: Optional[str] = None,
+        has_phone: Optional[str] = None,
+        has_vehicle: Optional[str] = None,
+        with_meta: Optional[str] = None,
     ):
+        applied: Dict[str, Any] = {}
         query = db.query(DbCustomer)
-        if q:
-            like = f"%{q}%"
+        if q and str(q).strip():
+            qs = str(q).strip()
+            like = f"%{qs}%"
+            applied["q"] = qs
             query = query.filter(
                 or_(
-                    DbCustomer.customer_id.like(like),
-                    DbCustomer.customer_name.like(like),
-                    DbCustomer.customer_masked.like(like),
+                    DbCustomer.customer_id.ilike(like),
+                    DbCustomer.customer_name.ilike(like),
+                    func.coalesce(DbCustomer.customer_masked, "").ilike(like),
+                    func.coalesce(DbCustomer.phone, "").ilike(like),
+                    func.coalesce(DbCustomer.phone_masked, "").ilike(like),
+                    func.coalesce(DbCustomer.full_address, "").ilike(like),
+                    func.coalesce(DbCustomer.amis_customer_code, "").ilike(like),
+                    func.coalesce(DbCustomer.source_dealer_id, "").ilike(like),
                 )
             )
-        if source_dealer_id:
-            query = query.filter(DbCustomer.source_dealer_id == source_dealer_id)
-        if customer_type:
-            query = query.filter(DbCustomer.customer_type == customer_type)
-        if crm_status:
-            query = query.filter(DbCustomer.crm_status == crm_status)
+        if source_dealer_id and str(source_dealer_id).strip():
+            sd = str(source_dealer_id).strip()
+            applied["source_dealer_id"] = sd
+            query = query.filter(DbCustomer.source_dealer_id == sd)
+        if customer_type and str(customer_type).strip():
+            applied["customer_type"] = str(customer_type).strip()
+            query = query.filter(DbCustomer.customer_type == str(customer_type).strip())
+        if crm_status and str(crm_status).strip():
+            applied["crm_status"] = str(crm_status).strip()
+            query = query.filter(DbCustomer.crm_status == str(crm_status).strip())
+        if status and str(status).strip():
+            applied["status"] = str(status).strip()
+            query = query.filter(DbCustomer.status == str(status).strip())
+        if source_channel and str(source_channel).strip():
+            applied["source_channel"] = str(source_channel).strip()
+            query = query.filter(DbCustomer.source_channel == str(source_channel).strip())
+        if city and str(city).strip():
+            cv = str(city).strip()
+            applied["city"] = cv
+            clike = f"%{cv}%"
+            query = query.filter(
+                or_(
+                    func.coalesce(DbCustomer.city, "").ilike(clike),
+                    func.coalesce(DbCustomer.full_address, "").ilike(clike),
+                )
+            )
+        if ward and str(ward).strip():
+            wv = str(ward).strip()
+            applied["ward"] = wv
+            wlike = f"%{wv}%"
+            query = query.filter(
+                or_(
+                    func.coalesce(DbCustomer.ward, "").ilike(wlike),
+                    func.coalesce(DbCustomer.full_address, "").ilike(wlike),
+                )
+            )
+        hp = _parse_bool_query(has_phone)
+        if hp is True:
+            applied["has_phone"] = True
+            query = query.filter(
+                or_(
+                    and_(DbCustomer.phone.isnot(None), func.length(func.trim(DbCustomer.phone)) > 0),
+                    and_(
+                        DbCustomer.phone_masked.isnot(None),
+                        func.length(func.trim(DbCustomer.phone_masked)) > 0,
+                    ),
+                )
+            )
+        elif hp is False:
+            applied["has_phone"] = False
+            query = query.filter(
+                and_(
+                    func.length(func.trim(func.coalesce(DbCustomer.phone, ""))) == 0,
+                    func.length(func.trim(func.coalesce(DbCustomer.phone_masked, ""))) == 0,
+                )
+            )
+        hv = _parse_bool_query(has_vehicle)
+        if hv is True:
+            applied["has_vehicle"] = True
+            query = query.filter(
+                exists().where(DbVehicleProfile.customer_id == DbCustomer.customer_id)
+            )
+        elif hv is False:
+            applied["has_vehicle"] = False
+            query = query.filter(
+                not_(exists().where(DbVehicleProfile.customer_id == DbCustomer.customer_id))
+            )
         rows = query.order_by(DbCustomer.customer_id).all()
-        return [_serialize_customer(c) for c in rows]
+        items = [_serialize_customer(c) for c in rows]
+        return _wrap_list(items, with_meta, applied)
 
     @router.post("/end-customers")
     def create_end_customer(data: dict, db: Session = Depends(get_db)):
@@ -648,29 +835,110 @@ def register_customer_routes(app, get_db):
         dealer_id: Optional[str] = None,
         customer_id: Optional[str] = None,
         vehicle_model_code: Optional[str] = None,
+        model_year: Optional[int] = None,
         vehicle_status: Optional[str] = None,
+        has_customer: Optional[str] = None,
+        has_active_norm: Optional[str] = None,
+        with_meta: Optional[str] = None,
     ):
+        applied: Dict[str, Any] = {}
         query = db.query(DbVehicleProfile)
-        if q:
-            like = f"%{q}%"
+        if q and str(q).strip():
+            qs = str(q).strip()
+            like = f"%{qs}%"
+            applied["q"] = qs
             query = query.filter(
                 or_(
-                    DbVehicleProfile.vehicle_id.like(like),
-                    DbVehicleProfile.vehicle_model_code.like(like),
-                    DbVehicleProfile.model_name.like(like),
-                    DbVehicleProfile.vin_masked.like(like),
-                    DbVehicleProfile.vin_number.like(like),
+                    DbVehicleProfile.vehicle_id.ilike(like),
+                    func.coalesce(DbVehicleProfile.vehicle_model_code, "").ilike(like),
+                    func.coalesce(DbVehicleProfile.model_name, "").ilike(like),
+                    func.coalesce(DbVehicleProfile.vin_masked, "").ilike(like),
+                    func.coalesce(DbVehicleProfile.vin_number, "").ilike(like),
+                    func.coalesce(DbVehicleProfile.customer_id, "").ilike(like),
+                    func.coalesce(DbVehicleProfile.dealer_id, "").ilike(like),
                 )
             )
-        if dealer_id:
-            query = query.filter(DbVehicleProfile.dealer_id == dealer_id)
-        if customer_id:
-            query = query.filter(DbVehicleProfile.customer_id == customer_id)
-        if vehicle_model_code:
-            query = query.filter(DbVehicleProfile.vehicle_model_code == vehicle_model_code)
-        if vehicle_status:
-            query = query.filter(DbVehicleProfile.vehicle_status == vehicle_status)
-        return query.order_by(DbVehicleProfile.vehicle_id).all()
+        if dealer_id and str(dealer_id).strip():
+            applied["dealer_id"] = str(dealer_id).strip()
+            query = query.filter(DbVehicleProfile.dealer_id == str(dealer_id).strip())
+        if customer_id and str(customer_id).strip():
+            applied["customer_id"] = str(customer_id).strip()
+            query = query.filter(DbVehicleProfile.customer_id == str(customer_id).strip())
+        if vehicle_model_code and str(vehicle_model_code).strip():
+            vc = str(vehicle_model_code).strip()
+            applied["vehicle_model_code"] = vc
+            query = query.filter(func.coalesce(DbVehicleProfile.vehicle_model_code, "").ilike(f"%{vc}%"))
+        if model_year is not None:
+            applied["model_year"] = model_year
+            ystr = str(int(model_year))
+            query = query.filter(
+                or_(
+                    DbVehicleProfile.model_year == int(model_year),
+                    func.coalesce(DbVehicleProfile.delivery_date, "").contains(ystr),
+                )
+            )
+        if vehicle_status and str(vehicle_status).strip():
+            vst = str(vehicle_status).strip()
+            applied["vehicle_status"] = vst
+            query = query.filter(
+                func.coalesce(DbVehicleProfile.vehicle_status, DbVehicleProfile.status, "ACTIVE") == vst
+            )
+        hc = _parse_bool_query(has_customer)
+        if hc is True:
+            applied["has_customer"] = True
+            query = query.filter(
+                and_(
+                    DbVehicleProfile.customer_id.isnot(None),
+                    func.length(func.trim(DbVehicleProfile.customer_id)) > 0,
+                )
+            )
+        elif hc is False:
+            applied["has_customer"] = False
+            query = query.filter(
+                or_(
+                    DbVehicleProfile.customer_id.is_(None),
+                    func.length(func.trim(func.coalesce(DbVehicleProfile.customer_id, ""))) == 0,
+                )
+            )
+        han = _parse_bool_query(has_active_norm)
+        if han is True:
+            applied["has_active_norm"] = True
+            query = query.filter(
+                exists().where(
+                    and_(
+                        DbVehicleFilmNorm.vehicle_model_code == DbVehicleProfile.vehicle_model_code,
+                        DbVehicleFilmNorm.status == "ACTIVE",
+                    )
+                )
+            )
+        elif han is False:
+            applied["has_active_norm"] = False
+            query = query.filter(
+                not_(
+                    exists().where(
+                        and_(
+                            DbVehicleFilmNorm.vehicle_model_code == DbVehicleProfile.vehicle_model_code,
+                            DbVehicleFilmNorm.status == "ACTIVE",
+                        )
+                    )
+                )
+            )
+        rows = query.order_by(DbVehicleProfile.vehicle_id).all()
+        active_models = {
+            str(x[0]).strip()
+            for x in db.query(DbVehicleFilmNorm.vehicle_model_code)
+            .filter(DbVehicleFilmNorm.status == "ACTIVE")
+            .distinct()
+            .all()
+            if x[0]
+        }
+        items: List[dict] = []
+        for v in rows:
+            d = _serialize_vehicle(v)
+            vm = (v.vehicle_model_code or "").strip()
+            d["has_active_norm"] = vm in active_models if vm else False
+            items.append(d)
+        return _wrap_list(items, with_meta, applied)
 
     @router.post("/vehicles")
     def create_vehicle(data: dict, db: Session = Depends(get_db)):

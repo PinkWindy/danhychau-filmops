@@ -11,6 +11,59 @@ from sqlalchemy import case
 from database import DbVehicleFilmNorm
 
 
+def normalize_address_part(value: Optional[str]) -> str:
+    if value is None:
+        return ""
+    s = str(value).strip()
+    return re.sub(r"\s+", " ", s)
+
+
+def format_street(street: Optional[str]) -> str:
+    s = normalize_address_part(street)
+    if not s:
+        return ""
+    sl = s.lower()
+    street_prefixes = (
+        "đường",
+        "duong",
+        "quốc lộ",
+        "ql ",
+        "ql.",
+        "tỉnh lộ",
+        "tl ",
+        "tl.",
+        "đại lộ",
+        "hẻm",
+        "ngõ",
+        "ngách",
+        "kiệt",
+    )
+    if any(sl.startswith(p.lower()) for p in street_prefixes):
+        return s
+    return f"Đường {s}"
+
+
+def format_ward(ward: Optional[str]) -> str:
+    w = normalize_address_part(ward)
+    if not w:
+        return ""
+    wl = w.lower()
+    ward_prefixes = ("phường", "xã", "thị trấn", "đặc khu")
+    if any(wl.startswith(p) for p in ward_prefixes):
+        return w
+    return f"Phường {w}"
+
+
+def format_province(province: Optional[str]) -> str:
+    p = normalize_address_part(province)
+    if not p:
+        return ""
+    pl = p.lower()
+    if any(pl.startswith(x) for x in ("thành phố", "tp.", "tp ", "tỉnh")):
+        return p
+    return p
+
+
 def build_full_address(
     address_no: Optional[str],
     street: Optional[str],
@@ -18,31 +71,23 @@ def build_full_address(
     city: Optional[str],
 ) -> str:
     """
-    Nối địa chỉ đầy đủ (demo): thêm tiền tố Đường/Phường khi cần, tránh trùng từ khóa.
-    Dùng chung backend + gợi ý đồng bộ với static/app.js (buildFullAddress).
+    Nối địa chỉ đầy đủ: chỉ thêm tiền tố khi chưa có — tránh 'Phường Phường', 'Đường Đường',
+    không thêm tiền tố trùng cho Tỉnh/Thành phố. Đồng bộ với static/app.js (buildFullAddress).
     """
-    chunks: List[str] = []
-    an = (address_no or "").strip()
-    if an:
-        chunks.append(an)
-    st = (street or "").strip()
-    if st:
-        sl = st.lower()
-        if "đường" in sl:
-            chunks.append(st)
-        else:
-            chunks.append(f"Đường {st}")
-    w = (ward or "").strip()
-    if w:
-        wl = w.lower()
-        if any(k in wl for k in ("phường", "xã", "quận", "thị trấn")):
-            chunks.append(w)
-        else:
-            chunks.append(f"Phường {w}")
-    c = (city or "").strip()
-    if c:
-        chunks.append(c)
-    return ", ".join(chunks)
+    parts: List[str] = []
+    no = normalize_address_part(address_no)
+    street_text = format_street(street)
+    ward_text = format_ward(ward)
+    city_text = format_province(city)
+    if no:
+        parts.append(no)
+    if street_text:
+        parts.append(street_text)
+    if ward_text:
+        parts.append(ward_text)
+    if city_text:
+        parts.append(city_text)
+    return ", ".join(parts)
 
 
 def parse_size_wxl(s: Optional[str]) -> Tuple[Optional[float], Optional[float]]:

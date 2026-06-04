@@ -20,6 +20,7 @@ from database import (
 from inventory_api import register_inventory_routes, assert_source_valid_for_wf6_commit
 from customer_api import register_customer_routes
 from vehicle_norm_api import register_vehicle_norm_routes
+from location_api import register_location_routes
 from vehicle_norm_logic import resolve_vehicle_norm
 
 _log = logging.getLogger("uvicorn.error")
@@ -84,6 +85,7 @@ def get_db():
 register_inventory_routes(app, get_db)
 register_customer_routes(app, get_db)
 register_vehicle_norm_routes(app, get_db)
+register_location_routes(app)
 
 def _now():
     return datetime.datetime.utcnow().isoformat() + "Z"

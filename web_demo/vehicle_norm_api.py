@@ -6,7 +6,7 @@ import uuid
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import or_
+from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
 
 from database import DbVehicleFilmNorm, DbAuditLog
@@ -19,6 +19,27 @@ from vehicle_norm_logic import (
 )
 
 router = APIRouter(prefix="/api", tags=["vehicle-norms"])
+
+
+def _parse_bool_query(v: Optional[str]) -> Optional[bool]:
+    if v is None or str(v).strip() == "":
+        return None
+    s = str(v).strip().lower()
+    if s in ("true", "1", "yes", "on"):
+        return True
+    if s in ("false", "0", "no", "off"):
+        return False
+    return None
+
+
+def _with_meta_flag(with_meta: Optional[str]) -> bool:
+    return str(with_meta or "").strip().lower() in ("1", "true", "yes")
+
+
+def _wrap_norm_list(items: list, with_meta: Optional[str], applied: dict) -> Any:
+    if _with_meta_flag(with_meta):
+        return {"items": items, "total": len(items), "filters_applied": applied}
+    return items
 
 
 def _uid(s: str = "") -> str:
@@ -71,26 +92,102 @@ def register_vehicle_norm_routes(app, get_db):
         film_type: Optional[str] = None,
         status: Optional[str] = None,
         q: Optional[str] = None,
+        model_year: Optional[int] = None,
+        has_windshield: Optional[str] = None,
+        has_sunroof: Optional[str] = None,
+        has_rear_side_triangle: Optional[str] = None,
+        with_meta: Optional[str] = None,
     ):
+        applied: dict = {}
         query = db.query(DbVehicleFilmNorm)
-        if vehicle_model_code:
-            query = query.filter(DbVehicleFilmNorm.vehicle_model_code == vehicle_model_code.strip())
-        if film_type:
-            query = query.filter(DbVehicleFilmNorm.film_type == film_type.strip())
-        if status:
-            query = query.filter(DbVehicleFilmNorm.status == status)
-        if q:
-            like = f"%{q.strip()}%"
+        if vehicle_model_code and str(vehicle_model_code).strip():
+            vc = str(vehicle_model_code).strip()
+            applied["vehicle_model_code"] = vc
+            query = query.filter(func.coalesce(DbVehicleFilmNorm.vehicle_model_code, "").ilike(f"%{vc}%"))
+        if film_type and str(film_type).strip():
+            ft = str(film_type).strip()
+            applied["film_type"] = ft
+            query = query.filter(DbVehicleFilmNorm.film_type == ft)
+        if status and str(status).strip():
+            st = str(status).strip()
+            applied["status"] = st
+            query = query.filter(DbVehicleFilmNorm.status == st)
+        if q and str(q).strip():
+            qs = str(q).strip()
+            like = f"%{qs}%"
+            applied["q"] = qs
             query = query.filter(
                 or_(
-                    DbVehicleFilmNorm.norm_id.like(like),
-                    DbVehicleFilmNorm.vehicle_model_code.like(like),
-                    DbVehicleFilmNorm.model_year_range.like(like),
-                    DbVehicleFilmNorm.film_type.like(like),
+                    DbVehicleFilmNorm.norm_id.ilike(like),
+                    func.coalesce(DbVehicleFilmNorm.vehicle_model_code, "").ilike(like),
+                    func.coalesce(DbVehicleFilmNorm.model_year_range, "").ilike(like),
+                    func.coalesce(DbVehicleFilmNorm.film_type, "").ilike(like),
+                )
+            )
+        if model_year is not None:
+            ys = str(int(model_year))
+            applied["model_year"] = int(model_year)
+            query = query.filter(DbVehicleFilmNorm.model_year_range.contains(ys))
+        hw = _parse_bool_query(has_windshield)
+        if hw is True:
+            applied["has_windshield"] = True
+            query = query.filter(
+                or_(
+                    DbVehicleFilmNorm.windshield_width_cm > 0,
+                    DbVehicleFilmNorm.windshield_length_cm > 0,
+                    func.length(func.trim(func.coalesce(DbVehicleFilmNorm.windshield_size, ""))) > 0,
+                )
+            )
+        elif hw is False:
+            applied["has_windshield"] = False
+            query = query.filter(
+                and_(
+                    func.coalesce(DbVehicleFilmNorm.windshield_width_cm, 0) == 0,
+                    func.coalesce(DbVehicleFilmNorm.windshield_length_cm, 0) == 0,
+                    func.length(func.trim(func.coalesce(DbVehicleFilmNorm.windshield_size, ""))) == 0,
+                )
+            )
+        hs = _parse_bool_query(has_sunroof)
+        if hs is True:
+            applied["has_sunroof"] = True
+            query = query.filter(
+                or_(
+                    DbVehicleFilmNorm.sunroof_width_cm > 0,
+                    DbVehicleFilmNorm.sunroof_length_cm > 0,
+                    func.length(func.trim(func.coalesce(DbVehicleFilmNorm.sunroof_size, ""))) > 0,
+                )
+            )
+        elif hs is False:
+            applied["has_sunroof"] = False
+            query = query.filter(
+                and_(
+                    func.coalesce(DbVehicleFilmNorm.sunroof_width_cm, 0) == 0,
+                    func.coalesce(DbVehicleFilmNorm.sunroof_length_cm, 0) == 0,
+                    func.length(func.trim(func.coalesce(DbVehicleFilmNorm.sunroof_size, ""))) == 0,
+                )
+            )
+        hrt = _parse_bool_query(has_rear_side_triangle)
+        if hrt is True:
+            applied["has_rear_side_triangle"] = True
+            query = query.filter(
+                or_(
+                    DbVehicleFilmNorm.rear_side_triangle_width_cm > 0,
+                    DbVehicleFilmNorm.rear_side_triangle_length_cm > 0,
+                    func.length(func.trim(func.coalesce(DbVehicleFilmNorm.rear_side_triangle_size, ""))) > 0,
+                )
+            )
+        elif hrt is False:
+            applied["has_rear_side_triangle"] = False
+            query = query.filter(
+                and_(
+                    func.coalesce(DbVehicleFilmNorm.rear_side_triangle_width_cm, 0) == 0,
+                    func.coalesce(DbVehicleFilmNorm.rear_side_triangle_length_cm, 0) == 0,
+                    func.length(func.trim(func.coalesce(DbVehicleFilmNorm.rear_side_triangle_size, ""))) == 0,
                 )
             )
         rows = query.order_by(DbVehicleFilmNorm.norm_id).all()
-        return [norm_row_to_dict(r) for r in rows]
+        items = [norm_row_to_dict(r) for r in rows]
+        return _wrap_norm_list(items, with_meta, applied)
 
     @router.get("/vehicle-norms/resolve")
     def resolve_norm(

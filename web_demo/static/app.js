@@ -25,39 +25,76 @@ function _normSizeDisplay(n, sizeKey, wKey, lKey) {
   return '—';
 }
 
-/** Gợi ý địa bàn demo (không validate cứng). */
-const LOCATION_MASTER = {
-  'Thành phố Hồ Chí Minh': [
-    'Cầu Ông Lãnh', 'An Phú', 'Bến Nghé', 'Bến Thành', 'Tân Định', 'Thảo Điền', 'Bình Trưng',
-    'Phú Mỹ', 'Tân Phong', 'Linh Trung', 'Hiệp Bình', 'Bình Thọ', 'Quận 1', 'Quận 3', 'Quận 7',
-  ],
-  'TP. HCM': [
-    'Cầu Ông Lãnh', 'An Phú', 'Quận 1', 'Quận 3',
-  ],
-  'Hà Nội': [
-    'Hoàn Kiếm', 'Cửa Nam', 'Ba Đình', 'Giảng Võ', 'Đống Đa', 'Cầu Giấy',
-  ],
+/** Master địa bàn: load từ GET /api/location (JSON sinh từ Excel). */
+window.DYC_LOCATION_MASTER = window.DYC_LOCATION_MASTER || {
+  provinces: [],
+  wardsByProvince: {},
+  loaded: false,
 };
 
-/** Đồng bộ logic với vehicle_norm_logic.build_full_address (Python). */
+function normalizeAddressPart(value) {
+  return String(value ?? '')
+    .trim()
+    .replace(/\s+/g, ' ');
+}
+
+function formatStreet(street) {
+  const s = normalizeAddressPart(street);
+  if (!s) return '';
+  const sl = s.toLowerCase();
+  const streetPrefixes = ['đường', 'duong', 'quốc lộ', 'ql ', 'ql.', 'tỉnh lộ', 'tl ', 'tl.', 'đại lộ', 'hẻm', 'ngõ', 'ngách', 'kiệt'];
+  if (streetPrefixes.some((p) => sl.startsWith(p.toLowerCase()))) return s;
+  return `Đường ${s}`;
+}
+
+function formatWard(ward) {
+  const w = normalizeAddressPart(ward);
+  if (!w) return '';
+  const wl = w.toLowerCase();
+  const wardPrefixes = ['phường', 'xã', 'thị trấn', 'đặc khu'];
+  if (wardPrefixes.some((p) => wl.startsWith(p))) return w;
+  return `Phường ${w}`;
+}
+
+function formatProvince(province) {
+  const p = normalizeAddressPart(province);
+  if (!p) return '';
+  const pl = p.toLowerCase();
+  if (['thành phố', 'tp.', 'tp ', 'tỉnh'].some((x) => pl.startsWith(x))) return p;
+  return p;
+}
+
+/** Đồng bộ với vehicle_norm_logic.build_full_address (Python). */
 function buildFullAddress(parts) {
-  const addressNo = String(parts.addressNo ?? '').trim();
-  const street = String(parts.street ?? '').trim();
-  const ward = String(parts.ward ?? '').trim();
-  const city = String(parts.city ?? '').trim();
-  const chunks = [];
-  if (addressNo) chunks.push(addressNo);
-  if (street) {
-    if (street.toLowerCase().includes('đường')) chunks.push(street);
-    else chunks.push(`Đường ${street}`);
+  const no = normalizeAddressPart(parts.addressNo);
+  const streetText = formatStreet(parts.street);
+  const wardText = formatWard(parts.ward);
+  const cityText = formatProvince(parts.city);
+  const out = [];
+  if (no) out.push(no);
+  if (streetText) out.push(streetText);
+  if (wardText) out.push(wardText);
+  if (cityText) out.push(cityText);
+  return out.join(', ');
+}
+
+async function ensureLocationProvincesLoaded() {
+  const st = window.DYC_LOCATION_MASTER;
+  if (st.loaded) return;
+  try {
+    const r = await fetch('/api/location/provinces');
+    const j = await r.json();
+    st.provinces = Array.isArray(j.items) ? j.items : [];
+    st.loaded = true;
+  } catch (e) {
+    console.warn('[location] provinces', e);
+    st.provinces = [];
+    st.loaded = true;
   }
-  if (ward) {
-    const wl = ward.toLowerCase();
-    if (['phường', 'xã', 'quận', 'thị trấn'].some((k) => wl.includes(k))) chunks.push(ward);
-    else chunks.push(`Phường ${ward}`);
-  }
-  if (city) chunks.push(city);
-  return chunks.join(', ');
+  const { dlCity } = _ensureLocationDatalists();
+  dlCity.innerHTML = (st.provinces || [])
+    .map((c) => `<option value="${String(c).replace(/&/g, '&amp;').replace(/"/g, '&quot;')}"></option>`)
+    .join('');
 }
 
 function _ensureLocationDatalists() {
@@ -67,25 +104,47 @@ function _ensureLocationDatalists() {
     dlCity.id = 'dyc-city-datalist';
     document.body.appendChild(dlCity);
   }
-  dlCity.innerHTML = Object.keys(LOCATION_MASTER)
-    .map((c) => `<option value="${String(c).replace(/&/g, '&amp;').replace(/"/g, '&quot;')}"></option>`)
-    .join('');
   let dlWard = document.getElementById('dyc-ward-datalist');
   if (!dlWard) {
     dlWard = document.createElement('datalist');
     dlWard.id = 'dyc-ward-datalist';
     document.body.appendChild(dlWard);
   }
+  if (window.DYC_LOCATION_MASTER.loaded && window.DYC_LOCATION_MASTER.provinces.length) {
+    dlCity.innerHTML = window.DYC_LOCATION_MASTER.provinces
+      .map((c) => `<option value="${String(c).replace(/&/g, '&amp;').replace(/"/g, '&quot;')}"></option>`)
+      .join('');
+  }
   return { dlCity, dlWard };
 }
 
 function _fillWardDatalistForCity(cityVal) {
+  const v = String(cityVal || '').trim();
   const { dlWard } = _ensureLocationDatalists();
-  const key = Object.keys(LOCATION_MASTER).find((k) => k.toLowerCase() === String(cityVal || '').trim().toLowerCase());
-  const wards = key ? LOCATION_MASTER[key] : [];
-  dlWard.innerHTML = wards
-    .map((w) => `<option value="${String(w).replace(/&/g, '&amp;').replace(/"/g, '&quot;')}"></option>`)
-    .join('');
+  if (!v) {
+    dlWard.innerHTML = '';
+    return Promise.resolve();
+  }
+  const cache = window.DYC_LOCATION_MASTER.wardsByProvince;
+  if (cache[v]) {
+    dlWard.innerHTML = cache[v]
+      .map((w) => `<option value="${String(w).replace(/&/g, '&amp;').replace(/"/g, '&quot;')}"></option>`)
+      .join('');
+    return Promise.resolve();
+  }
+  return fetch(`/api/location/wards?province=${encodeURIComponent(v)}`)
+    .then((r) => r.json())
+    .then((j) => {
+      const items = (j && j.items) || [];
+      const prov = (j && j.province) || v;
+      if (items.length) cache[prov] = items;
+      dlWard.innerHTML = items
+        .map((w) => `<option value="${String(w).replace(/&/g, '&amp;').replace(/"/g, '&quot;')}"></option>`)
+        .join('');
+    })
+    .catch(() => {
+      dlWard.innerHTML = '';
+    });
 }
 
 /**
@@ -133,6 +192,247 @@ function setupEditorAddress(prefix) {
   if (ward) ward.setAttribute('list', 'dyc-ward-datalist');
   _fillWardDatalistForCity(city ? city.value : '');
 }
+
+const DYC_MODEL_CODES = ['RX300', 'RX350', 'ES250', 'LM500H', 'CAMRY', 'FORTUNER'];
+const DYC_MODEL_YEAR_OPTS = (() => {
+  const a = [];
+  for (let y = 2013; y <= 2026; y += 1) a.push(y);
+  return a;
+})();
+
+function normalizeListResponse(data) {
+  if (Array.isArray(data)) return { items: data, total: data.length };
+  if (data && typeof data === 'object' && Array.isArray(data.items)) {
+    return { items: data.items, total: data.total != null ? data.total : data.items.length };
+  }
+  return { items: [], total: 0 };
+}
+
+function getFilterValue(id) {
+  const el = document.getElementById(id);
+  return el ? String(el.value ?? '').trim() : '';
+}
+
+function buildQuery(params) {
+  const u = new URLSearchParams();
+  Object.entries(params || {}).forEach(([k, v]) => {
+    if (v === undefined || v === null || String(v).trim() === '') return;
+    u.append(k, String(v));
+  });
+  const s = u.toString();
+  return s ? `?${s}` : '';
+}
+
+function debounce(fn, delay) {
+  let t;
+  return (...args) => {
+    clearTimeout(t);
+    t = setTimeout(() => fn(...args), delay);
+  };
+}
+
+function ensureCustFilters() {
+  window._custF ||= {
+    dealers: { q: '', status: '', dealer_group: '', city: '', ward: '', has_amis_code: '', has_tax_code: '' },
+    customers: {
+      q: '', status: '', crm_status: '', source_channel: '', source_dealer_id: '', city: '', ward: '', has_phone: '', has_vehicle: '',
+    },
+    vehicles: {
+      q: '', vehicle_model_code: '', model_year: '', dealer_id: '', customer_id: '', vehicle_status: '', has_customer: '', has_active_norm: '',
+    },
+    norms: {
+      q: '', film_type: '', vehicle_model_code: '', model_year: '', status: '', has_windshield: '', has_sunroof: '', has_rear_side_triangle: '',
+    },
+  };
+}
+
+function clearCustomerFilters(scope) {
+  ensureCustFilters();
+  const blank = {
+    dealers: { q: '', status: '', dealer_group: '', city: '', ward: '', has_amis_code: '', has_tax_code: '' },
+    customers: {
+      q: '', status: '', crm_status: '', source_channel: '', source_dealer_id: '', city: '', ward: '', has_phone: '', has_vehicle: '',
+    },
+    vehicles: {
+      q: '', vehicle_model_code: '', model_year: '', dealer_id: '', customer_id: '', vehicle_status: '', has_customer: '', has_active_norm: '',
+    },
+    norms: {
+      q: '', film_type: '', vehicle_model_code: '', model_year: '', status: '', has_windshield: '', has_sunroof: '', has_rear_side_triangle: '',
+    },
+  };
+  window._custF[scope] = { ...blank[scope] };
+}
+
+function applyCustomerFilters(scope) {
+  ensureCustFilters();
+  const g = (id) => getFilterValue(id);
+  if (scope === 'dealers') {
+    window._custF.dealers = {
+      q: g('flt-d-q'),
+      status: g('flt-d-status'),
+      dealer_group: g('flt-d-group'),
+      city: g('flt-d-city'),
+      ward: g('flt-d-ward'),
+      has_amis_code: g('flt-d-has-amis'),
+      has_tax_code: g('flt-d-has-tax'),
+    };
+  } else if (scope === 'customers') {
+    window._custF.customers = {
+      q: g('flt-c-q'),
+      status: g('flt-c-status'),
+      crm_status: g('flt-c-crm'),
+      source_channel: g('flt-c-ch'),
+      source_dealer_id: g('flt-c-src-dealer'),
+      city: g('flt-c-city'),
+      ward: g('flt-c-ward'),
+      has_phone: g('flt-c-has-phone'),
+      has_vehicle: g('flt-c-has-veh'),
+    };
+  } else if (scope === 'vehicles') {
+    window._custF.vehicles = {
+      q: g('flt-v-q'),
+      vehicle_model_code: g('flt-v-model'),
+      model_year: g('flt-v-year'),
+      dealer_id: g('flt-v-dealer'),
+      customer_id: g('flt-v-cust'),
+      vehicle_status: g('flt-v-vst'),
+      has_customer: g('flt-v-has-cust'),
+      has_active_norm: g('flt-v-has-norm'),
+    };
+  } else if (scope === 'norms') {
+    window._custF.norms = {
+      q: g('flt-n-q'),
+      film_type: g('flt-n-film'),
+      vehicle_model_code: g('flt-n-model'),
+      model_year: g('flt-n-year'),
+      status: g('flt-n-status'),
+      has_windshield: g('flt-n-ws'),
+      has_sunroof: g('flt-n-sun'),
+      has_rear_side_triangle: g('flt-n-sst'),
+    };
+  }
+}
+
+function renderFilterChips(containerId, chips, onRemove) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  el.innerHTML = (chips || [])
+    .map(
+      (c) =>
+        `<span class="filter-chip" data-chip-key="${_esc(c.key)}"><span class="filter-chip-text">${_esc(c.label)}</span><button type="button" class="filter-chip-x" data-chip-key="${_esc(c.key)}" aria-label="Bỏ lọc">×</button></span>`,
+    )
+    .join('');
+  el.querySelectorAll('.filter-chip-x').forEach((btn) => {
+    btn.addEventListener('click', () => onRemove(btn.getAttribute('data-chip-key')));
+  });
+}
+
+function _ensureModelDatalist() {
+  let dl = document.getElementById('dyc-model-datalist');
+  if (!dl) {
+    dl = document.createElement('datalist');
+    dl.id = 'dyc-model-datalist';
+    document.body.appendChild(dl);
+  }
+  dl.innerHTML = DYC_MODEL_CODES.map((m) => `<option value="${_esc(m)}"></option>`).join('');
+}
+
+function _yearOptionsHtml(selected) {
+  return `<option value="">Tất cả</option>${DYC_MODEL_YEAR_OPTS.map((y) => `<option value="${y}"${String(selected) === String(y) ? ' selected' : ''}>${y}</option>`).join('')}`;
+}
+
+function _dealerFilterChips(fd, onRemove) {
+  const chips = [];
+  const L = {
+    q: 'Tìm kiếm',
+    status: 'TT',
+    dealer_group: 'Nhóm',
+    city: 'TP',
+    ward: 'Phường/Xã',
+    has_amis_code: 'AMIS',
+    has_tax_code: 'MST',
+  };
+  Object.entries(fd).forEach(([k, v]) => {
+    if (v === '' || v == null) return;
+    chips.push({ key: k, label: `${L[k] || k}: ${v}` });
+  });
+  renderFilterChips('flt-d-chips', chips, onRemove);
+}
+
+function _customerFilterChips(fc, onRemove) {
+  const chips = [];
+  const L = {
+    q: 'Tìm kiếm',
+    status: 'TT KH',
+    crm_status: 'CRM',
+    source_channel: 'Nguồn',
+    source_dealer_id: 'Đại lý nguồn',
+    city: 'TP',
+    ward: 'Phường/Xã',
+    has_phone: 'SĐT',
+    has_vehicle: 'Xe',
+  };
+  Object.entries(fc).forEach(([k, v]) => {
+    if (v === '' || v == null) return;
+    chips.push({ key: k, label: `${L[k] || k}: ${v}` });
+  });
+  renderFilterChips('flt-c-chips', chips, onRemove);
+}
+
+function _vehicleFilterChips(fv, onRemove) {
+  const chips = [];
+  const L = {
+    q: 'Tìm kiếm',
+    vehicle_model_code: 'Dòng xe',
+    model_year: 'Năm',
+    dealer_id: 'Đại lý',
+    customer_id: 'KH',
+    vehicle_status: 'TT xe',
+    has_customer: 'KH liên kết',
+    has_active_norm: 'Định mức',
+  };
+  Object.entries(fv).forEach(([k, v]) => {
+    if (v === '' || v == null) return;
+    chips.push({ key: k, label: `${L[k] || k}: ${v}` });
+  });
+  renderFilterChips('flt-v-chips', chips, onRemove);
+}
+
+function _normFilterChips(fn, onRemove) {
+  const chips = [];
+  const L = {
+    q: 'Tìm kiếm',
+    film_type: 'Loại phim',
+    vehicle_model_code: 'Dòng xe',
+    model_year: 'Năm',
+    status: 'TT',
+    has_windshield: 'Kính lái',
+    has_sunroof: 'Kính trời',
+    has_rear_side_triangle: 'Sườn sau+TG',
+  };
+  Object.entries(fn).forEach(([k, v]) => {
+    if (v === '' || v == null) return;
+    chips.push({ key: k, label: `${L[k] || k}: ${v}` });
+  });
+  renderFilterChips('flt-n-chips', chips, onRemove);
+}
+
+const __debDealerQ = debounce(() => {
+  applyCustomerFilters('dealers');
+  taiKhachHang();
+}, 300);
+const __debCustomerQ = debounce(() => {
+  applyCustomerFilters('customers');
+  taiKhachHang();
+}, 300);
+const __debVehicleQ = debounce(() => {
+  applyCustomerFilters('vehicles');
+  taiKhachHang();
+}, 300);
+const __debNormQ = debounce(() => {
+  applyCustomerFilters('norms');
+  taiKhachHang();
+}, 300);
 
 window._quickFormDirty = false;
 const _QUICK_DIRTY_MODES = ['edit-norm', 'create-norm', 'edit-customer', 'edit-dealer'];
@@ -430,11 +730,14 @@ let _mcQuickMode = null;
 
 async function taiTaoDonTay() {
   try {
-    const [dealers, custs, vehs] = await Promise.all([
+    const [dRes, cRes, vRes] = await Promise.all([
       fetch('/api/dealers').then(r => r.json()),
       fetch('/api/end-customers').then(r => r.json()),
       fetch('/api/vehicles').then(r => r.json()),
     ]);
+    const dealers = normalizeListResponse(dRes).items;
+    const custs = normalizeListResponse(cRes).items;
+    const vehs = normalizeListResponse(vRes).items;
     const sd = document.getElementById('mc-dealer-select');
     const sc = document.getElementById('mc-cust-select');
     const sv = document.getElementById('mc-veh-select');
@@ -457,14 +760,71 @@ function _mcIsoDelivery() {
 
 async function taiKhachHang() {
   const sub = document.querySelector('.cust-sub.active')?.dataset.csub || 'dealers';
+  ensureCustFilters();
+  await ensureLocationProvincesLoaded();
+  _ensureLocationDatalists();
+  _ensureModelDatalist();
+  let dlGrp = document.getElementById('dyc-dealer-group-datalist');
+  if (!dlGrp) {
+    dlGrp = document.createElement('datalist');
+    dlGrp.id = 'dyc-dealer-group-datalist';
+    dlGrp.innerHTML = ['Lexus', 'Toyota', 'BMW', 'Mercedes', 'Direct Retail']
+      .map((g) => `<option value="${_esc(g)}"></option>`)
+      .join('');
+    document.body.appendChild(dlGrp);
+  }
   try {
-    const sum = await fetch('/api/customers/summary').then(r => r.json());
+    const sum = await fetch('/api/customers/summary').then((r) => r.json());
     if (sub === 'dealers') {
-      const rows = await fetch('/api/dealers').then(r => r.json());
+      const fd = window._custF.dealers;
+      const qd = { ...fd, with_meta: '1' };
+      const dJson = await fetch(`/api/dealers${buildQuery(qd)}`).then((r) => r.json());
+      const { items: rows, total: dTotal } = normalizeListResponse(dJson);
+      const st = fd.status;
       document.getElementById('cust-pane-dealers').innerHTML = `
         <div class="kpi-grid kpi-grid-compact" style="margin-bottom:12px">
           <div class="kpi-card" data-color="blue"><div class="kpi-val">${sum.total_dealers}</div><div class="kpi-label">Tổng đại lý</div></div>
           <div class="kpi-card" data-color="green"><div class="kpi-val">${sum.active_dealers}</div><div class="kpi-label">Active</div></div>
+        </div>
+        <div class="cust-filter-bar">
+          <div class="cust-filter-title">Bộ lọc đại lý</div>
+          <div class="cust-filter-grid">
+            <div class="dyc-field dyc-field-span2"><label>Tìm kiếm</label>
+              <input id="flt-d-q" placeholder="Tìm theo tên đại lý, mã AMIS, MST, SĐT, địa chỉ..." value="${_esc(fd.q)}" autocomplete="off" /></div>
+            <div class="dyc-field"><label>Trạng thái</label>
+              <select id="flt-d-status">
+                <option value=""${st === '' ? ' selected' : ''}>Tất cả</option>
+                <option value="ACTIVE"${st === 'ACTIVE' ? ' selected' : ''}>ACTIVE</option>
+                <option value="INACTIVE"${st === 'INACTIVE' ? ' selected' : ''}>INACTIVE</option>
+                <option value="PENDING_REVIEW"${st === 'PENDING_REVIEW' ? ' selected' : ''}>PENDING_REVIEW</option>
+              </select></div>
+            <div class="dyc-field"><label>Nhóm đại lý</label>
+              <input id="flt-d-group" list="dyc-dealer-group-datalist" placeholder="Chọn hoặc gõ..." value="${_esc(fd.dealer_group)}" autocomplete="off" /></div>
+            <div class="dyc-field"><label>Thành phố</label>
+              <input id="flt-d-city" list="dyc-city-datalist" value="${_esc(fd.city)}" autocomplete="off" /></div>
+            <div class="dyc-field"><label>Phường / Xã</label>
+              <input id="flt-d-ward" list="dyc-ward-datalist" value="${_esc(fd.ward)}" autocomplete="off" /></div>
+            <div class="dyc-field"><label>Có mã AMIS</label>
+              <select id="flt-d-has-amis">
+                <option value=""${fd.has_amis_code === '' ? ' selected' : ''}>Tất cả</option>
+                <option value="true"${fd.has_amis_code === 'true' ? ' selected' : ''}>Có mã AMIS</option>
+                <option value="false"${fd.has_amis_code === 'false' ? ' selected' : ''}>Chưa có mã AMIS</option>
+              </select></div>
+            <div class="dyc-field"><label>Có MST</label>
+              <select id="flt-d-has-tax">
+                <option value=""${fd.has_tax_code === '' ? ' selected' : ''}>Tất cả</option>
+                <option value="true"${fd.has_tax_code === 'true' ? ' selected' : ''}>Có MST</option>
+                <option value="false"${fd.has_tax_code === 'false' ? ' selected' : ''}>Chưa có MST</option>
+              </select></div>
+          </div>
+          <div class="cust-filter-actions">
+            <button type="button" class="btn btn-primary btn-sm" data-flt-act="dealers-apply">Áp dụng lọc</button>
+            <button type="button" class="btn btn-outline btn-sm" data-flt-act="dealers-clear">Xóa lọc</button>
+            <button type="button" class="btn btn-outline btn-sm" data-flt-act="dealers-refresh">Làm mới</button>
+            <button type="button" class="btn btn-outline btn-sm" data-flt-act="dealers-create">Tạo đại lý</button>
+          </div>
+          <div class="cust-filter-meta"><span id="flt-d-total-label">Tổng số kết quả sau lọc: <strong id="flt-d-total">${dTotal}</strong></span></div>
+          <div class="filter-chips-row" id="flt-d-chips"></div>
         </div>
         <div class="table-wrap" style="overflow-x:auto"><table class="data-table" style="font-size:11px"><thead><tr>
           <th>Loại KH</th><th>Tên khách hàng</th><th>MST</th><th>SĐT</th><th>Địa chỉ</th><th>Đường</th><th>Phường</th><th>TP</th><th>Full</th><th>AMIS</th><th>TT</th><th></th>
@@ -484,8 +844,22 @@ async function taiKhachHang() {
               : `<button type="button" class="btn btn-outline btn-sm" onclick="moToggleDealer('${d.dealer_id}','activate')">Active</button>`}
           </td></tr>`).join('')}
         </tbody></table></div>`;
+      _fillWardDatalistForCity(fd.city);
+      _dealerFilterChips(fd, (key) => {
+        window._custF.dealers[key] = '';
+        taiKhachHang();
+      });
     } else if (sub === 'customers') {
-      const rows = await fetch('/api/end-customers').then(r => r.json());
+      const fc = window._custF.customers;
+      const [custJson, dealerPick] = await Promise.all([
+        fetch(`/api/end-customers${buildQuery({ ...fc, with_meta: '1' })}`).then((r) => r.json()),
+        fetch('/api/dealers').then((r) => r.json()),
+      ]);
+      const { items: rows, total: cTotal } = normalizeListResponse(custJson);
+      const dealerOpts = normalizeListResponse(dealerPick).items;
+      const st = fc.status;
+      const crm = fc.crm_status;
+      const ch = fc.source_channel;
       document.getElementById('cust-pane-customers').innerHTML = `
         <div class="kpi-grid kpi-grid-compact" style="margin-bottom:12px">
           <div class="kpi-card" data-color="blue"><div class="kpi-val">${sum.total_end_customers}</div><div class="kpi-label">Tổng KH</div></div>
@@ -493,6 +867,62 @@ async function taiKhachHang() {
           <div class="kpi-card" data-color="orange"><div class="kpi-val">${sum.pending_customers}</div><div class="kpi-label">Pending</div></div>
           <div class="kpi-card" data-color="red"><div class="kpi-val">${sum.duplicate_review_count}</div><div class="kpi-label">Duplicate review</div></div>
         </div>
+        <div class="cust-filter-bar">
+          <div class="cust-filter-title">Bộ lọc khách hàng lẻ</div>
+          <div class="cust-filter-grid">
+            <div class="dyc-field dyc-field-span2"><label>Tìm kiếm</label>
+              <input id="flt-c-q" placeholder="Tìm theo tên KH, SĐT, địa chỉ, mã AMIS, đại lý nguồn..." value="${_esc(fc.q)}" autocomplete="off" /></div>
+            <div class="dyc-field"><label>Trạng thái KH</label>
+              <select id="flt-c-status">
+                <option value=""${st === '' ? ' selected' : ''}>Tất cả</option>
+                <option value="ACTIVE"${st === 'ACTIVE' ? ' selected' : ''}>ACTIVE</option>
+                <option value="INACTIVE"${st === 'INACTIVE' ? ' selected' : ''}>INACTIVE</option>
+              </select></div>
+            <div class="dyc-field"><label>Trạng thái CRM</label>
+              <select id="flt-c-crm">
+                <option value=""${crm === '' ? ' selected' : ''}>Tất cả</option>
+                <option value="NEW_PENDING_VERIFICATION"${crm === 'NEW_PENDING_VERIFICATION' ? ' selected' : ''}>NEW_PENDING_VERIFICATION</option>
+                <option value="VERIFIED"${crm === 'VERIFIED' ? ' selected' : ''}>VERIFIED</option>
+                <option value="DUPLICATE_REVIEW"${crm === 'DUPLICATE_REVIEW' ? ' selected' : ''}>DUPLICATE_REVIEW</option>
+                <option value="ARCHIVED"${crm === 'ARCHIVED' ? ' selected' : ''}>ARCHIVED</option>
+              </select></div>
+            <div class="dyc-field"><label>Nguồn KH</label>
+              <select id="flt-c-ch">
+                <option value=""${ch === '' ? ' selected' : ''}>Tất cả</option>
+                <option value="DEALER"${ch === 'DEALER' ? ' selected' : ''}>DEALER</option>
+                <option value="DIRECT"${ch === 'DIRECT' ? ' selected' : ''}>DIRECT</option>
+                <option value="MANUAL"${ch === 'MANUAL' ? ' selected' : ''}>MANUAL</option>
+                <option value="OCR"${ch === 'OCR' ? ' selected' : ''}>OCR</option>
+              </select></div>
+            <div class="dyc-field"><label>Đại lý nguồn</label>
+              <select id="flt-c-src-dealer"><option value="">Tất cả</option>${dealerOpts.map((d) => `<option value="${_esc(d.dealer_id)}"${fc.source_dealer_id === d.dealer_id ? ' selected' : ''}>${_esc(d.dealer_id)} — ${_esc(d.dealer_name)}</option>`).join('')}</select></div>
+            <div class="dyc-field"><label>Thành phố</label>
+              <input id="flt-c-city" list="dyc-city-datalist" value="${_esc(fc.city)}" autocomplete="off" /></div>
+            <div class="dyc-field"><label>Phường / Xã</label>
+              <input id="flt-c-ward" list="dyc-ward-datalist" value="${_esc(fc.ward)}" autocomplete="off" /></div>
+            <div class="dyc-field"><label>Có SĐT</label>
+              <select id="flt-c-has-phone">
+                <option value=""${fc.has_phone === '' ? ' selected' : ''}>Tất cả</option>
+                <option value="true"${fc.has_phone === 'true' ? ' selected' : ''}>Có SĐT</option>
+                <option value="false"${fc.has_phone === 'false' ? ' selected' : ''}>Chưa có SĐT</option>
+              </select></div>
+            <div class="dyc-field"><label>Có xe liên kết</label>
+              <select id="flt-c-has-veh">
+                <option value=""${fc.has_vehicle === '' ? ' selected' : ''}>Tất cả</option>
+                <option value="true"${fc.has_vehicle === 'true' ? ' selected' : ''}>Có xe</option>
+                <option value="false"${fc.has_vehicle === 'false' ? ' selected' : ''}>Chưa có xe</option>
+              </select></div>
+          </div>
+          <div class="cust-filter-actions">
+            <button type="button" class="btn btn-primary btn-sm" data-flt-act="customers-apply">Áp dụng lọc</button>
+            <button type="button" class="btn btn-outline btn-sm" data-flt-act="customers-clear">Xóa lọc</button>
+            <button type="button" class="btn btn-outline btn-sm" data-flt-act="customers-refresh">Làm mới</button>
+            <button type="button" class="btn btn-outline btn-sm" data-flt-act="customers-create">Tạo khách hàng</button>
+          </div>
+          <div class="cust-filter-meta">Tổng số kết quả sau lọc: <strong id="flt-c-total">${cTotal}</strong></div>
+          <div class="filter-chips-row" id="flt-c-chips"></div>
+        </div>
+        ${rows.length === 0 ? '<div class="empty-state cust-empty"><p>Không tìm thấy khách hàng phù hợp với bộ lọc.</p></div>' : `
         <div class="table-wrap" style="overflow-x:auto"><table class="data-table" style="font-size:11px"><thead><tr>
           <th>Loại KH</th><th>Tên</th><th>MST</th><th>SĐT</th><th>Địa chỉ</th><th>Đường</th><th>Phường</th><th>TP</th><th>Full</th><th>AMIS</th><th>TT</th><th></th>
         </tr></thead><tbody>
@@ -510,11 +940,28 @@ async function taiKhachHang() {
               ? `<button type="button" class="btn btn-outline btn-sm" onclick="moToggleCustomer('${c.customer_id}','deactivate')">Inactive</button>`
               : `<button type="button" class="btn btn-outline btn-sm" onclick="moToggleCustomer('${c.customer_id}','activate')">Active</button>`}
           </td></tr>`).join('')}
-        </tbody></table></div>`;
+        </tbody></table></div>`}
+        `;
+      _fillWardDatalistForCity(fc.city);
+      _customerFilterChips(fc, (key) => {
+        window._custF.customers[key] = '';
+        taiKhachHang();
+      });
     } else {
-      const rows = await fetch('/api/vehicles').then(r => r.json());
-      const norms = await fetch('/api/vehicle-norms').then(r => r.json()).catch(() => []);
+      const fv = window._custF.vehicles;
+      const fn = window._custF.norms;
       const vehSub = window._custVehSub || 'list';
+      const [vehJson, normJson, dealerPick, custPick] = await Promise.all([
+        fetch(`/api/vehicles${buildQuery({ ...fv, with_meta: '1' })}`).then((r) => r.json()),
+        fetch(`/api/vehicle-norms${buildQuery({ ...fn, with_meta: '1' })}`).then((r) => r.json()).catch(() => []),
+        fetch('/api/dealers').then((r) => r.json()),
+        fetch('/api/end-customers').then((r) => r.json()),
+      ]);
+      const { items: rows, total: vTotal } = normalizeListResponse(vehJson);
+      const { items: norms, total: nTotal } = normalizeListResponse(normJson);
+      const dealerOpts = normalizeListResponse(dealerPick).items;
+      const custOpts = normalizeListResponse(custPick).items;
+      const vst = fv.vehicle_status;
       document.getElementById('cust-pane-vehicles').innerHTML = `
         <div class="kpi-grid kpi-grid-compact" style="margin-bottom:12px">
           <div class="kpi-card" data-color="blue"><div class="kpi-val">${sum.total_vehicles}</div><div class="kpi-label">Tổng xe</div></div>
@@ -525,18 +972,114 @@ async function taiKhachHang() {
           <button type="button" class="btn btn-sm veh-sub ${vehSub === 'norms' ? 'btn-primary' : 'btn-outline'}" data-vehsub="norms">Định mức phim</button>
         </div>
         <div id="cust-veh-list-wrap" style="display:${vehSub === 'list' ? 'block' : 'none'}">
+        <div class="cust-filter-bar">
+          <div class="cust-filter-title">Bộ lọc hồ sơ xe</div>
+          <div class="cust-filter-grid">
+            <div class="dyc-field dyc-field-span2"><label>Tìm kiếm</label>
+              <input id="flt-v-q" placeholder="Tìm theo mã xe, dòng xe, VIN, khách hàng, đại lý..." value="${_esc(fv.q)}" autocomplete="off" /></div>
+            <div class="dyc-field"><label>Dòng xe</label>
+              <input id="flt-v-model" list="dyc-model-datalist" value="${_esc(fv.vehicle_model_code)}" autocomplete="off" /></div>
+            <div class="dyc-field"><label>Năm model</label>
+              <select id="flt-v-year">${_yearOptionsHtml(fv.model_year)}</select></div>
+            <div class="dyc-field"><label>Đại lý</label>
+              <select id="flt-v-dealer"><option value="">Tất cả</option>${dealerOpts.map((d) => `<option value="${_esc(d.dealer_id)}"${fv.dealer_id === d.dealer_id ? ' selected' : ''}>${_esc(d.dealer_id)}</option>`).join('')}</select></div>
+            <div class="dyc-field"><label>Khách hàng</label>
+              <select id="flt-v-cust"><option value="">Tất cả</option>${custOpts.map((c) => `<option value="${_esc(c.customer_id)}"${fv.customer_id === c.customer_id ? ' selected' : ''}>${_esc(c.customer_id)}</option>`).join('')}</select></div>
+            <div class="dyc-field"><label>Trạng thái xe</label>
+              <select id="flt-v-vst">
+                <option value=""${vst === '' ? ' selected' : ''}>Tất cả</option>
+                <option value="ACTIVE"${vst === 'ACTIVE' ? ' selected' : ''}>ACTIVE</option>
+                <option value="SOLD"${vst === 'SOLD' ? ' selected' : ''}>SOLD</option>
+                <option value="UNKNOWN"${vst === 'UNKNOWN' ? ' selected' : ''}>UNKNOWN</option>
+                <option value="ARCHIVED"${vst === 'ARCHIVED' ? ' selected' : ''}>ARCHIVED</option>
+              </select></div>
+            <div class="dyc-field"><label>Có KH liên kết</label>
+              <select id="flt-v-has-cust">
+                <option value=""${fv.has_customer === '' ? ' selected' : ''}>Tất cả</option>
+                <option value="true"${fv.has_customer === 'true' ? ' selected' : ''}>Có khách hàng</option>
+                <option value="false"${fv.has_customer === 'false' ? ' selected' : ''}>Chưa có khách hàng</option>
+              </select></div>
+            <div class="dyc-field"><label>Định mức active</label>
+              <select id="flt-v-has-norm">
+                <option value=""${fv.has_active_norm === '' ? ' selected' : ''}>Tất cả</option>
+                <option value="true"${fv.has_active_norm === 'true' ? ' selected' : ''}>Có định mức</option>
+                <option value="false"${fv.has_active_norm === 'false' ? ' selected' : ''}>Chưa có định mức</option>
+              </select></div>
+          </div>
+          <div class="cust-filter-actions">
+            <button type="button" class="btn btn-primary btn-sm" data-flt-act="vehicles-apply">Áp dụng lọc</button>
+            <button type="button" class="btn btn-outline btn-sm" data-flt-act="vehicles-clear">Xóa lọc</button>
+            <button type="button" class="btn btn-outline btn-sm" data-flt-act="vehicles-refresh">Làm mới</button>
+            <button type="button" class="btn btn-outline btn-sm" data-flt-act="vehicles-create">Tạo hồ sơ xe</button>
+          </div>
+          <div class="cust-filter-meta">Tổng số kết quả sau lọc: <strong id="flt-v-total">${vTotal}</strong></div>
+          <div class="filter-chips-row" id="flt-v-chips"></div>
+        </div>
+        <p class="cust-norm-hint muted" style="font-size:11px;margin:0 0 8px 0">Xe chưa có định mức active: cảnh báo hiển thị theo dòng.</p>
           <div class="table-wrap"><table class="data-table"><thead><tr>
             <th>vehicle_id</th><th>model</th><th>vin_masked</th><th>dealer</th><th>customer</th><th>TT</th><th></th>
           </tr></thead><tbody>
-          ${rows.map(v => `<tr><td><strong>${_esc(v.vehicle_id)}</strong></td><td>${_esc(v.vehicle_model_code)}</td><td>${_esc(v.vin_masked || '—')}</td>
+          ${rows.map((v) => {
+            const noNorm = v.has_active_norm === false;
+            return `<tr><td><strong>${_esc(v.vehicle_id)}</strong></td><td>${_esc(v.vehicle_model_code)}${noNorm ? ' <span class="badge-warn" title="Dòng xe này chưa có định mức active.">!</span>' : ''}</td><td>${_esc(v.vin_masked || '—')}</td>
             <td>${_esc(v.dealer_id || '—')}</td><td>${_esc(v.customer_id || '—')}</td><td>${_esc(v.vehicle_status || v.status)}</td>
             <td><button type="button" class="btn btn-outline btn-sm" onclick="moDrawerVehicle('${v.vehicle_id}')">Xem</button>
-            <button type="button" class="btn btn-outline btn-sm" onclick="moToggleVehicle('${v.vehicle_id}','${(v.vehicle_status || v.status) === 'ACTIVE' ? 'deactivate' : 'activate'}')">${(v.vehicle_status || v.status) === 'ACTIVE' ? 'Inactive' : 'Active'}</button></td></tr>`).join('')}
+            <button type="button" class="btn btn-outline btn-sm" onclick="moToggleVehicle('${v.vehicle_id}','${(v.vehicle_status || v.status) === 'ACTIVE' ? 'deactivate' : 'activate'}')">${(v.vehicle_status || v.status) === 'ACTIVE' ? 'Inactive' : 'Active'}</button></td></tr>`;
+          }).join('')}
           </tbody></table></div>
         </div>
         <div id="cust-veh-norms-wrap" style="display:${vehSub === 'norms' ? 'block' : 'none'}">
           <p class="muted" style="font-size:12px;margin-bottom:8px">Định mức phim (dữ liệu chuẩn trong hệ thống — cùng cấu trúc file Excel: Loại phim, Dòng xe, Năm model, các kích thước kính).</p>
-          <button type="button" class="btn btn-primary btn-sm" id="btn-norm-add" style="margin-bottom:8px">+ Thêm định mức</button>
+          <div class="cust-filter-bar">
+            <div class="cust-filter-title">Bộ lọc định mức phim</div>
+            <div class="cust-filter-grid">
+              <div class="dyc-field dyc-field-span2"><label>Tìm kiếm</label>
+                <input id="flt-n-q" placeholder="Tìm theo mã định mức, dòng xe, năm model..." value="${_esc(fn.q)}" autocomplete="off" /></div>
+              <div class="dyc-field"><label>Loại phim</label>
+                <select id="flt-n-film">
+                  <option value=""${fn.film_type === '' ? ' selected' : ''}>Tất cả</option>
+                  <option value="Phim cách nhiệt"${fn.film_type === 'Phim cách nhiệt' ? ' selected' : ''}>Phim cách nhiệt</option>
+                  <option value="Phim PPF"${fn.film_type === 'Phim PPF' ? ' selected' : ''}>Phim PPF</option>
+                </select></div>
+              <div class="dyc-field"><label>Dòng xe</label>
+                <input id="flt-n-model" list="dyc-model-datalist" value="${_esc(fn.vehicle_model_code)}" autocomplete="off" /></div>
+              <div class="dyc-field"><label>Năm model</label>
+                <select id="flt-n-year">${_yearOptionsHtml(fn.model_year)}</select></div>
+              <div class="dyc-field"><label>Trạng thái</label>
+                <select id="flt-n-status">
+                  <option value=""${fn.status === '' ? ' selected' : ''}>Tất cả</option>
+                  <option value="ACTIVE"${fn.status === 'ACTIVE' ? ' selected' : ''}>ACTIVE</option>
+                  <option value="INACTIVE"${fn.status === 'INACTIVE' ? ' selected' : ''}>INACTIVE</option>
+                </select></div>
+              <div class="dyc-field"><label>Có kính lái</label>
+                <select id="flt-n-ws">
+                  <option value=""${fn.has_windshield === '' ? ' selected' : ''}>Tất cả</option>
+                  <option value="true"${fn.has_windshield === 'true' ? ' selected' : ''}>Có</option>
+                  <option value="false"${fn.has_windshield === 'false' ? ' selected' : ''}>Không</option>
+                </select></div>
+              <div class="dyc-field"><label>Có kính trời</label>
+                <select id="flt-n-sun">
+                  <option value=""${fn.has_sunroof === '' ? ' selected' : ''}>Tất cả</option>
+                  <option value="true"${fn.has_sunroof === 'true' ? ' selected' : ''}>Có</option>
+                  <option value="false"${fn.has_sunroof === 'false' ? ' selected' : ''}>Không</option>
+                </select></div>
+              <div class="dyc-field"><label>Sườn sau + tam giác</label>
+                <select id="flt-n-sst">
+                  <option value=""${fn.has_rear_side_triangle === '' ? ' selected' : ''}>Tất cả</option>
+                  <option value="true"${fn.has_rear_side_triangle === 'true' ? ' selected' : ''}>Có</option>
+                  <option value="false"${fn.has_rear_side_triangle === 'false' ? ' selected' : ''}>Không</option>
+                </select></div>
+            </div>
+            <div class="cust-filter-actions">
+              <button type="button" class="btn btn-primary btn-sm" data-flt-act="norms-apply">Áp dụng lọc</button>
+              <button type="button" class="btn btn-outline btn-sm" data-flt-act="norms-clear">Xóa lọc</button>
+              <button type="button" class="btn btn-outline btn-sm" data-flt-act="norms-refresh">Làm mới</button>
+              <button type="button" class="btn btn-primary btn-sm" id="btn-norm-add" data-flt-act="norms-add">Thêm định mức</button>
+            </div>
+            <div class="cust-filter-meta">Tổng số định mức sau lọc: <strong id="flt-n-total">${nTotal}</strong></div>
+            <div class="filter-chips-row" id="flt-n-chips"></div>
+          </div>
+          ${norms.length === 0 ? '<div class="empty-state cust-empty"><p>Chưa có định mức phù hợp. Có thể thêm định mức mới cho dòng xe này.</p></div>' : `
           <div class="table-wrap table-norms-excel-wrap"><table class="data-table table-norms-excel"><thead><tr>
             <th>Mã định mức</th>
             <th>Loại phim</th>
@@ -552,7 +1095,7 @@ async function taiKhachHang() {
             <th>TT</th>
             <th></th>
           </tr></thead><tbody>
-          ${(norms || []).map(n => `<tr>
+          ${norms.map(n => `<tr>
             <td title="${_esc(n.norm_id)}"><strong>${_esc(n.norm_id)}</strong></td>
             <td title="${_esc(n.film_type)}">${_esc(n.film_type)}</td>
             <td>${_esc(n.vehicle_model_code)}</td>
@@ -571,9 +1114,16 @@ async function taiKhachHang() {
                 ? `<button type="button" class="btn btn-outline btn-sm btn-norm-toggle" data-norm-id="${_esc(n.norm_id)}" data-norm-act="deactivate">Inactive</button>`
                 : `<button type="button" class="btn btn-outline btn-sm btn-norm-toggle" data-norm-id="${_esc(n.norm_id)}" data-norm-act="activate">Active</button>`}
             </td></tr>`).join('')}
-          </tbody></table></div>
+          </tbody></table></div>`}
         </div>`;
-      document.getElementById('btn-norm-add')?.addEventListener('click', () => moFormNorm(''));
+      _vehicleFilterChips(fv, (key) => {
+        window._custF.vehicles[key] = '';
+        taiKhachHang();
+      });
+      _normFilterChips(fn, (key) => {
+        window._custF.norms[key] = '';
+        taiKhachHang();
+      });
     }
     document.getElementById('cust-pane-dealers').style.display = sub === 'dealers' ? 'block' : 'none';
     document.getElementById('cust-pane-customers').style.display = sub === 'customers' ? 'block' : 'none';
@@ -606,6 +1156,82 @@ window.moDrawerVehicle = async function(id) {
 window._custVehSub = window._custVehSub || 'list';
 
 document.getElementById('tab-customers')?.addEventListener('click', (ev) => {
+  const fa = ev.target.closest('[data-flt-act]');
+  if (fa) {
+    const act = fa.getAttribute('data-flt-act');
+    if (act === 'dealers-apply') {
+      applyCustomerFilters('dealers');
+      taiKhachHang();
+      return;
+    }
+    if (act === 'dealers-clear') {
+      clearCustomerFilters('dealers');
+      taiKhachHang();
+      return;
+    }
+    if (act === 'dealers-refresh') {
+      taiKhachHang();
+      return;
+    }
+    if (act === 'dealers-create') {
+      document.getElementById('mc-btn-quick-dealer')?.click();
+      return;
+    }
+    if (act === 'customers-apply') {
+      applyCustomerFilters('customers');
+      taiKhachHang();
+      return;
+    }
+    if (act === 'customers-clear') {
+      clearCustomerFilters('customers');
+      taiKhachHang();
+      return;
+    }
+    if (act === 'customers-refresh') {
+      taiKhachHang();
+      return;
+    }
+    if (act === 'customers-create') {
+      document.getElementById('mc-btn-quick-cust')?.click();
+      return;
+    }
+    if (act === 'vehicles-apply') {
+      applyCustomerFilters('vehicles');
+      taiKhachHang();
+      return;
+    }
+    if (act === 'vehicles-clear') {
+      clearCustomerFilters('vehicles');
+      taiKhachHang();
+      return;
+    }
+    if (act === 'vehicles-refresh') {
+      taiKhachHang();
+      return;
+    }
+    if (act === 'vehicles-create') {
+      document.getElementById('mc-btn-quick-veh')?.click();
+      return;
+    }
+    if (act === 'norms-apply') {
+      applyCustomerFilters('norms');
+      taiKhachHang();
+      return;
+    }
+    if (act === 'norms-clear') {
+      clearCustomerFilters('norms');
+      taiKhachHang();
+      return;
+    }
+    if (act === 'norms-refresh') {
+      taiKhachHang();
+      return;
+    }
+    if (act === 'norms-add') {
+      window.moFormNorm('');
+      return;
+    }
+  }
   const edit = ev.target.closest('.btn-norm-edit');
   if (edit && ev.target.closest('#cust-pane-vehicles')) {
     ev.preventDefault();
@@ -622,6 +1248,35 @@ document.getElementById('tab-customers')?.addEventListener('click', (ev) => {
   if (!b) return;
   window._custVehSub = b.dataset.vehsub || 'list';
   taiKhachHang();
+});
+
+document.getElementById('tab-customers')?.addEventListener('input', (ev) => {
+  const id = ev.target.id;
+  if (id === 'flt-d-city' || id === 'flt-c-city') _fillWardDatalistForCity(ev.target.value);
+  if (id === 'flt-d-q') __debDealerQ();
+  else if (id === 'flt-c-q') __debCustomerQ();
+  else if (id === 'flt-v-q') __debVehicleQ();
+  else if (id === 'flt-n-q') __debNormQ();
+});
+
+document.getElementById('tab-customers')?.addEventListener('keydown', (ev) => {
+  if (ev.key !== 'Enter') return;
+  const id = ev.target.id;
+  if (!['flt-d-q', 'flt-c-q', 'flt-v-q', 'flt-n-q'].includes(id)) return;
+  ev.preventDefault();
+  if (id === 'flt-d-q') {
+    applyCustomerFilters('dealers');
+    taiKhachHang();
+  } else if (id === 'flt-c-q') {
+    applyCustomerFilters('customers');
+    taiKhachHang();
+  } else if (id === 'flt-v-q') {
+    applyCustomerFilters('vehicles');
+    taiKhachHang();
+  } else if (id === 'flt-n-q') {
+    applyCustomerFilters('norms');
+    taiKhachHang();
+  }
 });
 
 function _closeQuickModal() {
@@ -741,7 +1396,8 @@ window.moToggleNorm = async function(normId, act) {
 
 window.moFormDealer = async function(id) {
   _wireReasonModalOnce();
-  const rows = await fetch('/api/dealers').then(r => r.json());
+  await ensureLocationProvincesLoaded();
+  const rows = normalizeListResponse(await fetch('/api/dealers').then((r) => r.json())).items;
   const d = rows.find(x => x.dealer_id === id) || {};
   const reasonBox = id
     ? `<div class="dyc-field"><label>Lý do sửa<span class="req">*</span></label><input id="ed-d-reason" placeholder="Bắt buộc — nhật ký kiểm toán" autocomplete="off" /></div>`
@@ -767,7 +1423,7 @@ window.moFormDealer = async function(id) {
   <div class="dyc-field"><label>Địa chỉ đầy đủ</label>
     <div class="dyc-inline-row">
       <input id="ed-d-full" class="dyc-grow" value="${_esc(d.full_address || '')}" />
-      <button type="button" class="btn btn-outline btn-sm" id="ed-d-rebuild-full" style="white-space:nowrap">Tự tạo lại</button>
+      <button type="button" class="btn btn-outline btn-sm" id="ed-d-rebuild-full" style="white-space:nowrap">Tự tạo lại địa chỉ</button>
     </div>
   </div>
   <div class="dyc-field"><label>Mã AMIS</label><input id="ed-d-amis" value="${_esc(d.amis_customer_code || '')}" /></div>
@@ -780,7 +1436,8 @@ window.moFormDealer = async function(id) {
 };
 window.moFormCustomer = async function(id) {
   _wireReasonModalOnce();
-  const rows = await fetch('/api/end-customers').then(r => r.json());
+  await ensureLocationProvincesLoaded();
+  const rows = normalizeListResponse(await fetch('/api/end-customers').then((r) => r.json())).items;
   const c = rows.find(x => x.customer_id === id) || {};
   _openQuick(
     'Sửa khách hàng',
@@ -803,7 +1460,7 @@ window.moFormCustomer = async function(id) {
   <div class="dyc-field"><label>Địa chỉ đầy đủ</label>
     <div class="dyc-inline-row">
       <input id="ed-c-full" class="dyc-grow" value="${_esc(c.full_address || '')}" />
-      <button type="button" class="btn btn-outline btn-sm" id="ed-c-rebuild-full" style="white-space:nowrap">Tự tạo lại</button>
+      <button type="button" class="btn btn-outline btn-sm" id="ed-c-rebuild-full" style="white-space:nowrap">Tự tạo lại địa chỉ</button>
     </div>
   </div>
   <div class="dyc-field"><label>Mã AMIS</label><input id="ed-c-amis" value="${_esc(c.amis_customer_code || '')}" /></div>
@@ -857,7 +1514,8 @@ window.moFormNorm = function(normId) {
   if (!isNew) {
     fetch('/api/vehicle-norms')
       .then((r) => r.json())
-      .then((list) => {
+      .then((raw) => {
+        const list = normalizeListResponse(raw).items;
         const n = list.find((x) => x.norm_id === normId);
         if (!n) {
           toast('warning', 'Định mức', 'Không tìm thấy norm_id trong danh sách.');
@@ -1135,7 +1793,7 @@ document.getElementById('mc-dealer-select')?.addEventListener('change', (e) => {
 document.getElementById('mc-cust-select')?.addEventListener('change', async (e) => {
   const id = e.target.value;
   if (!id) return;
-  const c = await fetch('/api/end-customers').then(r => r.json()).then(arr => arr.find(x => x.customer_id === id));
+  const c = normalizeListResponse(await fetch('/api/end-customers').then((r) => r.json())).items.find((x) => x.customer_id === id);
   if (c) {
     document.getElementById('mc-cust-masked').value = c.customer_masked || c.customer_name || '';
     document.getElementById('mc-phone-masked').value = c.phone_masked || '';
@@ -1145,7 +1803,7 @@ document.getElementById('mc-cust-select')?.addEventListener('change', async (e) 
 document.getElementById('mc-veh-select')?.addEventListener('change', async (e) => {
   const id = e.target.value;
   if (!id) return;
-  const v = await fetch('/api/vehicles').then(r => r.json()).then(arr => arr.find(x => x.vehicle_id === id));
+  const v = normalizeListResponse(await fetch('/api/vehicles').then((r) => r.json())).items.find((x) => x.vehicle_id === id);
   if (v) {
     document.getElementById('mc-veh-model').value = v.vehicle_model_code || '';
     document.getElementById('mc-vin-masked').value = v.vin_masked || '';

@@ -956,6 +956,49 @@ body { font-family: var(--font); background: var(--bg-base); color: var(--text-p
   background: rgba(0,0,0,0.25); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; color: var(--text); font-size: 13px;
 }
 
+/* Customer tab — filter bars & chips */
+.cust-filter-bar {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  margin-bottom: 12px;
+}
+.cust-filter-title { font-size: 12px; font-weight: 600; color: var(--text-secondary); margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.04em; }
+.cust-filter-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 10px 12px;
+  align-items: end;
+}
+.cust-filter-grid .dyc-field { margin: 0; }
+.cust-filter-grid .dyc-field-span2 { grid-column: span 2; }
+@media (max-width: 700px) {
+  .cust-filter-grid .dyc-field-span2 { grid-column: span 1; }
+}
+.cust-filter-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.cust-filter-meta { font-size: 12px; color: var(--text-secondary); margin-top: 8px; }
+.filter-chips-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; min-height: 4px; }
+.filter-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  background: rgba(21,101,192,0.2);
+  border: 1px solid rgba(66,165,245,0.35);
+  border-radius: 999px;
+  padding: 2px 4px 2px 10px;
+  font-size: 11px;
+  color: var(--text-primary);
+}
+.filter-chip-x {
+  background: transparent; border: none; color: var(--text-secondary);
+  cursor: pointer; font-size: 14px; line-height: 1; padding: 2px 6px; border-radius: 6px;
+}
+.filter-chip-x:hover { color: var(--red-light); background: rgba(255,255,255,0.06); }
+.cust-empty { margin: 16px 0; padding: 24px; text-align: center; color: var(--text-secondary); font-size: 13px; }
+.badge-warn {
+  display: inline-block; min-width: 18px; text-align: center;
+  background: rgba(255,143,0,0.25); color: var(--orange-light); border-radius: 4px; font-size: 10px; font-weight: 700;
+}
+
 /* ══════════════════════════════════════════════════
    RESPONSIVE
 ══════════════════════════════════════════════════ */
