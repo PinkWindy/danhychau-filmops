@@ -51,6 +51,32 @@ Tài liệu: [audit/inventory-admin-test-report.md](audit/inventory-admin-test-r
 
 ---
 
+## Cách chạy smoke test Manual Order & Customer Management
+
+Chạy trong thư mục `web_demo/` (cần `httpx` cho FastAPI `TestClient`, đã khai trong `web_demo/requirements.txt`).
+
+```bash
+cd web_demo
+python manual_order_customer_smoke_test.py
+```
+
+Trên Windows PowerShell, nếu bảng Markdown in ra lỗi encoding, có thể thêm:
+
+```powershell
+$env:PYTHONIOENCODING='utf-8'
+python manual_order_customer_smoke_test.py
+```
+
+Expected result:
+
+```text
+MANUAL ORDER & CUSTOMER MANAGEMENT SMOKE TEST PASSED
+```
+
+Tài liệu: [audit/manual-order-customer-test-report.md](audit/manual-order-customer-test-report.md), [audit/manual-order-customer-demo-script.md](audit/manual-order-customer-demo-script.md).
+
+---
+
 ## 3. Thứ tự đọc tài liệu
 Để hiểu nhanh chóng và toàn diện hệ thống này, khuyến nghị đọc tài liệu theo thứ tự sau:
 

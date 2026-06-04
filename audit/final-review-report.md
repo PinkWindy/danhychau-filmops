@@ -62,6 +62,17 @@ $$\text{Ready Score} = \mathbf{100\%}$$
 
 ---
 
+## Manual Order & Customer Management Hardening
+
+* `manual_order_customer_smoke_test.py` passed **20/20** cases.
+* Manual order creation is **ready for demo**.
+* Customer management APIs for Dealer, End Customer and Vehicle Profile are **ready for demo**.
+* Existing OCR and Inventory Admin flows **remain compatible** (đã kiểm tra trong smoke).
+
+Chi tiết: [manual-order-customer-test-report.md](manual-order-customer-test-report.md), kịch bản demo: [manual-order-customer-demo-script.md](manual-order-customer-demo-script.md).
+
+---
+
 ## 8. Kết luận cuối cùng (Final Conclusion)
 
 $$\mathbf{READY\ FOR\ MVP\ DEMO\ +\ MOBILE\ GO-LIVE}$$
