@@ -29,7 +29,6 @@ from database import (
     DbWorkstream,
     DbMaterialPreference,
 )
-from film_norm_excel_import import try_import_excel_norms
 from ocr_lexus_test_data import upsert_lexus_ocr_drafts
 from ppf_allocation_service import PPF_ITEM_DEFINITIONS, PPF_FULL_REQUIRED_M, DEFAULT_PPF_BLOCK
 
@@ -359,44 +358,28 @@ def seed_vehicle_profiles(db: Session) -> None:
     )
 
 
-def _fallback_window_film_norm_rx350(db: Session) -> None:
-    """Định mức RX350 (khoảng năm) — đủ smoke resolve + manual order; Excel có thể ghi đè theo composite."""
-    ts = _now_iso()
-    _merge_norm(
-        db,
-        norm_id="NORM-STANDARD-RX350-2020-2026",
-        film_type="Phim cách nhiệt",
-        vehicle_model_code="RX350",
-        model_year_range="2020-2026",
-        windshield_size="90x152",
-        windshield_width_cm=90,
-        windshield_length_cm=152,
-        rear_window_size="50x130",
-        rear_window_width_cm=50,
-        rear_window_length_cm=130,
-        front_side_size="75x130",
-        front_side_width_cm=75,
-        front_side_length_cm=130,
-        rear_side_triangle_size="40x100",
-        rear_side_triangle_width_cm=40,
-        rear_side_triangle_length_cm=100,
-        triangle_size="",
-        triangle_width_cm=0,
-        triangle_length_cm=0,
-        rear_side_size="75x130",
-        rear_side_width_cm=75,
-        rear_side_length_cm=130,
-        sunroof_size="80x80",
-        sunroof_width_cm=80,
-        sunroof_length_cm=80,
-        status="ACTIVE",
-        note="Seed chuẩn fallback (khi chưa import Excel)",
-        created_at=ts,
-        updated_at=ts,
-    )
+def _purge_deprecated_window_film_norm_ids(db: Session) -> None:
+    """Xóa bản ghi demo cũ — định mức phim cách nhiệt do người dùng quản lý."""
+    for nid in ("NORM-DEMO-RX350-WF-2024-2027", "NORM-RX350-2013-2022"):
+        row = db.query(DbVehicleFilmNorm).filter(DbVehicleFilmNorm.norm_id == nid).first()
+        if row:
+            db.delete(row)
 
 
-def _seed_ppf_default_norm(db: Session) -> None:
+def seed_vehicle_film_norms(db: Session) -> Dict[str, Any]:
+    """
+    Không tự import Excel / không tự tạo định mức phim cách nhiệt khi seed.
+    Chỉ giữ định mức PPF mặc định (ALL) và dọn bản demo cũ.
+    Import Excel: POST /api/vehicle-norms/import-from-excel (thủ công).
+    """
+    _purge_deprecated_window_film_norm_ids(db)
+    _seed_ppf_default_norm(db)
+    return {
+        "ok": True,
+        "window_film_norms": "manual_only",
+        "excel_auto_import": False,
+        "ppf_default_norm": True,
+    }
     ts = _now_iso()
     _merge_norm(
         db,
@@ -433,20 +416,6 @@ def _seed_ppf_default_norm(db: Session) -> None:
         created_at=ts,
         updated_at=ts,
     )
-
-
-def seed_vehicle_film_norms(db: Session) -> Dict[str, Any]:
-    from vehicle_norm_logic import find_active_vehicle_norm
-
-    imp = try_import_excel_norms(db)
-    if not imp.get("ok"):
-        _fallback_window_film_norm_rx350(db)
-    else:
-        # Vẫn đảm bảo có RX350 trong khoảng năm nếu Excel không chứa RX350
-        if not find_active_vehicle_norm(db, "RX350", 2026, "Phim cách nhiệt"):
-            _fallback_window_film_norm_rx350(db)
-    _seed_ppf_default_norm(db)
-    return imp
 
 
 def seed_material_preferences(db: Session) -> None:

@@ -38,7 +38,6 @@ async def lifespan(app: FastAPI):
     try:
         init_db()
         _log.info("DYC init_db() completed (schema / migrations).")
-        from film_norm_excel_import import try_import_excel_norms
         from standard_seed_data import seed_all_demo_data_if_missing_canonical, try_location_master_import_warn_only
 
         db = SessionLocal()
@@ -48,20 +47,9 @@ async def lifespan(app: FastAPI):
                 _log.info("DYC standard_seed: đã seed dữ liệu demo chuẩn (DB trống).")
             else:
                 db.rollback()
-            imp = try_import_excel_norms(db)
-            db.commit()
-            if imp.get("ok"):
-                _log.info(
-                    "DYC Excel norms: inserted=%s updated=%s skipped=%s path=%s",
-                    imp.get("inserted"),
-                    imp.get("updated"),
-                    imp.get("skipped"),
-                    imp.get("path"),
-                )
-            else:
-                _log.warning("DYC Excel norms import: %s", imp.get("error"))
+            # Định mức phim cách nhiệt: không import Excel tự động khi khởi động — dùng UI hoặc POST /api/vehicle-norms/import-from-excel
         except Exception:
-            _log.exception("DYC seed / Excel norms skipped or partial.")
+            _log.exception("DYC seed skipped or partial.")
         finally:
             db.close()
         try_location_master_import_warn_only()

@@ -59,7 +59,7 @@
     );
   }
 
-  async function enrichWfAllocationFromNorm(ws, alloc) {
+  async function enrichWfAllocationFromNorm(ws, alloc, modelYearOverride, opts) {
     let req = {};
     try {
       req = await fetch(`/api/requests/${encodeURIComponent(ws.request_id)}`).then((r) => r.json());
@@ -68,7 +68,13 @@
     }
     const vmRaw = (req.vehicle_model_code || '').trim() || (req.model_name || '').trim();
     const vm = normVm(vmRaw) || vmRaw;
-    const my = req.model_year != null && req.model_year !== '' ? Number(req.model_year) : null;
+    let my = null;
+    if (modelYearOverride != null && modelYearOverride !== '' && !Number.isNaN(Number(modelYearOverride))) {
+      my = Number(modelYearOverride);
+    } else if (req.model_year != null && req.model_year !== '') {
+      my = Number(req.model_year);
+      if (Number.isNaN(my)) my = null;
+    }
     const ft = 'Phim cách nhiệt';
     const q = new URLSearchParams({ vehicle_model_code: vm || vmRaw, film_type: ft });
     if (my != null && !Number.isNaN(my)) q.set('model_year', String(my));
@@ -78,6 +84,7 @@
     } catch (e) {
       console.warn('[WF modal] norm resolve', e);
     }
+    const force = opts && opts.forceRefreshNormDims;
     const afBy = {};
     (normRes.auto_fill_items || []).forEach((x) => {
       if (x.job_item) afBy[x.job_item] = x;
@@ -106,12 +113,17 @@
       const pr = await pref(ji);
       const hasNormDims =
         af && (parseFloat(af.width_cm) || 0) > 0 && (parseFloat(af.length_cm) || 0) > 0;
-      if (hasNormDims) {
+      const defMc = ((af && af.material_code) || '').trim() || ((pr && pr.preferred_material_code) || '').trim();
+      if (force && hasNormDims) {
+        it.planned_size = af.size || '';
+        it.required_width_cm = parseFloat(af.width_cm) || 0;
+        it.required_length_cm = parseFloat(af.length_cm) || 0;
+        if (defMc) it.material_code = defMc;
+      } else if (hasNormDims) {
         if (!(it.planned_size || '').trim()) it.planned_size = af.size || '';
         if (!(parseFloat(it.required_width_cm) > 0)) it.required_width_cm = parseFloat(af.width_cm) || 0;
         if (!(parseFloat(it.required_length_cm) > 0)) it.required_length_cm = parseFloat(af.length_cm) || 0;
       }
-      const defMc = ((af && af.material_code) || '').trim() || ((pr && pr.preferred_material_code) || '').trim();
       if (!(it.material_code || '').trim() && defMc) it.material_code = defMc;
       const inSvc = wfSet.size ? wfSet.has(ji) : true;
       const isMain = Object.prototype.hasOwnProperty.call(MAIN, ji);
@@ -248,13 +260,27 @@
         it.planned_size = it.planned_cut_block || '';
       }
       it.sources = [];
-      document.querySelectorAll(`tr[data-wa-src-item="${it.item_code}"]`).forEach((row) => {
-        const stype = (row.querySelector('.wa-src-type')?.value || 'LOT').toUpperCase();
-        const sid = (row.querySelector('.wa-src-id')?.value || '').trim();
-        const len = parseFloat(row.querySelector('.wa-src-len')?.value || '0') || 0;
-        const note = (row.querySelector('.wa-src-note')?.value || '').trim();
-        if (sid && len > 0) it.sources.push({ source_type: stype, source_id: sid, allocated_length_m: len, note });
-      });
+      if (!isPpfCtx(ctx)) {
+        const trItem = document.querySelector(`tr[data-wa-item="${it.item_code}"]`);
+        const stack = trItem && trItem.querySelector('.wa-src-stack');
+        if (stack && it.is_selected) {
+          stack.querySelectorAll('.wa-src-line').forEach((line) => {
+            const stype = (line.querySelector('.wa-src-type')?.value || 'LOT').toUpperCase();
+            const sid = (line.querySelector('.wa-src-id')?.value || '').trim();
+            const len = parseFloat(line.querySelector('.wa-src-len')?.value || '0') || 0;
+            const note = (line.querySelector('.wa-src-note')?.value || '').trim();
+            if (sid && len > 0) it.sources.push({ source_type: stype, source_id: sid, allocated_length_m: len, note });
+          });
+        }
+      } else {
+        document.querySelectorAll(`tr[data-wa-src-item="${it.item_code}"]`).forEach((row) => {
+          const stype = (row.querySelector('.wa-src-type')?.value || 'LOT').toUpperCase();
+          const sid = (row.querySelector('.wa-src-id')?.value || '').trim();
+          const len = parseFloat(row.querySelector('.wa-src-len')?.value || '0') || 0;
+          const note = (row.querySelector('.wa-src-note')?.value || '').trim();
+          if (sid && len > 0) it.sources.push({ source_type: stype, source_id: sid, allocated_length_m: len, note });
+        });
+      }
     }
     return alloc;
   }
@@ -321,53 +347,77 @@
       <div class="field-group"><label>KTV</label><input type="text" id="wa-edit-tech" class="field-input" value="${esc(ws.assigned_technician_name || '')}"></div></div></div>`;
   }
 
-  function renderWfBody(ctx) {
-    const { alloc, lots, offcuts, ws } = ctx;
-    const rowOpts = ctx.wfRowOpts || {};
-    let rows = '';
-    for (const it of alloc.items || []) {
-      rows += `<tr style="background:rgba(255,255,255,0.03)">
-        <td style="padding:6px"><input type="checkbox" id="wa_sel_${it.item_code}" ${it.is_selected ? 'checked' : ''}></td>
-        <td style="padding:6px;font-weight:600">${esc(it.item_name)}</td>
-        <td style="padding:6px"><input type="text" class="field-input" style="width:72px" id="wa_mat_${it.item_code}" value="${esc(it.material_code || '')}"></td>
-        <td style="padding:6px"><input type="number" class="field-input" style="width:56px" id="wa_qty_${it.item_code}" min="0" value="${it.quantity || 0}"></td>
-        <td style="padding:6px"><input type="text" class="field-input" style="width:80px" id="wa_block_${it.item_code}" value="${esc(it.planned_size || it.planned_cut_block || '')}"></td>
-        <td style="padding:6px"><input type="number" class="field-input" style="width:52px" id="wa_wcm_${it.item_code}" step="0.1" value="${it.required_width_cm != null ? it.required_width_cm : ''}"></td>
-        <td style="padding:6px"><input type="number" class="field-input" style="width:52px" id="wa_lcm_${it.item_code}" step="0.1" value="${it.required_length_cm != null ? it.required_length_cm : ''}"></td>
-        <td style="padding:6px"><input type="number" class="field-input" style="width:72px" id="wa_reqm_${it.item_code}" step="0.01" value="${it.required_length_m != null ? it.required_length_m : ''}"></td>
-        <td colspan="4"></td></tr>`;
-      if (!it.is_selected) continue;
-      const mc = it.material_code || '';
-      const srcs = it.sources && it.sources.length ? it.sources : [{ source_type: 'LOT', source_id: '', allocated_length_m: 0, note: '' }];
-      srcs.forEach((src, j) => {
+  function wfSourceStackHtml(it, rowOpts) {
+    if (!it.is_selected) return '<span style="opacity:0.55;font-size:11px">—</span>';
+    const srcs =
+      it.sources && it.sources.length
+        ? it.sources
+        : [{ source_type: 'LOT', source_id: '', allocated_length_m: 0, note: '' }];
+    return srcs
+      .map((src, j) => {
         const st = (src.source_type || 'LOT').toUpperCase();
         const optKey = `${it.item_code}:${j}:${st}`;
         const optItems = rowOpts[optKey] || [];
         const opts = wfOptsHtml(st, optItems, src.source_id);
-        rows += `<tr data-wa-src-item="${it.item_code}" data-wa-src-idx="${j}" data-wa-row-mat="${esc(mc)}" data-wa-opt-key="${esc(optKey)}">
-          <td colspan="12" style="padding:6px 10px 6px 28px;background:rgba(0,30,80,0.2)">
-            <div style="display:grid;grid-template-columns:72px 110px minmax(180px,1.2fr) 88px minmax(120px,1fr) 40px;gap:8px;align-items:center">
-              <span style="font-size:11px;color:var(--text-secondary)">↳ #${j + 1}</span>
-              <select class="field-input wa-src-type"><option value="LOT" ${st === 'LOT' ? 'selected' : ''}>Cuộn LOT</option>
-                <option value="OFFCUT" ${st === 'OFFCUT' ? 'selected' : ''}>Mảnh dư</option></select>
-              <select class="field-input wa-src-id">${opts}</select>
-              <input type="number" class="field-input wa-src-len" step="0.01" min="0" value="${src.allocated_length_m != null ? src.allocated_length_m : ''}" placeholder="m">
-              <input type="text" class="field-input wa-src-note" placeholder="Ghi chú" value="${esc(src.note || '')}">
-              <button type="button" class="btn btn-outline btn-sm wa-del-src"${srcs.length < 2 ? ' disabled' : ''}>✕</button>
-            </div></td></tr>`;
-      });
-      rows += `<tr><td colspan="12" style="padding:4px 6px">
-        <button type="button" class="btn btn-outline btn-sm" data-wa-add-src="${it.item_code}">+ Thêm nguồn</button>
-        <button type="button" class="btn btn-outline btn-sm" data-wa-reset style="margin-left:8px">Reset</button></td></tr>`;
+        return `<div class="wa-src-line" data-wa-src-idx="${j}" style="display:grid;grid-template-columns:110px minmax(160px,1.1fr) 88px minmax(100px,1fr) 36px;gap:8px;align-items:center;margin-bottom:6px">
+          <select class="field-input wa-src-type"><option value="LOT" ${st === 'LOT' ? 'selected' : ''}>Cuộn LOT</option>
+            <option value="OFFCUT" ${st === 'OFFCUT' ? 'selected' : ''}>Mảnh dư</option></select>
+          <select class="field-input wa-src-id">${opts}</select>
+          <input type="number" class="field-input wa-src-len" step="0.01" min="0" value="${src.allocated_length_m != null ? src.allocated_length_m : ''}" placeholder="m">
+          <input type="text" class="field-input wa-src-note" placeholder="Ghi chú" value="${esc(src.note || '')}">
+          <button type="button" class="btn btn-outline btn-sm wa-del-src"${srcs.length < 2 ? ' disabled' : ''}>✕</button>
+        </div>`;
+      })
+      .join('');
+  }
+
+  function renderWfBody(ctx) {
+    const { alloc, lots, offcuts, ws } = ctx;
+    const rowOpts = ctx.wfRowOpts || {};
+    const nm = ctx.normMeta || {};
+    const nid = (nm.norm_id && String(nm.norm_id)) || '';
+    const strat = (nm.resolution_strategy && String(nm.resolution_strategy)) || '';
+    const draftRaw = ctx.normYearDraft != null && ctx.normYearDraft !== '' ? String(ctx.normYearDraft) : '';
+    const hint =
+      nid || strat
+        ? `Đề xuất: <code>${esc(nid || '—')}</code>${strat ? ` — <span style="opacity:0.9">${esc(strat)}</span>` : ''}`
+        : 'Chưa khớp định mức — chỉnh năm model và bấm <strong>Áp dụng định mức</strong>, hoặc nhập tay trên phiếu / bảng.';
+    let rows = '';
+    for (const it of alloc.items || []) {
+      const stackInner = wfSourceStackHtml(it, rowOpts);
+      rows += `<tr data-wa-item="${it.item_code}">
+        <td style="padding:6px;vertical-align:top"><input type="checkbox" id="wa_sel_${it.item_code}" ${it.is_selected ? 'checked' : ''}></td>
+        <td style="padding:6px;font-weight:600;vertical-align:top">${esc(it.item_name)}</td>
+        <td style="padding:6px;vertical-align:top"><input type="text" class="field-input" style="width:72px" id="wa_mat_${it.item_code}" value="${esc(it.material_code || '')}"></td>
+        <td style="padding:6px;vertical-align:top"><input type="number" class="field-input" style="width:56px" id="wa_qty_${it.item_code}" min="0" value="${it.quantity || 0}"></td>
+        <td style="padding:6px;vertical-align:top"><input type="text" class="field-input" style="width:80px" id="wa_block_${it.item_code}" value="${esc(it.planned_size || it.planned_cut_block || '')}"></td>
+        <td style="padding:6px;vertical-align:top"><input type="number" class="field-input" style="width:52px" id="wa_wcm_${it.item_code}" step="0.1" value="${it.required_width_cm != null ? it.required_width_cm : ''}"></td>
+        <td style="padding:6px;vertical-align:top"><input type="number" class="field-input" style="width:52px" id="wa_lcm_${it.item_code}" step="0.1" value="${it.required_length_cm != null ? it.required_length_cm : ''}"></td>
+        <td style="padding:6px;vertical-align:top"><input type="number" class="field-input" style="width:72px" id="wa_reqm_${it.item_code}" step="0.01" value="${it.required_length_m != null ? it.required_length_m : ''}"></td>
+        <td colspan="4" style="padding:6px;vertical-align:top;background:rgba(0,30,80,0.12)"><div class="wa-src-stack" data-wa-src-item="${it.item_code}">${stackInner}</div></td>
+        <td style="padding:6px;vertical-align:top;white-space:nowrap">
+          <button type="button" class="btn btn-outline btn-sm" data-wa-add-src="${it.item_code}"${it.is_selected ? '' : ' disabled'}>+ Nguồn</button>
+          <button type="button" class="btn btn-outline btn-sm" data-wa-reset style="margin-left:6px">Reset</button>
+        </td></tr>`;
     }
     return `
       <div class="edit-guide-box"><i class="fa-solid fa-circle-info" style="color:var(--blue-light)"></i><div>
         <strong style="color:var(--blue-light)">Chỉnh sửa vật tư Phim cách nhiệt trước duyệt</strong>
-        <p class="edit-hint" style="margin:4px 0 0">Bảng hạng mục kính — chia nguồn theo mét cắt. API: <code>/allocation</code></p></div></div>
+        <p class="edit-hint" style="margin:4px 0 0">Bảng hạng mục kính — mỗi hạng mục một hàng; chia nguồn theo mét cắt. API: <code>/allocation</code></p></div></div>
+      <div class="edit-section" style="padding-bottom:4px">
+        <div class="edit-section-title"><i class="fa-solid fa-calendar-days" style="color:var(--blue-light)"></i> Năm model &amp; định mức đề xuất</div>
+        <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;margin-top:8px">
+          <div class="field-group" style="margin:0;min-width:140px"><label style="font-size:11px">Năm model (phiếu YC + chỉnh tay)</label>
+            <input type="number" class="field-input" id="wa-norm-model-year" min="1985" max="2035" step="1" placeholder="VD: 2022" value="${esc(draftRaw)}">
+          </div>
+          <button type="button" class="btn btn-sm" id="wa-apply-norm-year">Áp dụng định mức</button>
+          <div class="edit-hint" id="wa-norm-resolve-hint" style="margin:0;flex:1;min-width:200px">${hint}</div>
+        </div>
+      </div>
       <div class="edit-section"><div class="edit-section-title"><i class="fa-solid fa-table" style="color:var(--blue-light)"></i> Bảng hạng mục &amp; nguồn</div>
         <div style="overflow-x:auto"><table class="data-table" style="width:100%;font-size:12px"><thead><tr style="text-align:left;background:rgba(255,255,255,0.05)">
           <th>Chọn</th><th>Hạng mục</th><th>Mã vật tư</th><th>SL</th><th>Size</th><th>Rộng cm</th><th>Dài cm</th><th>Yêu cầu (m)</th>
-          <th>Loại nguồn</th><th>Mã nguồn</th><th>Lấy (m)</th><th>Ghi chú</th><th></th>
+          <th colspan="4">Nguồn (LOT / mảnh dư)</th><th></th>
         </tr></thead><tbody>${rows}</tbody></table></div></div>
       <div class="edit-section" id="wa-summary-box"><div class="edit-section-title"><i class="fa-solid fa-scale-balanced" style="color:var(--teal-light)"></i> Kiểm tra từng hạng mục</div>
         <div id="wa-alloc-summary"></div><div id="wa-alloc-warn" style="display:none;margin-top:8px;padding:8px;border-radius:8px;background:rgba(255,152,0,0.12);color:var(--amber);font-size:12px;font-weight:600"></div></div>
@@ -437,19 +487,25 @@
       el.addEventListener('change', () => {
         window._wsEditDirty = true;
         if (el.classList.contains('wa-src-type')) {
-          const row = el.closest('tr[data-wa-src-item]');
-          const code = row.getAttribute('data-wa-src-item');
-          const j = parseInt(row.getAttribute('data-wa-src-idx') || '0', 10);
-          const st = (el.value || 'LOT').toUpperCase();
           const ctx0 = window.__waEditorCtx;
+          const rowPpf = el.closest('tr[data-wa-src-item]');
+          const trWf = el.closest('tr[data-wa-item]');
+          const row = isPpfCtx(ctx0) ? rowPpf : trWf;
+          const code = row ? row.getAttribute(isPpfCtx(ctx0) ? 'data-wa-src-item' : 'data-wa-item') : '';
+          const line = el.closest('.wa-src-line');
+          const j = parseInt((line && line.getAttribute('data-wa-src-idx')) || row?.getAttribute('data-wa-src-idx') || '0', 10);
+          const st = (el.value || 'LOT').toUpperCase();
           if (isPpfCtx(ctx0)) {
             const mat = document.getElementById('wa-ppf-type').value;
-            const sel = row.querySelector('.wa-src-id');
-            sel.innerHTML = sourceOptionsMat(mat, st, ctx0.lots, ctx0.offcuts, '');
+            const selRow = rowPpf && rowPpf.querySelector('.wa-src-id');
+            if (selRow) selRow.innerHTML = sourceOptionsMat(mat, st, ctx0.lots, ctx0.offcuts, '');
             refreshSummary(ctx0);
             return;
           }
-          const mat = (document.getElementById(`wa_mat_${code}`)?.value || '').trim() || row.getAttribute('data-wa-row-mat') || '';
+          const mat =
+            (document.getElementById(`wa_mat_${code}`)?.value || '').trim() ||
+            (ctx0.alloc.items.find((x) => x.item_code === code) || {}).material_code ||
+            '';
           const it = ctx0.alloc.items.find((x) => x.item_code === code);
           const minL = it ? parseFloat(it.required_length_m) || 0 : 0;
           const minW = it && it.required_width_cm ? parseFloat(it.required_width_cm) / 100 : 0;
@@ -457,7 +513,7 @@
           loadWfActiveOptions(ctx0.ws.request_id, mat, st, minL, minW).then((items) => {
             ctx0.wfRowOpts = ctx0.wfRowOpts || {};
             ctx0.wfRowOpts[k] = items;
-            const sel = row.querySelector('.wa-src-id');
+            const sel = line && line.querySelector('.wa-src-id');
             if (sel) sel.innerHTML = wfOptsHtml(st, items, '');
             refreshSummary(ctx0);
           });
@@ -525,9 +581,14 @@
       }
       const del = e.target.closest('.wa-del-src');
       if (del && !del.disabled) {
-        const row = del.closest('tr[data-wa-src-item]');
-        const code = row?.getAttribute('data-wa-src-item');
-        const idx = parseInt(row?.getAttribute('data-wa-src-idx') || '0', 10);
+        const ctx0 = window.__waEditorCtx;
+        const rowPpf = del.closest('tr[data-wa-src-item]');
+        const stackWf = del.closest('.wa-src-stack');
+        const code = isPpfCtx(ctx0)
+          ? rowPpf?.getAttribute('data-wa-src-item')
+          : stackWf?.getAttribute('data-wa-src-item');
+        const line = del.closest('.wa-src-line');
+        const idx = parseInt(line?.getAttribute('data-wa-src-idx') || rowPpf?.getAttribute('data-wa-src-idx') || '0', 10);
         const a = readAllocFromDom(ctx);
         const it = a.items.find((x) => x.item_code === code);
         if (it && it.sources && it.sources.length > idx && it.sources.length > 1) it.sources.splice(idx, 1);
@@ -558,7 +619,11 @@
             ctx.ws = ws2;
             if (ws2.workstream_type !== 'PPF_INSTALLATION') {
               ctx.wfRowOpts = {};
-              await enrichWfAllocationFromNorm(ws2, ctx.alloc);
+              const { req, normRes } = await enrichWfAllocationFromNorm(ws2, ctx.alloc);
+              ctx.normMeta = normRes || {};
+              const rmy = req.model_year;
+              ctx.normYearDraft =
+                rmy != null && rmy !== '' && !Number.isNaN(Number(rmy)) ? String(Number(rmy)) : '';
               await prefetchWfSourceDropdowns(ctx);
             }
             body.innerHTML = (isPpfCtx(ctx) ? renderPpfBody(ctx) : renderWfBody(ctx)) + renderReasonBlock();
@@ -568,6 +633,30 @@
           });
       }
     };
+    const applyNormBtn = document.getElementById('wa-apply-norm-year');
+    if (applyNormBtn && !isPpfCtx(ctx)) {
+      applyNormBtn.onclick = async () => {
+        window._wsEditDirty = true;
+        const yEl = document.getElementById('wa-norm-model-year');
+        const rawY = yEl && yEl.value != null ? String(yEl.value).trim() : '';
+        const yr = rawY === '' ? NaN : parseInt(rawY, 10);
+        const a = readAllocFromDom(ctx);
+        ctx.alloc = a;
+        ctx.normYearDraft = rawY;
+        ctx.wfRowOpts = {};
+        const { normRes } = await enrichWfAllocationFromNorm(
+          ctx.ws,
+          ctx.alloc,
+          Number.isFinite(yr) ? yr : null,
+          { forceRefreshNormDims: true }
+        );
+        ctx.normMeta = normRes || {};
+        await prefetchWfSourceDropdowns(ctx);
+        body.innerHTML = renderWfBody(ctx) + renderReasonBlock();
+        wire(ctx);
+        refreshSummary(ctx);
+      };
+    }
   }
 
   async function saveAllocation() {
@@ -632,9 +721,13 @@
       return;
     }
     if (isPpf) autoSecondLot(alloc, lots);
-    window.__waEditorCtx = { wsId, ws, lots, offcuts, alloc, wfRowOpts: {} };
+    window.__waEditorCtx = { wsId, ws, lots, offcuts, alloc, wfRowOpts: {}, normMeta: {}, normYearDraft: '' };
     if (!isPpf) {
-      await enrichWfAllocationFromNorm(ws, alloc);
+      const { req, normRes } = await enrichWfAllocationFromNorm(ws, alloc);
+      window.__waEditorCtx.normMeta = normRes || {};
+      const rmy = req.model_year;
+      window.__waEditorCtx.normYearDraft =
+        rmy != null && rmy !== '' && !Number.isNaN(Number(rmy)) ? String(Number(rmy)) : '';
       await prefetchWfSourceDropdowns(window.__waEditorCtx);
     }
     document.getElementById('ws-edit-title').textContent = isPpf

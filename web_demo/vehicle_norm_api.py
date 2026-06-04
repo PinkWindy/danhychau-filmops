@@ -5,7 +5,7 @@ import json
 import uuid
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
 
@@ -212,6 +212,18 @@ def register_vehicle_norm_routes(app, get_db):
         return resolve_vehicle_norm_with_year_fallback(
             db, vehicle_model_code.strip(), model_year, film_type.strip()
         )
+
+    @router.post("/vehicle-norms/import-from-excel")
+    def import_norms_from_excel(
+        db: Session = Depends(get_db),
+        body: dict = Body(default_factory=dict),
+    ):
+        """Import định mức phim cách nhiệt từ Excel (thủ công). Body tùy chọn: {\"xlsx_path\": \"đường dẫn file\"}."""
+        from film_norm_excel_import import try_import_excel_norms
+
+        path = (body or {}).get("xlsx_path")
+        path = str(path).strip() if path else None
+        return try_import_excel_norms(db, path or None)
 
     @router.post("/vehicle-norms")
     def create_norm(data: dict, db: Session = Depends(get_db)):

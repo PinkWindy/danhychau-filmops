@@ -586,6 +586,19 @@ def init_db():
         for col, col_def in workstream_new_cols:
             _add_column_if_missing(conn, "workstreams", col, col_def)
 
+        # Gỡ định mức demo tự tạo cũ — định mức phim cách nhiệt chỉ do người dùng nhập / import thủ công.
+        try:
+            cur = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='vehicle_film_norms'"
+            )
+            if cur.fetchone():
+                conn.execute(
+                    "DELETE FROM vehicle_film_norms WHERE norm_id IN (?, ?)",
+                    ("NORM-DEMO-RX350-WF-2024-2027", "NORM-RX350-2013-2022"),
+                )
+        except Exception:
+            pass
+
         conn.commit()
         conn.close()
 

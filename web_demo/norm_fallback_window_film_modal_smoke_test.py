@@ -78,8 +78,28 @@ def _put_allocation(ws_id: str, body: dict):
     return client.put(f"/api/workstreams/{ws_id}/allocation", json=b)
 
 
+def _ensure_smoke_rx350_window_film_norm() -> None:
+    """Định mức WF không còn auto-seed — đảm bảo có bản ghi RX350 cho smoke."""
+    body = {
+        "norm_id": "NORM-SEED-SMOKE-RX350-WF",
+        "film_type": "Phim cách nhiệt",
+        "vehicle_model_code": "RX350",
+        "model_year_range": "2005-2030",
+        "windshield_size": "90x152",
+        "rear_window_size": "80x130",
+        "front_side_size": "92x130",
+        "rear_side_triangle_size": "50x152",
+        "sunroof_size": "80x80",
+        "created_by": "SMOKE-NORM-FALLBACK",
+    }
+    r = client.post("/api/vehicle-norms", json=body)
+    if r.status_code not in (200, 409):
+        raise RuntimeError(f"POST smoke norm failed: {r.status_code} {r.text[:300]}")
+
+
 def main() -> int:
     init_db()
+    _ensure_smoke_rx350_window_film_norm()
 
     add(1, 'normalize "RX350H PREMIUM CE"', normalize_vehicle_model_code("RX350H PREMIUM CE") == "RX350", "")
 
