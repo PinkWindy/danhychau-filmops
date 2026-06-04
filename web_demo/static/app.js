@@ -3,6 +3,14 @@
    ================================================================ */
 'use strict';
 
+function _esc(s) {
+  return String(s ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
 // ─── DANH MỤC THI CÔNG ────────────────────────────────────────────────────────
 const HANG_MUC_PPF = [
   { id: 'HOOD',          label: 'Nắp ca-pô' },
@@ -275,11 +283,23 @@ async function taiKhachHang() {
           <div class="kpi-card" data-color="blue"><div class="kpi-val">${sum.total_dealers}</div><div class="kpi-label">Tổng đại lý</div></div>
           <div class="kpi-card" data-color="green"><div class="kpi-val">${sum.active_dealers}</div><div class="kpi-label">Active</div></div>
         </div>
-        <div class="table-wrap"><table class="data-table"><thead><tr>
-          <th>dealer_id</th><th>dealer_name</th><th>legal_name</th><th>group</th><th>phone</th><th>status</th><th></th>
+        <div class="table-wrap" style="overflow-x:auto"><table class="data-table" style="font-size:11px"><thead><tr>
+          <th>Loại KH</th><th>Tên khách hàng</th><th>MST</th><th>SĐT</th><th>Địa chỉ</th><th>Đường</th><th>Phường</th><th>TP</th><th>Full</th><th>AMIS</th><th>TT</th><th></th>
         </tr></thead><tbody>
-        ${rows.map(d => `<tr><td><strong>${d.dealer_id}</strong></td><td>${d.dealer_name}</td><td>${d.legal_name||'—'}</td><td>${d.dealer_group||'—'}</td><td>${d.contact_phone||'—'}</td><td>${d.status}</td>
-          <td><button class="btn btn-outline btn-sm" onclick="moDrawerDealer('${d.dealer_id}')">Lịch sử</button></td></tr>`).join('')}
+        ${rows.map(d => `<tr>
+          <td>${_esc(d.customer_category)}</td>
+          <td><strong>${_esc(d.dealer_id)}</strong><br/>${_esc(d.customer_name || d.dealer_name)}</td>
+          <td>${_esc(d.tax_code)}</td><td>${_esc(d.phone)}</td>
+          <td>${_esc(d.address_no)}</td><td>${_esc(d.street)}</td><td>${_esc(d.ward)}</td><td>${_esc(d.city)}</td>
+          <td style="max-width:140px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${_esc(d.full_address)}">${_esc(d.full_address)}</td>
+          <td>${_esc(d.amis_customer_code)}</td><td>${_esc(d.status)}</td>
+          <td style="white-space:nowrap">
+            <button type="button" class="btn btn-outline btn-sm" onclick="moDrawerDealer('${d.dealer_id}')">Lịch sử</button>
+            <button type="button" class="btn btn-outline btn-sm" onclick="moFormDealer('${d.dealer_id}')">Sửa</button>
+            ${d.status === 'ACTIVE'
+              ? `<button type="button" class="btn btn-outline btn-sm" onclick="moToggleDealer('${d.dealer_id}','deactivate')">Inactive</button>`
+              : `<button type="button" class="btn btn-outline btn-sm" onclick="moToggleDealer('${d.dealer_id}','activate')">Active</button>`}
+          </td></tr>`).join('')}
         </tbody></table></div>`;
     } else if (sub === 'customers') {
       const rows = await fetch('/api/end-customers').then(r => r.json());
@@ -290,25 +310,72 @@ async function taiKhachHang() {
           <div class="kpi-card" data-color="orange"><div class="kpi-val">${sum.pending_customers}</div><div class="kpi-label">Pending</div></div>
           <div class="kpi-card" data-color="red"><div class="kpi-val">${sum.duplicate_review_count}</div><div class="kpi-label">Duplicate review</div></div>
         </div>
-        <div class="table-wrap"><table class="data-table"><thead><tr>
-          <th>customer_id</th><th>masked</th><th>source</th><th>dealer</th><th>crm</th><th></th>
+        <div class="table-wrap" style="overflow-x:auto"><table class="data-table" style="font-size:11px"><thead><tr>
+          <th>Loại KH</th><th>Tên</th><th>MST</th><th>SĐT</th><th>Địa chỉ</th><th>Đường</th><th>Phường</th><th>TP</th><th>Full</th><th>AMIS</th><th>TT</th><th></th>
         </tr></thead><tbody>
-        ${rows.map(c => `<tr><td><strong>${c.customer_id}</strong></td><td>${c.customer_masked||c.customer_name}</td><td>${c.source_channel}</td><td>${c.source_dealer_id||'—'}</td><td>${c.crm_status}</td>
-          <td><button class="btn btn-outline btn-sm" onclick="moDrawerCustomer('${c.customer_id}')">Xem</button></td></tr>`).join('')}
+        ${rows.map(c => `<tr>
+          <td>${_esc(c.customer_category)}</td>
+          <td><strong>${_esc(c.customer_id)}</strong><br/>${_esc(c.customer_name)}</td>
+          <td>${_esc(c.tax_code)}</td><td>${_esc(c.phone || c.phone_masked)}</td>
+          <td>${_esc(c.address_no)}</td><td>${_esc(c.street)}</td><td>${_esc(c.ward)}</td><td>${_esc(c.city)}</td>
+          <td style="max-width:140px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${_esc(c.full_address)}</td>
+          <td>${_esc(c.amis_customer_code)}</td><td>${_esc(c.status)}</td>
+          <td style="white-space:nowrap">
+            <button type="button" class="btn btn-outline btn-sm" onclick="moDrawerCustomer('${c.customer_id}')">Lịch sử</button>
+            <button type="button" class="btn btn-outline btn-sm" onclick="moFormCustomer('${c.customer_id}')">Sửa</button>
+            ${c.status === 'ACTIVE'
+              ? `<button type="button" class="btn btn-outline btn-sm" onclick="moToggleCustomer('${c.customer_id}','deactivate')">Inactive</button>`
+              : `<button type="button" class="btn btn-outline btn-sm" onclick="moToggleCustomer('${c.customer_id}','activate')">Active</button>`}
+          </td></tr>`).join('')}
         </tbody></table></div>`;
     } else {
       const rows = await fetch('/api/vehicles').then(r => r.json());
+      const norms = await fetch('/api/vehicle-norms').then(r => r.json()).catch(() => []);
+      const vehSub = window._custVehSub || 'list';
       document.getElementById('cust-pane-vehicles').innerHTML = `
         <div class="kpi-grid kpi-grid-compact" style="margin-bottom:12px">
           <div class="kpi-card" data-color="blue"><div class="kpi-val">${sum.total_vehicles}</div><div class="kpi-label">Tổng xe</div></div>
           <div class="kpi-card" data-color="orange"><div class="kpi-val">${sum.vehicles_without_customer}</div><div class="kpi-label">Chưa gắn KH</div></div>
         </div>
-        <div class="table-wrap"><table class="data-table"><thead><tr>
-          <th>vehicle_id</th><th>model</th><th>vin_masked</th><th>dealer</th><th>customer</th><th></th>
-        </tr></thead><tbody>
-        ${rows.map(v => `<tr><td><strong>${v.vehicle_id}</strong></td><td>${v.vehicle_model_code}</td><td>${v.vin_masked||'—'}</td><td>${v.dealer_id||'—'}</td><td>${v.customer_id||'—'}</td>
-          <td><button class="btn btn-outline btn-sm" onclick="moDrawerVehicle('${v.vehicle_id}')">Xem</button></td></tr>`).join('')}
-        </tbody></table></div>`;
+        <div class="cust-subtabs" style="margin-bottom:10px">
+          <button type="button" class="btn btn-sm veh-sub ${vehSub === 'list' ? 'btn-primary' : 'btn-outline'}" data-vehsub="list">Danh sách xe</button>
+          <button type="button" class="btn btn-sm veh-sub ${vehSub === 'norms' ? 'btn-primary' : 'btn-outline'}" data-vehsub="norms">Định mức phim</button>
+        </div>
+        <div id="cust-veh-list-wrap" style="display:${vehSub === 'list' ? 'block' : 'none'}">
+          <div class="table-wrap"><table class="data-table"><thead><tr>
+            <th>vehicle_id</th><th>model</th><th>vin_masked</th><th>dealer</th><th>customer</th><th>TT</th><th></th>
+          </tr></thead><tbody>
+          ${rows.map(v => `<tr><td><strong>${_esc(v.vehicle_id)}</strong></td><td>${_esc(v.vehicle_model_code)}</td><td>${_esc(v.vin_masked || '—')}</td>
+            <td>${_esc(v.dealer_id || '—')}</td><td>${_esc(v.customer_id || '—')}</td><td>${_esc(v.vehicle_status || v.status)}</td>
+            <td><button type="button" class="btn btn-outline btn-sm" onclick="moDrawerVehicle('${v.vehicle_id}')">Xem</button>
+            <button type="button" class="btn btn-outline btn-sm" onclick="moToggleVehicle('${v.vehicle_id}','${(v.vehicle_status || v.status) === 'ACTIVE' ? 'deactivate' : 'activate'}')">${(v.vehicle_status || v.status) === 'ACTIVE' ? 'Inactive' : 'Active'}</button></td></tr>`).join('')}
+          </tbody></table></div>
+        </div>
+        <div id="cust-veh-norms-wrap" style="display:${vehSub === 'norms' ? 'block' : 'none'}">
+          <p class="muted" style="font-size:12px;margin-bottom:8px">Định mức phim cách nhiệt theo dòng xe / năm model.</p>
+          <button type="button" class="btn btn-primary btn-sm" id="btn-norm-add" style="margin-bottom:8px">+ Thêm định mức</button>
+          <div class="table-wrap" style="overflow-x:auto"><table class="data-table" style="font-size:10px"><thead><tr>
+            <th>Phim</th><th>Dòng xe</th><th>Năm</th><th>KL w/l</th><th>KH w/l</th><th>ST w/l</th><th>SSTG w/l</th><th>TG</th><th>SS</th><th>KT</th><th>TT</th><th></th>
+          </tr></thead><tbody>
+          ${(norms || []).map(n => `<tr>
+            <td>${_esc(n.film_type)}</td><td>${_esc(n.vehicle_model_code)}</td><td>${_esc(n.model_year_range)}</td>
+            <td>${n.windshield_width_cm||0}/${n.windshield_length_cm||0}</td>
+            <td>${n.rear_window_width_cm||0}/${n.rear_window_length_cm||0}</td>
+            <td>${n.front_side_width_cm||0}/${n.front_side_length_cm||0}</td>
+            <td>${n.rear_side_triangle_width_cm||0}/${n.rear_side_triangle_length_cm||0}</td>
+            <td>${n.triangle_width_cm||0}/${n.triangle_length_cm||0}</td>
+            <td>${n.rear_side_width_cm||0}/${n.rear_side_length_cm||0}</td>
+            <td>${n.sunroof_width_cm||0}/${n.sunroof_length_cm||0}</td>
+            <td>${_esc(n.status)}</td>
+            <td style="white-space:nowrap">
+              <button type="button" class="btn btn-outline btn-sm" onclick="moFormNorm('${n.norm_id}')">Sửa</button>
+              ${n.status === 'ACTIVE'
+                ? `<button type="button" class="btn btn-outline btn-sm" onclick="moToggleNorm('${n.norm_id}','deactivate')">Off</button>`
+                : `<button type="button" class="btn btn-outline btn-sm" onclick="moToggleNorm('${n.norm_id}','activate')">On</button>`}
+            </td></tr>`).join('')}
+          </tbody></table></div>
+        </div>`;
+      document.getElementById('btn-norm-add')?.addEventListener('click', () => moFormNorm(''));
     }
     document.getElementById('cust-pane-dealers').style.display = sub === 'dealers' ? 'block' : 'none';
     document.getElementById('cust-pane-customers').style.display = sub === 'customers' ? 'block' : 'none';
@@ -338,6 +405,154 @@ window.moDrawerVehicle = async function(id) {
   ov.style.display = 'flex';
 };
 
+window._custVehSub = window._custVehSub || 'list';
+
+document.getElementById('tab-customers')?.addEventListener('click', (ev) => {
+  const b = ev.target.closest('.veh-sub');
+  if (!b) return;
+  window._custVehSub = b.dataset.vehsub || 'list';
+  taiKhachHang();
+});
+
+function _closeQuickModal() {
+  document.getElementById('modal-quick-overlay').style.display = 'none';
+  _mcQuickMode = null;
+}
+document.getElementById('btn-x-modal-quick')?.addEventListener('click', _closeQuickModal);
+document.getElementById('btn-x-drawer')?.addEventListener('click', () => {
+  document.getElementById('modal-drawer-overlay').style.display = 'none';
+});
+document.getElementById('btn-x-demo-modal')?.addEventListener('click', () => {
+  document.getElementById('demo-modal-overlay').style.display = 'none';
+});
+document.getElementById('btn-x-ws-edit')?.addEventListener('click', () => {
+  if (typeof window.closeWsEdit === 'function') window.closeWsEdit();
+});
+
+window.moToggleDealer = async function(id, act) {
+  const reason = prompt('Lý do (bắt buộc):');
+  if (!reason || !reason.trim()) { toast('warning', 'Thiếu lý do', ''); return; }
+  const path = act === 'activate' ? 'activate' : 'deactivate';
+  const ov = prompt('Có đơn mở chưa đóng? Nhập YES nếu cần admin_override:') === 'YES';
+  const r = await fetch(`/api/dealers/${encodeURIComponent(id)}/${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ reason: reason.trim(), admin_override: ov, updated_by: 'WEB' }),
+  });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) { toast('error', 'Lỗi', data.detail || JSON.stringify(data)); return; }
+  toast('success', 'Đại lý', 'Đã cập nhật');
+  taiKhachHang();
+};
+window.moToggleCustomer = async function(id, act) {
+  const reason = prompt('Lý do (bắt buộc):');
+  if (!reason || !reason.trim()) { toast('warning', 'Thiếu lý do', ''); return; }
+  const ov = prompt('admin_override? YES nếu bắt buộc:') === 'YES';
+  const path = act === 'activate' ? 'activate' : 'deactivate';
+  const r = await fetch(`/api/end-customers/${encodeURIComponent(id)}/${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ reason: reason.trim(), admin_override: ov, updated_by: 'WEB' }),
+  });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) { toast('error', 'Lỗi', data.detail || JSON.stringify(data)); return; }
+  toast('success', 'Khách hàng', 'Đã cập nhật');
+  taiKhachHang();
+};
+window.moToggleVehicle = async function(id, act) {
+  const reason = prompt('Lý do (bắt buộc):');
+  if (!reason || !reason.trim()) return;
+  const path = act === 'activate' ? 'activate' : 'deactivate';
+  const r = await fetch(`/api/vehicles/${encodeURIComponent(id)}/${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ reason: reason.trim(), updated_by: 'WEB' }),
+  });
+  if (!r.ok) { toast('error', 'Lỗi', await r.text()); return; }
+  toast('success', 'Xe', 'Đã cập nhật');
+  taiKhachHang();
+};
+window.moToggleNorm = async function(normId, act) {
+  const reason = prompt('Lý do (bắt buộc):');
+  if (!reason || !reason.trim()) return;
+  const path = act === 'activate' ? 'activate' : 'deactivate';
+  const r = await fetch(`/api/vehicle-norms/${encodeURIComponent(normId)}/${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ reason: reason.trim(), updated_by: 'WEB' }),
+  });
+  if (!r.ok) { toast('error', 'Lỗi', await r.text()); return; }
+  toast('success', 'Định mức', 'Đã cập nhật');
+  taiKhachHang();
+};
+
+window.moFormDealer = async function(id) {
+  const rows = await fetch('/api/dealers').then(r => r.json());
+  const d = rows.find(x => x.dealer_id === id) || {};
+  const reasonBox = id ? '<label>Reason sửa *</label><input id="ed-d-reason" class="wide" />' : '';
+  _openQuick(id ? 'Sửa đại lý' : 'Đại lý', `
+    ${reasonBox}
+    <label>Tên khách hàng</label><input id="ed-d-name" class="wide" value="${_esc(d.customer_name || d.dealer_name || '')}" />
+    <label>MST</label><input id="ed-d-tax" value="${_esc(d.tax_code || '')}" />
+    <label>SĐT</label><input id="ed-d-phone" value="${_esc(d.phone || '')}" />
+    <label>Địa chỉ (số nhà)</label><input id="ed-d-ano" value="${_esc(d.address_no || '')}" />
+    <label>Đường</label><input id="ed-d-st" value="${_esc(d.street || '')}" />
+    <label>Phường</label><input id="ed-d-ward" value="${_esc(d.ward || '')}" />
+    <label>Thành phố</label><input id="ed-d-city" value="${_esc(d.city || '')}" />
+    <label>Full address</label><input id="ed-d-full" value="${_esc(d.full_address || '')}" />
+    <label>Mã AMIS</label><input id="ed-d-amis" value="${_esc(d.amis_customer_code || '')}" />
+  `);
+  window._editDealerId = id;
+  _mcQuickMode = 'edit-dealer';
+};
+window.moFormCustomer = async function(id) {
+  const rows = await fetch('/api/end-customers').then(r => r.json());
+  const c = rows.find(x => x.customer_id === id) || {};
+  _openQuick('Sửa khách hàng', `
+    <label>Reason *</label><input id="ed-c-reason" class="wide" />
+    <label>Tên</label><input id="ed-c-name" class="wide" value="${_esc(c.customer_name || '')}" />
+    <label>MST</label><input id="ed-c-tax" value="${_esc(c.tax_code || '')}" />
+    <label>SĐT</label><input id="ed-c-phone" value="${_esc(c.phone || c.phone_masked || '')}" />
+    <label>Địa chỉ</label><input id="ed-c-ano" value="${_esc(c.address_no || '')}" />
+    <label>Đường</label><input id="ed-c-st" value="${_esc(c.street || '')}" />
+    <label>Phường</label><input id="ed-c-ward" value="${_esc(c.ward || '')}" />
+    <label>TP</label><input id="ed-c-city" value="${_esc(c.city || '')}" />
+    <label>Full</label><input id="ed-c-full" value="${_esc(c.full_address || '')}" />
+    <label>AMIS</label><input id="ed-c-amis" value="${_esc(c.amis_customer_code || '')}" />
+  `);
+  window._editCustomerId = id;
+  _mcQuickMode = 'edit-customer';
+};
+window.moFormNorm = function(normId) {
+  const isNew = !normId;
+  _openQuick(isNew ? 'Thêm định mức' : 'Sửa định mức', `
+    ${isNew ? '' : '<label>Reason sửa *</label><input id="ed-n-reason" class="wide" />'}
+    <label>norm_id</label><input id="ed-n-id" ${isNew ? '' : 'readonly'} value="${_esc(normId)}" />
+    <label>film_type *</label><input id="ed-n-ft" value="Phim cách nhiệt" />
+    <label>vehicle_model_code *</label><input id="ed-n-vc" />
+    <label>model_year_range *</label><input id="ed-n-myr" value="2013 - 2022" />
+    <label>Kính lái size</label><input id="ed-n-ws" value="90x152" />
+    <label>Kính hậu</label><input id="ed-n-rs" value="60x130" />
+    <label>Sườn trước</label><input id="ed-n-fs" value="92x130" />
+    <label>Sườn sau + TG</label><input id="ed-n-sst" value="50x152" />
+  `);
+  window._editNormId = normId;
+  _mcQuickMode = isNew ? 'create-norm' : 'edit-norm';
+  if (!isNew) {
+    fetch('/api/vehicle-norms').then(r => r.json()).then(list => {
+      const n = list.find(x => x.norm_id === normId);
+      if (!n) return;
+      document.getElementById('ed-n-ft').value = n.film_type || '';
+      document.getElementById('ed-n-vc').value = n.vehicle_model_code || '';
+      document.getElementById('ed-n-myr').value = n.model_year_range || '';
+      document.getElementById('ed-n-ws').value = n.windshield_size || '';
+      document.getElementById('ed-n-rs').value = n.rear_window_size || '';
+      document.getElementById('ed-n-fs').value = n.front_side_size || '';
+      document.getElementById('ed-n-sst').value = n.rear_side_triangle_size || '';
+    });
+  }
+};
+
 function _openQuick(title, html) {
   document.getElementById('modal-quick-title').textContent = title;
   document.getElementById('modal-quick-body').innerHTML = html;
@@ -355,7 +570,80 @@ document.getElementById('drawer-close')?.addEventListener('click', () => {
 document.getElementById('modal-quick-ok')?.addEventListener('click', async () => {
   const actor = 'AD-001';
   try {
-    if (_mcQuickMode === 'dealer') {
+    if (_mcQuickMode === 'edit-dealer') {
+      const id = window._editDealerId;
+      const reason = (document.getElementById('ed-d-reason')?.value || '').trim();
+      if (!reason) { toast('warning', 'Thiếu reason', ''); return; }
+      const body = {
+        dealer_name: document.getElementById('ed-d-name').value.trim(),
+        tax_code: document.getElementById('ed-d-tax').value.trim() || null,
+        phone: document.getElementById('ed-d-phone').value.trim() || null,
+        address_no: document.getElementById('ed-d-ano').value.trim() || null,
+        street: document.getElementById('ed-d-st').value.trim() || null,
+        ward: document.getElementById('ed-d-ward').value.trim() || null,
+        city: document.getElementById('ed-d-city').value.trim() || null,
+        full_address: document.getElementById('ed-d-full').value.trim() || null,
+        amis_customer_code: document.getElementById('ed-d-amis').value.trim() || null,
+        reason,
+        updated_by: actor,
+      };
+      const r = await fetch(`/api/dealers/${encodeURIComponent(id)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      if (!r.ok) throw new Error(await r.text());
+      toast('success', 'Đại lý', 'Đã lưu');
+    } else if (_mcQuickMode === 'edit-customer') {
+      const id = window._editCustomerId;
+      const reason = (document.getElementById('ed-c-reason').value || '').trim();
+      if (!reason) { toast('warning', 'Thiếu reason', ''); return; }
+      const body = {
+        customer_name: document.getElementById('ed-c-name').value.trim(),
+        tax_code: document.getElementById('ed-c-tax').value.trim() || null,
+        phone: document.getElementById('ed-c-phone').value.trim() || null,
+        address_no: document.getElementById('ed-c-ano').value.trim() || null,
+        street: document.getElementById('ed-c-st').value.trim() || null,
+        ward: document.getElementById('ed-c-ward').value.trim() || null,
+        city: document.getElementById('ed-c-city').value.trim() || null,
+        full_address: document.getElementById('ed-c-full').value.trim() || null,
+        amis_customer_code: document.getElementById('ed-c-amis').value.trim() || null,
+        reason,
+        updated_by: actor,
+      };
+      const r = await fetch(`/api/end-customers/${encodeURIComponent(id)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      if (!r.ok) throw new Error(await r.text());
+      toast('success', 'KH', 'Đã lưu');
+    } else if (_mcQuickMode === 'create-norm') {
+      const body = {
+        norm_id: document.getElementById('ed-n-id').value.trim() || undefined,
+        film_type: document.getElementById('ed-n-ft').value.trim(),
+        vehicle_model_code: document.getElementById('ed-n-vc').value.trim(),
+        model_year_range: document.getElementById('ed-n-myr').value.trim(),
+        windshield_size: document.getElementById('ed-n-ws').value.trim(),
+        rear_window_size: document.getElementById('ed-n-rs').value.trim(),
+        front_side_size: document.getElementById('ed-n-fs').value.trim(),
+        rear_side_triangle_size: document.getElementById('ed-n-sst').value.trim(),
+        created_by: actor,
+      };
+      const r = await fetch('/api/vehicle-norms', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      if (!r.ok) throw new Error(await r.text());
+      toast('success', 'Định mức', 'Đã tạo');
+    } else if (_mcQuickMode === 'edit-norm') {
+      const nid = document.getElementById('ed-n-id').value.trim();
+      const reason = (document.getElementById('ed-n-reason').value || '').trim();
+      if (!reason) { toast('warning', 'Thiếu reason', ''); return; }
+      const body = {
+        film_type: document.getElementById('ed-n-ft').value.trim(),
+        vehicle_model_code: document.getElementById('ed-n-vc').value.trim(),
+        model_year_range: document.getElementById('ed-n-myr').value.trim(),
+        windshield_size: document.getElementById('ed-n-ws').value.trim(),
+        rear_window_size: document.getElementById('ed-n-rs').value.trim(),
+        front_side_size: document.getElementById('ed-n-fs').value.trim(),
+        rear_side_triangle_size: document.getElementById('ed-n-sst').value.trim(),
+        reason,
+        updated_by: actor,
+      };
+      const r = await fetch(`/api/vehicle-norms/${encodeURIComponent(nid)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      if (!r.ok) throw new Error(await r.text());
+      toast('success', 'Định mức', 'Đã lưu');
+    } else if (_mcQuickMode === 'dealer') {
       const body = {
         dealer_id: document.getElementById('qc-dealer-id').value.trim(),
         dealer_name: document.getElementById('qc-dealer-name').value.trim(),
@@ -402,8 +690,11 @@ document.getElementById('modal-quick-ok')?.addEventListener('click', async () =>
       toast('success', 'Xe', 'Đã tạo hồ sơ xe');
       document.getElementById('mc-veh-select').value = body.vehicle_id;
     }
+    const doneMode = _mcQuickMode;
     document.getElementById('modal-quick-overlay').style.display = 'none';
-    taiTaoDonTay();
+    _mcQuickMode = null;
+    if (['edit-dealer', 'edit-customer', 'create-norm', 'edit-norm'].includes(doneMode)) taiKhachHang();
+    else taiTaoDonTay();
   } catch (e) { toast('error', 'Lỗi lưu', e.message); }
 });
 
@@ -462,7 +753,38 @@ document.getElementById('mc-veh-select')?.addEventListener('change', async (e) =
   if (v) {
     document.getElementById('mc-veh-model').value = v.vehicle_model_code || '';
     document.getElementById('mc-vin-masked').value = v.vin_masked || '';
+    if (v.model_year) document.getElementById('mc-model-year').value = String(v.model_year);
   }
+  window.mcPreviewNorm?.();
+});
+
+async function mcPreviewNorm() {
+  const box = document.getElementById('mc-norm-preview');
+  if (!box) return;
+  if (!document.getElementById('mc-svc-wf')?.checked) { box.innerHTML = ''; return; }
+  const vm = (document.getElementById('mc-veh-model')?.value || '').trim();
+  if (!vm) { box.innerHTML = ''; return; }
+  const my = (document.getElementById('mc-model-year')?.value || '').trim();
+  const ft = (document.getElementById('mc-film-type')?.value || 'Phim cách nhiệt').trim();
+  let q = `vehicle_model_code=${encodeURIComponent(vm)}&film_type=${encodeURIComponent(ft)}`;
+  if (my) q += `&model_year=${encodeURIComponent(my)}`;
+  try {
+    const res = await fetch(`/api/vehicle-norms/resolve?${q}`).then(r => r.json());
+    if (res.found) {
+      const rows = (res.auto_fill_items || []).map(i => `${i.job_item} ${i.material_code} ${i.size}`).join('<br/>');
+      box.innerHTML = `<strong>Định mức tự động</strong> (${res.norm?.norm_id || ''})<br/>${rows}`;
+    } else {
+      box.innerHTML = '<span style="color:var(--orange)">Chưa có định mức ACTIVE. Cập nhật tại Khách hàng → Hồ sơ xe → Định mức phim.</span>';
+    }
+  } catch (err) {
+    box.textContent = 'Không gọi được API resolve.';
+    console.warn(err);
+  }
+}
+window.mcPreviewNorm = mcPreviewNorm;
+['mc-veh-model', 'mc-model-year', 'mc-film-type', 'mc-svc-wf'].forEach(id => {
+  document.getElementById(id)?.addEventListener('change', () => mcPreviewNorm());
+  document.getElementById(id)?.addEventListener('input', () => { clearTimeout(window._mcNormT); window._mcNormT = setTimeout(mcPreviewNorm, 400); });
 });
 
 document.getElementById('mc-btn-submit')?.addEventListener('click', async () => {
@@ -490,7 +812,15 @@ document.getElementById('mc-btn-submit')?.addEventListener('click', async () => 
       ppf_type: document.getElementById('mc-ppf-type').value,
       include_window_film: wf,
       window_film_items: wfItems,
+      film_type: document.getElementById('mc-film-type')?.value || 'Phim cách nhiệt',
     },
+    model_year: (() => {
+      const v = document.getElementById('mc-model-year')?.value;
+      const n = parseInt(v, 10);
+      return Number.isFinite(n) ? n : undefined;
+    })(),
+    film_type: document.getElementById('mc-film-type')?.value || undefined,
+    continue_without_norm: document.getElementById('mc-continue-no-norm')?.checked || false,
     assigned_teams: {
       ppf_team: document.getElementById('mc-team-ppf').value,
       window_film_team: document.getElementById('mc-team-wf').value,
@@ -880,6 +1210,28 @@ async function hienThiDon(req) {
   document.getElementById('det-model').textContent = req.vehicle_model_code;
   document.getElementById('det-vin').textContent = req.vin_masked || req.vin_number;
   document.getElementById('det-deadline').textContent = fmtDt(req.requested_delivery_time);
+  const normCard = document.getElementById('det-norm-card');
+  const normBody = document.getElementById('det-norm-body');
+  let na = req.norm_application;
+  if (!na && req.norm_application_json) {
+    try { na = JSON.parse(req.norm_application_json); } catch (e) { na = null; }
+  }
+  if (na && normCard && normBody) {
+    normCard.style.display = 'block';
+    const src = na.source || '—';
+    const items = (na.applied_items || []).map(i => `${i.job_item} ${i.material_code} ${i.size}`).join('<br/>');
+    normBody.innerHTML = `
+      <div><strong>norm_id</strong>: ${na.norm_id || na.norm?.norm_id || '—'}</div>
+      <div><strong>film_type</strong>: ${na.film_type || na.norm?.film_type || '—'}</div>
+      <div><strong>model</strong>: ${na.vehicle_model_code || na.norm?.vehicle_model_code || '—'} · <strong>range</strong>: ${na.model_year_range || na.norm?.model_year_range || '—'}</div>
+      <div><strong>source</strong>: ${src}</div>
+      ${na.override_reason ? `<div><strong>override_reason</strong>: ${_esc(na.override_reason)}</div>` : ''}
+      <div style="margin-top:6px">${items || '<span class="muted">Không có auto_fill_items</span>'}</div>
+      ${na.warning ? `<div class="hitl-alert" style="margin-top:8px">${_esc(na.warning)}</div>` : ''}
+    `;
+  } else if (normCard) {
+    normCard.style.display = 'none';
+  }
   const cgBox = document.getElementById('cutting-group-box');
   if (req.is_grouped_cut) {
     cgBox.style.display = 'flex';

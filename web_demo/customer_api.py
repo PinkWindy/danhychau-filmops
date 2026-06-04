@@ -23,6 +23,7 @@ from database import (
     DbCuttingGroupMatrix,
     DbNotification,
 )
+from vehicle_norm_logic import build_full_address, resolve_vehicle_norm, apply_auto_fill_to_plan
 
 router = APIRouter(prefix="/api", tags=["customers"])
 
@@ -178,6 +179,99 @@ def _material_plan_for_items(items: list) -> list:
     return out
 
 
+def _serialize_dealer(d: DbDealer) -> dict:
+    fa = getattr(d, "full_address", None) or None
+    if not (fa or "").strip():
+        fa = build_full_address(
+            getattr(d, "address_no", None),
+            getattr(d, "street", None),
+            getattr(d, "ward", None),
+            getattr(d, "city", None),
+        )
+    if not (fa or "").strip():
+        fa = d.address or ""
+    return {
+        "dealer_id": d.dealer_id,
+        "dealer_name": d.dealer_name,
+        "customer_category": getattr(d, "customer_category", None) or "DEALER",
+        "customer_name": d.dealer_name,
+        "legal_name": d.legal_name,
+        "dealer_group": d.dealer_group,
+        "tax_code": d.tax_code or "",
+        "phone": d.contact_phone or "",
+        "address_no": getattr(d, "address_no", None) or "",
+        "street": getattr(d, "street", None) or "",
+        "ward": getattr(d, "ward", None) or "",
+        "city": getattr(d, "city", None) or "",
+        "full_address": fa or "",
+        "amis_customer_code": getattr(d, "amis_customer_code", None) or "",
+        "status": d.status or "ACTIVE",
+        "address": d.address,
+        "contact_phone": d.contact_phone,
+        "contact_person": d.contact_person,
+        "email": d.email,
+        "created_at": d.created_at,
+        "updated_at": getattr(d, "updated_at", None),
+        "note": d.note,
+    }
+
+
+def _serialize_customer(c: DbCustomer) -> dict:
+    fa = getattr(c, "full_address", None) or None
+    if not (fa or "").strip():
+        fa = build_full_address(
+            getattr(c, "address_no", None),
+            getattr(c, "street", None),
+            getattr(c, "ward", None),
+            getattr(c, "city", None),
+        )
+    if not (fa or "").strip():
+        fa = (c.address or c.address_masked or "") or ""
+    return {
+        "customer_id": c.customer_id,
+        "customer_category": getattr(c, "customer_category", None) or "RETAIL_CUSTOMER",
+        "customer_name": c.customer_name,
+        "customer_masked": c.customer_masked,
+        "tax_code": getattr(c, "tax_code", None) or "",
+        "phone": c.phone or "",
+        "address_no": getattr(c, "address_no", None) or "",
+        "street": getattr(c, "street", None) or "",
+        "ward": getattr(c, "ward", None) or "",
+        "city": getattr(c, "city", None) or "",
+        "full_address": fa or "",
+        "amis_customer_code": getattr(c, "amis_customer_code", None) or "",
+        "status": c.status or "ACTIVE",
+        "phone_masked": c.phone_masked,
+        "email": c.email,
+        "address": c.address,
+        "address_masked": c.address_masked,
+        "source_dealer_id": c.source_dealer_id,
+        "customer_type": c.customer_type,
+        "source_channel": c.source_channel,
+        "crm_status": c.crm_status,
+        "consent_status": c.consent_status,
+        "created_at": c.created_at,
+        "updated_at": getattr(c, "updated_at", None),
+        "note": c.note,
+    }
+
+
+def _open_requests_count_dealer(db: Session, dealer_id: str) -> int:
+    return (
+        db.query(DbRequest)
+        .filter(DbRequest.dealer_id == dealer_id, DbRequest.status != "CLOSED")
+        .count()
+    )
+
+
+def _open_requests_count_customer(db: Session, customer_id: str) -> int:
+    return (
+        db.query(DbRequest)
+        .filter(DbRequest.customer_id == customer_id, DbRequest.status != "CLOSED")
+        .count()
+    )
+
+
 def register_customer_routes(app, get_db):
     """Mount customer + manual-create routes."""
 
@@ -227,7 +321,8 @@ def register_customer_routes(app, get_db):
             query = query.filter(DbDealer.status == status)
         if dealer_group:
             query = query.filter(DbDealer.dealer_group == dealer_group)
-        return query.order_by(DbDealer.dealer_id).all()
+        rows = query.order_by(DbDealer.dealer_id).all()
+        return [_serialize_dealer(d) for d in rows]
 
     @router.post("/dealers")
     def create_dealer(data: dict, db: Session = Depends(get_db)):
@@ -236,29 +331,48 @@ def register_customer_routes(app, get_db):
             raise HTTPException(400, "dealer_id bắt buộc")
         if db.query(DbDealer).filter(DbDealer.dealer_id == did).first():
             raise HTTPException(409, "dealer_id đã tồn tại")
-        name = (data.get("dealer_name") or "").strip()
+        name = (data.get("dealer_name") or data.get("customer_name") or "").strip()
         if not name:
-            raise HTTPException(400, "dealer_name bắt buộc")
+            raise HTTPException(400, "dealer_name / customer_name bắt buộc")
+        tax = (data.get("tax_code") or "").strip()
+        if tax:
+            dup_tax = db.query(DbDealer).filter(DbDealer.tax_code == tax).first()
+            if dup_tax:
+                raise HTTPException(409, f"tax_code đã tồn tại ({dup_tax.dealer_id})")
         actor = data.get("created_by") or "WEB"
+        addr_no = (data.get("address_no") or "").strip() or None
+        street = (data.get("street") or "").strip() or None
+        ward = (data.get("ward") or "").strip() or None
+        city = (data.get("city") or "").strip() or None
+        full_ad = (data.get("full_address") or "").strip() or build_full_address(addr_no, street, ward, city)
+        if not full_ad:
+            full_ad = data.get("address")
         d = DbDealer(
             dealer_id=did,
             dealer_name=name,
             legal_name=data.get("legal_name"),
             dealer_group=data.get("dealer_group"),
-            tax_code=data.get("tax_code"),
-            address=data.get("address"),
-            contact_phone=data.get("phone") or data.get("phone_masked"),
+            tax_code=tax or None,
+            address=data.get("address") or full_ad,
+            contact_phone=(data.get("phone") or data.get("phone_masked") or data.get("contact_phone")),
             contact_person=data.get("contact_person"),
             email=data.get("email"),
             status=data.get("status") or "ACTIVE",
             created_at=_now(),
             note=data.get("note"),
+            customer_category=(data.get("customer_category") or "DEALER").strip() or "DEALER",
+            address_no=addr_no,
+            street=street,
+            ward=ward,
+            city=city,
+            full_address=full_ad,
+            amis_customer_code=(data.get("amis_customer_code") or "").strip() or None,
         )
         db.add(d)
         _audit(db, None, "DEALER_CREATED", "DEALER", did, None, name, data.get("note") or "", actor)
         db.commit()
         db.refresh(d)
-        return d
+        return _serialize_dealer(d)
 
     @router.put("/dealers/{dealer_id}")
     def update_dealer(dealer_id: str, data: dict, db: Session = Depends(get_db)):
@@ -276,11 +390,25 @@ def register_customer_routes(app, get_db):
             "status": d.status,
             "address": d.address,
             "contact_phone": d.contact_phone,
+            "tax_code": d.tax_code,
+            "full_address": getattr(d, "full_address", None),
         }
-        for field in ("dealer_name", "legal_name", "dealer_group", "tax_code", "address",
-                      "contact_phone", "contact_person", "email", "status", "note"):
+        for field in (
+            "dealer_name", "legal_name", "dealer_group", "tax_code", "address",
+            "contact_phone", "contact_person", "email", "status", "note",
+            "customer_category", "address_no", "street", "ward", "city",
+            "amis_customer_code",
+        ):
             if field in data and data[field] is not None:
                 setattr(d, field, data[field])
+        if "phone" in data and data["phone"] is not None:
+            d.contact_phone = data["phone"]
+        if "customer_name" in data and data["customer_name"]:
+            d.dealer_name = str(data["customer_name"]).strip()
+        if "full_address" in data and data["full_address"]:
+            d.full_address = str(data["full_address"]).strip()
+        elif any(k in data for k in ("address_no", "street", "ward", "city")):
+            d.full_address = build_full_address(d.address_no, d.street, d.ward, d.city) or d.full_address
         d.updated_at = _now()
         after = {
             "dealer_name": d.dealer_name,
@@ -289,6 +417,8 @@ def register_customer_routes(app, get_db):
             "status": d.status,
             "address": d.address,
             "contact_phone": d.contact_phone,
+            "tax_code": d.tax_code,
+            "full_address": getattr(d, "full_address", None),
         }
         _audit(
             db,
@@ -303,7 +433,43 @@ def register_customer_routes(app, get_db):
         )
         db.commit()
         db.refresh(d)
-        return d
+        return _serialize_dealer(d)
+
+    @router.post("/dealers/{dealer_id}/activate")
+    def activate_dealer(dealer_id: str, data: dict, db: Session = Depends(get_db)):
+        reason = (data.get("reason") or "").strip()
+        if not reason:
+            raise HTTPException(400, "reason bắt buộc")
+        d = db.query(DbDealer).filter(DbDealer.dealer_id == dealer_id).first()
+        if not d:
+            raise HTTPException(404, "Không tìm thấy dealer")
+        actor = data.get("updated_by") or "WEB"
+        before = d.status
+        d.status = "ACTIVE"
+        d.updated_at = _now()
+        _audit(db, None, "DEALER_ACTIVATED", "DEALER", dealer_id, before, "ACTIVE", reason, actor)
+        db.commit()
+        db.refresh(d)
+        return _serialize_dealer(d)
+
+    @router.post("/dealers/{dealer_id}/deactivate")
+    def deactivate_dealer(dealer_id: str, data: dict, db: Session = Depends(get_db)):
+        reason = (data.get("reason") or "").strip()
+        if not reason:
+            raise HTTPException(400, "reason bắt buộc")
+        d = db.query(DbDealer).filter(DbDealer.dealer_id == dealer_id).first()
+        if not d:
+            raise HTTPException(404, "Không tìm thấy dealer")
+        if _open_requests_count_dealer(db, dealer_id) > 0 and not data.get("admin_override"):
+            raise HTTPException(400, "Còn đơn chưa CLOSED — không inactive (admin_override + reason nếu cần).")
+        actor = data.get("updated_by") or "WEB"
+        before = d.status
+        d.status = "INACTIVE"
+        d.updated_at = _now()
+        _audit(db, None, "DEALER_DEACTIVATED", "DEALER", dealer_id, before, "INACTIVE", reason, actor)
+        db.commit()
+        db.refresh(d)
+        return _serialize_dealer(d)
 
     @router.get("/end-customers")
     def list_end_customers(
@@ -329,7 +495,8 @@ def register_customer_routes(app, get_db):
             query = query.filter(DbCustomer.customer_type == customer_type)
         if crm_status:
             query = query.filter(DbCustomer.crm_status == crm_status)
-        return query.order_by(DbCustomer.customer_id).all()
+        rows = query.order_by(DbCustomer.customer_id).all()
+        return [_serialize_customer(c) for c in rows]
 
     @router.post("/end-customers")
     def create_end_customer(data: dict, db: Session = Depends(get_db)):
@@ -341,18 +508,26 @@ def register_customer_routes(app, get_db):
         masked = (data.get("customer_masked") or data.get("customer_name") or "").strip()
         if not masked:
             raise HTTPException(400, "customer_masked hoặc customer_name bắt buộc")
+        cname = (data.get("customer_name") or masked).strip()
+        addr_no = (data.get("address_no") or "").strip() or None
+        street = (data.get("street") or "").strip() or None
+        ward = (data.get("ward") or "").strip() or None
+        city = (data.get("city") or "").strip() or None
+        full_ad = (data.get("full_address") or "").strip() or build_full_address(addr_no, street, ward, city)
+        if not full_ad:
+            full_ad = data.get("address") or data.get("address_masked")
         ch = data.get("source_channel") or "MANUAL"
         if ch == "DEALER" and not (data.get("source_dealer_id") or "").strip():
             pass  # nên có — chỉ cảnh báo business, không chặn cứng demo
         actor = data.get("created_by") or "WEB"
         c = DbCustomer(
             customer_id=cid,
-            customer_name=data.get("customer_name") or masked,
+            customer_name=cname,
             customer_masked=masked,
-            phone=data.get("phone"),
+            phone=data.get("phone") or data.get("phone_masked"),
             phone_masked=data.get("phone_masked"),
             email=data.get("email"),
-            address=data.get("address"),
+            address=data.get("address") or full_ad,
             address_masked=data.get("address_masked"),
             source_dealer_id=data.get("source_dealer_id"),
             customer_type=data.get("customer_type") or "END_CUSTOMER",
@@ -360,15 +535,23 @@ def register_customer_routes(app, get_db):
             crm_status=data.get("crm_status") or "NEW_PENDING_VERIFICATION",
             consent_status=data.get("consent_status") or "UNKNOWN",
             created_from_request_id=data.get("created_from_request_id"),
-            status="ACTIVE",
+            status=data.get("status") or "ACTIVE",
             created_at=_now(),
             note=data.get("note"),
+            customer_category=(data.get("customer_category") or "RETAIL_CUSTOMER").strip() or "RETAIL_CUSTOMER",
+            tax_code=(data.get("tax_code") or "").strip() or None,
+            address_no=addr_no,
+            street=street,
+            ward=ward,
+            city=city,
+            full_address=full_ad,
+            amis_customer_code=(data.get("amis_customer_code") or "").strip() or None,
         )
         db.add(c)
         _audit(db, None, "CUSTOMER_CREATED", "CUSTOMER", cid, None, masked, data.get("note") or "", actor)
         db.commit()
         db.refresh(c)
-        return c
+        return _serialize_customer(c)
 
     @router.put("/end-customers/{customer_id}")
     def update_end_customer(customer_id: str, data: dict, db: Session = Depends(get_db)):
@@ -393,10 +576,14 @@ def register_customer_routes(app, get_db):
         for field in (
             "customer_name", "customer_masked", "phone", "phone_masked", "email",
             "address", "address_masked", "customer_type", "source_channel",
-            "source_dealer_id", "crm_status", "consent_status", "note",
+            "source_dealer_id", "crm_status", "consent_status", "note", "status",
+            "customer_category", "tax_code", "address_no", "street", "ward", "city",
+            "amis_customer_code", "full_address",
         ):
             if field in data and data[field] is not None:
                 setattr(c, field, data[field])
+        if any(k in data for k in ("address_no", "street", "ward", "city")) and not data.get("full_address"):
+            c.full_address = build_full_address(c.address_no, c.street, c.ward, c.city) or c.full_address
         c.updated_at = _now()
         after = {k: getattr(c, k, None) for k in before}
         _audit(
@@ -412,7 +599,43 @@ def register_customer_routes(app, get_db):
         )
         db.commit()
         db.refresh(c)
-        return c
+        return _serialize_customer(c)
+
+    @router.post("/end-customers/{customer_id}/activate")
+    def activate_customer(customer_id: str, data: dict, db: Session = Depends(get_db)):
+        reason = (data.get("reason") or "").strip()
+        if not reason:
+            raise HTTPException(400, "reason bắt buộc")
+        c = db.query(DbCustomer).filter(DbCustomer.customer_id == customer_id).first()
+        if not c:
+            raise HTTPException(404, "Không tìm thấy khách hàng")
+        actor = data.get("updated_by") or "WEB"
+        before = c.status
+        c.status = "ACTIVE"
+        c.updated_at = _now()
+        _audit(db, None, "CUSTOMER_ACTIVATED", "CUSTOMER", customer_id, before, "ACTIVE", reason, actor)
+        db.commit()
+        db.refresh(c)
+        return _serialize_customer(c)
+
+    @router.post("/end-customers/{customer_id}/deactivate")
+    def deactivate_customer(customer_id: str, data: dict, db: Session = Depends(get_db)):
+        reason = (data.get("reason") or "").strip()
+        if not reason:
+            raise HTTPException(400, "reason bắt buộc")
+        c = db.query(DbCustomer).filter(DbCustomer.customer_id == customer_id).first()
+        if not c:
+            raise HTTPException(404, "Không tìm thấy khách hàng")
+        if _open_requests_count_customer(db, customer_id) > 0 and not data.get("admin_override"):
+            raise HTTPException(400, "Còn đơn chưa CLOSED — không inactive (admin_override nếu cần).")
+        actor = data.get("updated_by") or "WEB"
+        before = c.status
+        c.status = "INACTIVE"
+        c.updated_at = _now()
+        _audit(db, None, "CUSTOMER_DEACTIVATED", "CUSTOMER", customer_id, before, "INACTIVE", reason, actor)
+        db.commit()
+        db.refresh(c)
+        return _serialize_customer(c)
 
     @router.get("/vehicles")
     def list_vehicles(
@@ -581,6 +804,42 @@ def register_customer_routes(app, get_db):
             reason,
             actor,
         )
+        db.commit()
+        db.refresh(v)
+        return v
+
+    @router.post("/vehicles/{vehicle_id}/activate")
+    def activate_vehicle(vehicle_id: str, data: dict, db: Session = Depends(get_db)):
+        reason = (data.get("reason") or "").strip()
+        if not reason:
+            raise HTTPException(400, "reason bắt buộc")
+        v = db.query(DbVehicleProfile).filter(DbVehicleProfile.vehicle_id == vehicle_id).first()
+        if not v:
+            raise HTTPException(404, "Không tìm thấy xe")
+        actor = data.get("updated_by") or "WEB"
+        before = {"vehicle_status": v.vehicle_status, "status": v.status}
+        v.vehicle_status = "ACTIVE"
+        v.status = "ACTIVE"
+        v.updated_at = _now()
+        _audit(db, None, "VEHICLE_ACTIVATED", "VEHICLE", vehicle_id, str(before), "ACTIVE", reason, actor)
+        db.commit()
+        db.refresh(v)
+        return v
+
+    @router.post("/vehicles/{vehicle_id}/deactivate")
+    def deactivate_vehicle(vehicle_id: str, data: dict, db: Session = Depends(get_db)):
+        reason = (data.get("reason") or "").strip()
+        if not reason:
+            raise HTTPException(400, "reason bắt buộc")
+        v = db.query(DbVehicleProfile).filter(DbVehicleProfile.vehicle_id == vehicle_id).first()
+        if not v:
+            raise HTTPException(404, "Không tìm thấy xe")
+        actor = data.get("updated_by") or "WEB"
+        before = {"vehicle_status": v.vehicle_status, "status": v.status}
+        v.vehicle_status = "INACTIVE"
+        v.status = "INACTIVE"
+        v.updated_at = _now()
+        _audit(db, None, "VEHICLE_DEACTIVATED", "VEHICLE", vehicle_id, str(before), "INACTIVE", reason, actor)
         db.commit()
         db.refresh(v)
         return v
@@ -816,6 +1075,65 @@ def register_customer_routes(app, get_db):
 
         cg = _wf_cut_group(db, vehicle_model) if inc_wf else None
         wf_plan = _material_plan_for_items(wf_items if inc_wf else [])
+        model_year_val = None
+        try:
+            if data.get("model_year") is not None:
+                model_year_val = int(data.get("model_year"))
+        except (TypeError, ValueError):
+            model_year_val = None
+        if model_year_val is None and requested_at and len(str(requested_at)) >= 4:
+            try:
+                model_year_val = int(str(requested_at)[:4])
+            except (TypeError, ValueError):
+                pass
+        if model_year_val is None and vehicle_id:
+            _vp = db.query(DbVehicleProfile).filter(DbVehicleProfile.vehicle_id == vehicle_id).first()
+            if _vp and _vp.model_year is not None:
+                model_year_val = int(_vp.model_year)
+        norm_application = None
+        film_type = (
+            (data.get("film_type") or "").strip()
+            or (svc.get("window_film_type") or "").strip()
+            or (svc.get("film_type") or "").strip()
+            or "Phim cách nhiệt"
+        )
+        if inc_wf:
+            res = resolve_vehicle_norm(db, vehicle_model, model_year_val, film_type)
+            norm_application = {
+                "found": res["found"],
+                "norm_id": (res.get("norm") or {}).get("norm_id") if res.get("norm") else None,
+                "norm": res.get("norm"),
+                "applied_items": res.get("auto_fill_items") or [],
+                "source": "AUTO_FROM_VEHICLE_NORM" if res["found"] else None,
+                "film_type": film_type,
+                "vehicle_model_code": vehicle_model,
+                "model_year_range": (res.get("norm") or {}).get("model_year_range"),
+                "model_year": model_year_val,
+            }
+            if res["found"]:
+                wf_plan = apply_auto_fill_to_plan(wf_plan, res["auto_fill_items"])
+            elif not data.get("continue_without_norm"):
+                needs_review = True
+                review_notes.append("NO_VEHICLE_NORM_ACTIVE")
+            ovs = data.get("norm_override")
+            if ovs and isinstance(ovs, list):
+                by_ji = {str(o.get("job_item")): o for o in ovs if o.get("job_item")}
+                for row in wf_plan:
+                    o = by_ji.get(str(row.get("job_item")))
+                    if not o:
+                        continue
+                    if o.get("material_code"):
+                        row["material_code"] = o["material_code"]
+                    if o.get("size"):
+                        row["size"] = o["size"]
+                    if o.get("width_cm") is not None:
+                        row["width_cm"] = o["width_cm"]
+                    if o.get("length_cm") is not None:
+                        row["length_cm"] = o["length_cm"]
+                norm_application["source"] = "MANUAL_OVERRIDE"
+                norm_application["override_reason"] = (
+                    data.get("norm_override_reason") or data.get("override_reason") or "norm_override"
+                )
         wf_block = "152x143"
         wf_len = 1.43
         if cg:
@@ -870,6 +1188,7 @@ def register_customer_routes(app, get_db):
             source_channel="MANUAL",
             exception_reason="; ".join(review_notes + stock_flags) if (review_notes or stock_flags) else None,
             service_selection_json=json.dumps(svc, ensure_ascii=False),
+            norm_application_json=json.dumps(norm_application, ensure_ascii=False) if norm_application else None,
         )
         db.add(req)
 

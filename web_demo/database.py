@@ -29,6 +29,14 @@ class DbDealer(Base):
     created_at = Column(String)
     updated_at = Column(String)
     note = Column(Text)
+    # AMIS-style (bổ sung, không xóa cột cũ)
+    customer_category = Column(String, default="DEALER")
+    address_no = Column(String)
+    street = Column(String)
+    ward = Column(String)
+    city = Column(String)
+    full_address = Column(Text)
+    amis_customer_code = Column(String)
 
 
 class DbCustomer(Base):
@@ -51,6 +59,15 @@ class DbCustomer(Base):
     created_at = Column(String)
     updated_at = Column(String)
     note = Column(Text)
+    # AMIS-style
+    customer_category = Column(String, default="RETAIL_CUSTOMER")
+    tax_code = Column(String)
+    address_no = Column(String)
+    street = Column(String)
+    ward = Column(String)
+    city = Column(String)
+    full_address = Column(Text)
+    amis_customer_code = Column(String)
 
 
 class DbVehicleProfile(Base):
@@ -163,6 +180,42 @@ class DbRequest(Base):
     dealer_name = Column(String)
     vin_masked = Column(String)
     service_selection_json = Column(Text)
+    norm_application_json = Column(Text)
+
+
+class DbVehicleFilmNorm(Base):
+    """Định mức phim cách nhiệt theo dòng xe / khoảng năm model."""
+    __tablename__ = "vehicle_film_norms"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    norm_id = Column(String, unique=True, index=True, nullable=False)
+    film_type = Column(String, nullable=False)
+    vehicle_model_code = Column(String, nullable=False, index=True)
+    model_year_range = Column(String, nullable=False)
+    windshield_size = Column(String)
+    windshield_width_cm = Column(Float)
+    windshield_length_cm = Column(Float)
+    rear_window_size = Column(String)
+    rear_window_width_cm = Column(Float)
+    rear_window_length_cm = Column(Float)
+    front_side_size = Column(String)
+    front_side_width_cm = Column(Float)
+    front_side_length_cm = Column(Float)
+    rear_side_triangle_size = Column(String)
+    rear_side_triangle_width_cm = Column(Float)
+    rear_side_triangle_length_cm = Column(Float)
+    triangle_size = Column(String)
+    triangle_width_cm = Column(Float, default=0)
+    triangle_length_cm = Column(Float, default=0)
+    rear_side_size = Column(String)
+    rear_side_width_cm = Column(Float, default=0)
+    rear_side_length_cm = Column(Float, default=0)
+    sunroof_size = Column(String)
+    sunroof_width_cm = Column(Float, default=0)
+    sunroof_length_cm = Column(Float, default=0)
+    status = Column(String, default="ACTIVE")
+    created_at = Column(String)
+    updated_at = Column(String)
+    note = Column(Text)
 
 
 class DbWorkstream(Base):
@@ -422,6 +475,13 @@ def init_db():
             ("created_at", "TEXT"),
             ("updated_at", "TEXT"),
             ("note", "TEXT"),
+            ("customer_category", "TEXT DEFAULT 'DEALER'"),
+            ("address_no", "TEXT"),
+            ("street", "TEXT"),
+            ("ward", "TEXT"),
+            ("city", "TEXT"),
+            ("full_address", "TEXT"),
+            ("amis_customer_code", "TEXT"),
         ]
         for col, col_def in dealer_new_cols:
             _add_column_if_missing(conn, "dealers", col, col_def)
@@ -439,6 +499,14 @@ def init_db():
             ("created_at", "TEXT"),
             ("updated_at", "TEXT"),
             ("note", "TEXT"),
+            ("customer_category", "TEXT DEFAULT 'RETAIL_CUSTOMER'"),
+            ("tax_code", "TEXT"),
+            ("address_no", "TEXT"),
+            ("street", "TEXT"),
+            ("ward", "TEXT"),
+            ("city", "TEXT"),
+            ("full_address", "TEXT"),
+            ("amis_customer_code", "TEXT"),
         ]
         for col, col_def in customer_new_cols:
             _add_column_if_missing(conn, "customers", col, col_def)
@@ -462,6 +530,7 @@ def init_db():
             ("dealer_name", "TEXT"),
             ("vin_masked", "TEXT"),
             ("service_selection_json", "TEXT"),
+            ("norm_application_json", "TEXT"),
         ]
         for col, col_def in request_new_cols:
             _add_column_if_missing(conn, "requests", col, col_def)

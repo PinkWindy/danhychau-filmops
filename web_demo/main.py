@@ -19,6 +19,8 @@ from database import (
 )
 from inventory_api import register_inventory_routes, assert_source_valid_for_wf6_commit
 from customer_api import register_customer_routes
+from vehicle_norm_api import register_vehicle_norm_routes
+from vehicle_norm_logic import resolve_vehicle_norm
 
 _log = logging.getLogger("uvicorn.error")
 
@@ -29,6 +31,16 @@ async def lifespan(app: FastAPI):
     try:
         init_db()
         _log.info("DYC init_db() completed (schema / migrations).")
+        from populate_db import _seed_amis_and_vehicle_norms
+        db = SessionLocal()
+        try:
+            _seed_amis_and_vehicle_norms(db)
+            db.commit()
+            _log.info("DYC AMIS + vehicle norms seed checked.")
+        except Exception:
+            _log.exception("DYC seed AMIS/norms skipped or partial.")
+        finally:
+            db.close()
     except Exception:
         _log.exception("DYC init_db() failed — một số API có thể lỗi cho đến khi sửa DB.")
     yield
@@ -58,6 +70,7 @@ def get_db():
 
 register_inventory_routes(app, get_db)
 register_customer_routes(app, get_db)
+register_vehicle_norm_routes(app, get_db)
 
 def _now():
     return datetime.datetime.utcnow().isoformat() + "Z"
@@ -454,8 +467,85 @@ def get_requests(db: Session = Depends(get_db)):
 @app.get("/api/requests/{request_id}")
 def get_request(request_id: str, db: Session = Depends(get_db)):
     req = db.query(DbRequest).filter(DbRequest.request_id == request_id).first()
-    if not req: raise HTTPException(404, "Not found")
-    return req
+    if not req:
+        raise HTTPException(404, "Not found")
+    d = req.__dict__.copy()
+    d.pop("_sa_instance_state", None)
+    if req.service_selection_json:
+        try:
+            d["service_selection"] = json.loads(req.service_selection_json)
+        except Exception:
+            d["service_selection"] = None
+    if getattr(req, "norm_application_json", None):
+        try:
+            d["norm_application"] = json.loads(req.norm_application_json)
+        except Exception:
+            d["norm_application"] = None
+    else:
+        d["norm_application"] = None
+    return d
+
+
+@app.put("/api/requests/{request_id}/norm-override")
+def override_request_norm(request_id: str, data: dict, db: Session = Depends(get_db)):
+    reason = (data.get("reason") or "").strip()
+    if not reason:
+        raise HTTPException(400, "reason bắt buộc")
+    req = db.query(DbRequest).filter(DbRequest.request_id == request_id).first()
+    if not req:
+        raise HTTPException(404, "Không tìm thấy request")
+    allowed = {"DRAFT", "STANDARDIZED", "NORM_ASSIGNED", "ALLOCATED", "NEEDS_REVIEW", "EXCEPTION_HOLD"}
+    if req.status not in allowed and not data.get("admin_override"):
+        raise HTTPException(400, "Chỉ ghi đè định mức khi đơn chưa phê duyệt (hoặc admin_override).")
+    actor = data.get("updated_by") or "WEB"
+    prev = {}
+    try:
+        prev = json.loads(req.norm_application_json) if req.norm_application_json else {}
+    except Exception:
+        prev = {}
+    applied = data.get("applied_items") or data.get("auto_fill_items") or []
+    norm_block = {
+        "norm_id": data.get("norm_id") or (prev.get("norm") or {}).get("norm_id"),
+        "film_type": data.get("film_type") or (prev.get("norm") or {}).get("film_type"),
+        "vehicle_model_code": data.get("vehicle_model_code") or req.vehicle_model_code,
+        "model_year_range": data.get("model_year_range") or (prev.get("norm") or {}).get("model_year_range"),
+        "applied_items": applied,
+        "source": "MANUAL_OVERRIDE",
+        "override_reason": reason,
+    }
+    req.norm_application_json = json.dumps(norm_block, ensure_ascii=False)
+    # Cập nhật material_plan luồng WF nếu còn PENDING_APPROVAL
+    wss = db.query(DbWorkstream).filter(DbWorkstream.request_id == request_id).all()
+    for ws in wss:
+        if ws.workstream_type == "WINDOW_FILM_INSTALLATION" and ws.status == "PENDING_APPROVAL" and ws.material_plan:
+            try:
+                plan = json.loads(ws.material_plan)
+            except Exception:
+                plan = []
+            idx = {x.get("job_item"): i for i, x in enumerate(plan)}
+            for it in applied:
+                ji = it.get("job_item")
+                if ji in idx:
+                    row = plan[idx[ji]]
+                    row["material_code"] = it.get("material_code", row.get("material_code"))
+                    row["size"] = it.get("size", row.get("size"))
+                    row["width_cm"] = it.get("width_cm", row.get("width_cm"))
+                    row["length_cm"] = it.get("length_cm", row.get("length_cm"))
+            ws.material_plan = json.dumps(plan, ensure_ascii=False)
+    _audit(
+        db,
+        request_id,
+        "REQUEST_NORM_OVERRIDDEN",
+        "REQUEST",
+        request_id,
+        json.dumps(prev, ensure_ascii=False),
+        req.norm_application_json,
+        reason,
+        actor,
+    )
+    db.commit()
+    db.refresh(req)
+    return get_request(request_id, db)
 
 @app.get("/api/requests/{request_id}/workstreams")
 def get_workstreams(request_id: str, db: Session = Depends(get_db)):
@@ -1118,18 +1208,49 @@ def confirm_ocr(draft_id: str, data: dict, db: Session = Depends(get_db)):
     new_req_id = f"REQ-{today.strftime('%Y%m%d')}-{str(cnt+1).zfill(3)}"
     services = draft.extracted_services or "PPF,WINDOW_FILM"
     is_multi = "PPF" in services and "WINDOW_FILM" in services
+    vmodel = (data.get("vehicle_model") or draft.extracted_vehicle_model or "LEXUS_RX350").strip()
+    my_raw = data.get("model_year")
+    try:
+        model_year = int(my_raw) if my_raw is not None else None
+    except (TypeError, ValueError):
+        model_year = None
+    if model_year is None and draft.extracted_delivery_time:
+        try:
+            model_year = int(str(draft.extracted_delivery_time)[:4])
+        except Exception:
+            model_year = None
+    norm_payload = None
+    if "WINDOW_FILM" in services:
+        ft = (data.get("film_type") or "Phim cách nhiệt").strip()
+        res = resolve_vehicle_norm(db, vmodel, model_year, ft)
+        norm_payload = {
+            "found": res["found"],
+            "norm": res.get("norm"),
+            "applied_items": res.get("auto_fill_items") or [],
+            "source": "AUTO_FROM_VEHICLE_NORM" if res["found"] else "OCR_DEFAULT",
+            "vehicle_model_code_resolve": vmodel,
+            "model_year": model_year,
+            "film_type": ft,
+        }
+        if not res["found"]:
+            norm_payload["warning"] = "Chưa có định mức ACTIVE cho dòng xe/năm model — kiểm tra Hồ sơ xe > Định mức phim."
     new_req = DbRequest(
         request_id=new_req_id,
         dealer_id="DEALER_LEXUS_SG", customer_id="KH_MASKED_001",
         customer_name=data.get("customer_name", draft.extracted_customer_name),
         vehicle_id="VH-MASKED-002",
         vin_number=data.get("vin", draft.extracted_vin),
-        vehicle_model_code="LEXUS_RX350", material_code="JB20",
+        vehicle_model_code=vmodel,
+        material_code="JB20",
         job_items=draft.extracted_job_items,
         status="DRAFT", is_grouped_cut=False, is_multi_workstream=is_multi,
         requested_delivery_time=draft.extracted_delivery_time,
         created_at=_now(),
         source_channel="OCR",
+        service_selection_json=json.dumps(
+            {"include_ppf": "PPF" in services, "include_window_film": "WINDOW_FILM" in services,
+             "extracted_services": services}, ensure_ascii=False),
+        norm_application_json=json.dumps(norm_payload, ensure_ascii=False) if norm_payload else None,
     )
     db.add(new_req)
     draft.review_status = "CONFIRMED"; draft.confirmed_by = "ADMIN-001"
@@ -1139,7 +1260,8 @@ def confirm_ocr(draft_id: str, data: dict, db: Session = Depends(get_db)):
                "INFO", new_req_id, "REQUEST", "ADMIN")
     db.commit()
     return {"status":"success","request_id":new_req_id,
-            "detail":f"✅ Request {new_req_id} tạo với {services}. Multi-workstream: {is_multi}."}
+            "detail":f"✅ Request {new_req_id} tạo với {services}. Multi-workstream: {is_multi}.",
+            "norm": norm_payload}
 
 @app.post("/api/ocr/{draft_id}/cancel")
 def cancel_ocr(draft_id: str, db: Session = Depends(get_db)):

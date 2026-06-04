@@ -69,12 +69,15 @@
 <!-- MODAL DEMO E2E -->
 <div class="modal-overlay" id="demo-modal-overlay" style="display:none">
   <div class="demo-modal">
-    <div class="demo-modal-header">
+    <div class="demo-modal-header" style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
+      <div style="display:flex;gap:12px;flex:1;min-width:0">
       <i class="fa-solid fa-rocket"></i>
       <div>
         <h3>🚀 Chạy Demo Tự Động — Đa Luồng Thi Công</h3>
         <p style="font-size:12px;color:var(--text-secondary);margin-top:4px">PPF + Phim cách nhiệt — đồng thời 2 đội</p>
       </div>
+      </div>
+      <button type="button" class="btn btn-icon btn-sm" id="btn-x-demo-modal" title="Đóng" aria-label="Đóng"><i class="fa-solid fa-xmark"></i></button>
     </div>
     <div id="demo-steps-log"></div>
     <div class="demo-modal-footer" id="demo-modal-footer" style="display:none">
@@ -87,12 +90,15 @@
 <!-- MODAL CHỈNH SỬA LUỒNG THI CÔNG -->
 <div class="modal-overlay" id="ws-edit-modal" style="display:none">
   <div class="demo-modal ws-edit-modal-inner" style="max-width:680px;max-height:90vh;overflow-y:auto">
-    <div class="demo-modal-header">
+    <div class="demo-modal-header" style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
+      <div style="display:flex;gap:12px;flex:1;min-width:0">
       <i class="fa-solid fa-pen-to-square" style="color:var(--orange)"></i>
       <div>
         <h3 id="ws-edit-title">Chỉnh Sửa Luồng Thi Công</h3>
         <p id="ws-edit-subtitle" style="font-size:12px;color:var(--text-secondary);margin-top:4px"></p>
       </div>
+      </div>
+      <button type="button" class="btn btn-icon btn-sm" id="btn-x-ws-edit" title="Đóng" aria-label="Đóng"><i class="fa-solid fa-xmark"></i></button>
     </div>
     <div id="ws-edit-body" style="padding:0 20px 16px"></div>
     <div class="demo-modal-footer" style="display:flex">
@@ -296,8 +302,12 @@
             </div>
             <div class="form-grid-2">
               <div><label>vehicle_model_code</label><input type="text" id="mc-veh-model" placeholder="LEXUS_RX350" /></div>
+              <div><label>Năm model</label><input type="number" id="mc-model-year" placeholder="2022" min="1990" max="2035" /></div>
               <div><label>vin_masked</label><input type="text" id="mc-vin-masked" /></div>
+              <div><label>Loại phim (định mức)</label><input type="text" id="mc-film-type" value="Phim cách nhiệt" /></div>
             </div>
+            <div id="mc-norm-preview" class="muted" style="font-size:11px;margin-top:8px;padding:8px;border-radius:8px;background:rgba(0,0,0,0.2)"></div>
+            <label class="chk" style="margin-top:8px;display:block"><input type="checkbox" id="mc-continue-no-norm" /> Tiếp tục nếu chưa có định mức (NEEDS_REVIEW)</label>
           </div>
           <div class="manual-section"><h4>4. Thời gian giao xe</h4>
             <div class="form-grid-2">
@@ -438,6 +448,11 @@
                   </div>
                 </div>
               </div>
+            </div>
+
+            <div class="detail-card" id="det-norm-card" style="display:none;margin-top:10px">
+              <h4><i class="fa-solid fa-ruler-combined"></i> Định mức áp dụng</h4>
+              <div id="det-norm-body" style="font-size:12px"></div>
             </div>
 
             <div class="action-card">
@@ -836,9 +851,12 @@
 
 <div class="modal-overlay" id="modal-quick-overlay" style="display:none">
   <div class="demo-modal" style="max-width:520px">
-    <div class="demo-modal-header">
+    <div class="demo-modal-header" style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
+      <div style="display:flex;gap:12px;flex:1;min-width:0">
       <i class="fa-solid fa-bolt"></i>
       <div><h3 id="modal-quick-title">Tạo nhanh</h3><p class="muted" style="font-size:12px" id="modal-quick-sub"></p></div>
+      </div>
+      <button type="button" class="btn btn-icon btn-sm" id="btn-x-modal-quick" title="Đóng" aria-label="Đóng"><i class="fa-solid fa-xmark"></i></button>
     </div>
     <div id="modal-quick-body" style="padding:12px 20px 20px"></div>
     <div class="demo-modal-footer">
@@ -850,9 +868,12 @@
 
 <div class="modal-overlay" id="modal-drawer-overlay" style="display:none">
   <div class="demo-modal" style="max-width:640px;max-height:90vh;overflow-y:auto">
-    <div class="demo-modal-header">
+    <div class="demo-modal-header" style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
+      <div style="display:flex;gap:12px;flex:1;min-width:0">
       <i class="fa-solid fa-eye"></i>
       <div><h3 id="drawer-title">Chi tiết</h3></div>
+      </div>
+      <button type="button" class="btn btn-icon btn-sm" id="btn-x-drawer" title="Đóng" aria-label="Đóng"><i class="fa-solid fa-xmark"></i></button>
     </div>
     <div id="drawer-body" style="padding:12px 20px 20px;font-size:13px"></div>
     <div class="demo-modal-footer">
