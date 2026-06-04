@@ -1582,6 +1582,9 @@ def register_customer_routes(app, get_db):
                 actual_confirmation_status="PENDING",
                 created_at=_now(),
             )
+            from ppf_allocation_service import build_default_ppf_allocation
+
+            ws_p.ppf_allocation_json = json.dumps(build_default_ppf_allocation(ws_p), ensure_ascii=False)
             db.add(ws_p)
             created_ws_types.append("PPF_INSTALLATION")
 
@@ -1607,6 +1610,10 @@ def register_customer_routes(app, get_db):
             )
             db.add(ws_w)
             created_ws_types.append("WINDOW_FILM_INSTALLATION")
+            db.flush()
+            from wf_allocation_service import build_default_wf_allocation
+
+            ws_w.wf_allocation_json = json.dumps(build_default_wf_allocation(db, ws_w), ensure_ascii=False)
 
         _audit(
             db,

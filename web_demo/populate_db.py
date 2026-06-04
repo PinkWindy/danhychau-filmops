@@ -853,7 +853,7 @@ def clean_and_load_csv():
             planned_cut_block="152x1300",
             planned_deduction_length_m=13.0,
             allocated_source_type="LOT",
-            allocated_source_id="LOT-JB20-003",
+            allocated_source_id="LOT-LEX-CO-TTYPE-01",
             status="PENDING_APPROVAL",
             actual_confirmation_status="PENDING",
             created_at="2026-06-04T01:00:00Z"
@@ -886,13 +886,13 @@ def clean_and_load_csv():
     db.flush()
     db.execute(
         text("UPDATE lot_inventory SET remaining_length_m = original_length_m WHERE lot_id = :lid"),
-        {"lid": "LOT-JB20-003"},
+        {"lid": "LOT-LEX-CO-TTYPE-01"},
     )
     _chk = db.execute(
         text("SELECT remaining_length_m FROM lot_inventory WHERE lot_id = :lid"),
-        {"lid": "LOT-JB20-003"},
+        {"lid": "LOT-LEX-CO-TTYPE-01"},
     ).fetchone()
-    print(f"PPF demo LOT-JB20-003 remaining synced to {_chk[0] if _chk else '?'}.")
+    print(f"PPF demo LOT-LEX-CO-TTYPE-01 remaining synced to {_chk[0] if _chk else '?'}.")
 
     # 9. Add initial notifications
     db.query(DbNotification).delete()

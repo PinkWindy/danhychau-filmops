@@ -257,6 +257,8 @@ class DbWorkstream(Base):
     material_plan = Column(Text)              # JSON for multi-material WF plan
     ppf_type_changed = Column(Boolean, default=False)
     ppf_type_change_reason = Column(Text)
+    ppf_allocation_json = Column(Text)  # JSON: nhiều LOT/OFFCUT cho PPF Full xe + hạng mục
+    wf_allocation_json = Column(Text)  # JSON: phân bổ WF theo hạng mục kính + nhiều nguồn
     # Planning
     cut_group_id = Column(String)
     planned_cut_block = Column(String)
@@ -570,6 +572,13 @@ def init_db():
         ]
         for col, col_def in ocr_draft_cols:
             _add_column_if_missing(conn, "ocr_drafts", col, col_def)
+
+        workstream_new_cols = [
+            ("ppf_allocation_json", "TEXT"),
+            ("wf_allocation_json", "TEXT"),
+        ]
+        for col, col_def in workstream_new_cols:
+            _add_column_if_missing(conn, "workstreams", col, col_def)
 
         conn.commit()
         conn.close()

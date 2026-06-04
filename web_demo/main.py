@@ -2,7 +2,7 @@ import os, uuid, datetime, json, logging, traceback
 from contextlib import asynccontextmanager
 from typing import Optional
 
-from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Query
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Query, Body
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -130,8 +130,8 @@ def _audit(db: Session, request_id, transaction_type, source_type, source_id,
     sfx = (workstream_id or request_id or "SYS")[-4:].upper()
     ts = datetime.date.today().strftime("%Y%m%d")
     db.add(DbAuditLog(
-        log_id=f"AUD-{ts}-{sfx}-{_uid('')[:4]}",
-        transaction_id=f"TXN-{ts}-{sfx}-{_uid('')[:4]}",
+        log_id=f"AUD-{ts}-{sfx}-{_uid('')[:8]}",
+        transaction_id=f"TXN-{ts}-{sfx}-{_uid('')[:8]}",
         request_id=request_id, workstream_id=workstream_id,
         workstream_type=workstream_type, cut_group_id=cut_group_id,
         transaction_type=transaction_type, transaction_status="CONFIRMED",
@@ -165,6 +165,9 @@ def _create_workstreams_for_request(db: Session, req: DbRequest) -> list:
         created_at=_now(),
     )
     db.add(ppf_ws)
+    from ppf_allocation_service import build_default_ppf_allocation
+
+    ppf_ws.ppf_allocation_json = json.dumps(build_default_ppf_allocation(ppf_ws), ensure_ascii=False)
     wss.append(ppf_ws)
 
     wf_ft = "Phim cách nhiệt"
@@ -199,6 +202,9 @@ def _create_workstreams_for_request(db: Session, req: DbRequest) -> list:
     )
     db.add(wf_ws)
     wss.append(wf_ws)
+    from wf_allocation_service import build_default_wf_allocation
+
+    wf_ws.wf_allocation_json = json.dumps(build_default_wf_allocation(db, wf_ws), ensure_ascii=False)
 
     req.is_multi_workstream = True
     return wss
@@ -225,6 +231,90 @@ def _update_request_status_from_workstreams(db: Session, req: DbRequest):
 
 def _commit_workstream_inventory(db: Session, ws: DbWorkstream, tech_id: str = "KTV-003"):
     """Commit inventory transaction for a single workstream."""
+    # Window Film: trừ từng nguồn theo wf_allocation_json (WF6)
+    if ws.workstream_type == "WINDOW_FILM_INSTALLATION" and getattr(ws, "wf_allocation_json", None):
+        try:
+            wf_alloc = json.loads(ws.wf_allocation_json)
+        except json.JSONDecodeError:
+            wf_alloc = {}
+        if wf_alloc.get("items"):
+            from wf_allocation_service import commit_wf_multi_source_inventory
+
+            if commit_wf_multi_source_inventory(db, ws, tech_id, lambda *args: _audit(db, *args)):
+                source_type = ws.allocated_source_type or "LOT"
+                source_id = ws.allocated_source_id or ""
+                new_offcut_id = None
+                if ws.has_new_offcut and ws.offcut_length_m and ws.offcut_width_m:
+                    base = f"SUBLOT-{ws.selected_material_code or 'JB20'}"
+                    cnt = db.query(DbOffcutInventory).filter(
+                        DbOffcutInventory.offcut_id.like(f"{base}-%")).count()
+                    new_offcut_id = f"{base}-{str(cnt+1).zfill(3)}"
+                    db.add(DbOffcutInventory(
+                        offcut_id=new_offcut_id,
+                        parent_lot_id=source_id if source_type == "LOT" else None,
+                        material_code=ws.selected_material_code,
+                        width_m=ws.offcut_width_m, length_m=ws.offcut_length_m,
+                        area_m2=round(ws.offcut_width_m * ws.offcut_length_m, 3),
+                        is_locked=False, storage_location=ws.offcut_storage_location or "OFFCUT-RACK-C",
+                        import_date=datetime.date.today().isoformat(), status="ACTIVE"
+                    ))
+                    ws.created_offcut_id = new_offcut_id
+                    _audit(db, ws.request_id, "CREATE_OFFCUT", source_type, source_id,
+                           "None", f"{new_offcut_id}",
+                           f"Mảnh dư mới từ {ws.workstream_type}",
+                           tech_id, ws.workstream_id, ws.workstream_type)
+                if ws.has_scrap and ws.scrap_area_m2:
+                    _audit(db, ws.request_id, "RECORD_SCRAP", source_type, source_id,
+                           "None", f"Scrap {ws.scrap_area_m2}m²",
+                           f"Phế liệu phát sinh {ws.workstream_type}",
+                           tech_id, ws.workstream_id, ws.workstream_type)
+                ws.inventory_committed = True
+                ws.status = "CLOSED"
+                ws.closed_at = _now()
+                return new_offcut_id
+
+    # PPF: trừ từng nguồn theo ppf_allocation_json (WF6)
+    if ws.workstream_type == "PPF_INSTALLATION" and getattr(ws, "ppf_allocation_json", None):
+        try:
+            alloc = json.loads(ws.ppf_allocation_json)
+        except json.JSONDecodeError:
+            alloc = {}
+        if alloc.get("items"):
+            from ppf_allocation_service import commit_ppf_multi_source_inventory
+
+            if commit_ppf_multi_source_inventory(db, ws, tech_id, lambda *args: _audit(db, *args)):
+                source_type = ws.allocated_source_type or "LOT"
+                source_id = ws.allocated_source_id or f"LOT-{ws.selected_material_code or 'T-TYPE'}-001"
+                new_offcut_id = None
+                if ws.has_new_offcut and ws.offcut_length_m and ws.offcut_width_m:
+                    base = f"SUBLOT-{ws.selected_material_code or 'T-TYPE'}"
+                    cnt = db.query(DbOffcutInventory).filter(
+                        DbOffcutInventory.offcut_id.like(f"{base}-%")).count()
+                    new_offcut_id = f"{base}-{str(cnt+1).zfill(3)}"
+                    db.add(DbOffcutInventory(
+                        offcut_id=new_offcut_id,
+                        parent_lot_id=source_id if source_type == "LOT" else None,
+                        material_code=ws.selected_material_code,
+                        width_m=ws.offcut_width_m, length_m=ws.offcut_length_m,
+                        area_m2=round(ws.offcut_width_m * ws.offcut_length_m, 3),
+                        is_locked=False, storage_location=ws.offcut_storage_location or "OFFCUT-RACK-C",
+                        import_date=datetime.date.today().isoformat(), status="ACTIVE"
+                    ))
+                    ws.created_offcut_id = new_offcut_id
+                    _audit(db, ws.request_id, "CREATE_OFFCUT", source_type, source_id,
+                           "None", f"{new_offcut_id}",
+                           f"Mảnh dư mới từ {ws.workstream_type}",
+                           tech_id, ws.workstream_id, ws.workstream_type)
+                if ws.has_scrap and ws.scrap_area_m2:
+                    _audit(db, ws.request_id, "RECORD_SCRAP", source_type, source_id,
+                           "None", f"Scrap {ws.scrap_area_m2}m²",
+                           f"Phế liệu phát sinh {ws.workstream_type}",
+                           tech_id, ws.workstream_id, ws.workstream_type)
+                ws.inventory_committed = True
+                ws.status = "CLOSED"
+                ws.closed_at = _now()
+                return new_offcut_id
+
     source_type = ws.allocated_source_type or "LOT"
     source_id = ws.allocated_source_id or f"LOT-{ws.selected_material_code}-001"
     before_bal, after_bal = 0.0, 0.0
@@ -582,15 +672,7 @@ def override_request_norm(request_id: str, data: dict, db: Session = Depends(get
 @app.get("/api/requests/{request_id}/workstreams")
 def get_workstreams(request_id: str, db: Session = Depends(get_db)):
     wss = db.query(DbWorkstream).filter(DbWorkstream.request_id == request_id).all()
-    result = []
-    for ws in wss:
-        d = ws.__dict__.copy()
-        d.pop("_sa_instance_state", None)
-        if ws.material_plan:
-            try: d["material_plan"] = json.loads(ws.material_plan)
-            except: pass
-        result.append(d)
-    return result
+    return [_serialize_workstream(ws, db) for ws in wss]
 
 @app.get("/api/lots")
 def get_lots(db: Session = Depends(get_db)):
@@ -716,30 +798,277 @@ def run_request_step(request_id: str, db: Session = Depends(get_db)):
 
     return {"status":"info","detail":"Không có bước tự động khả dụng."}
 
+
+def _serialize_workstream(ws: DbWorkstream, db: Optional[Session] = None) -> dict:
+    d = ws.__dict__.copy()
+    d.pop("_sa_instance_state", None)
+    if ws.material_plan:
+        try:
+            d["material_plan"] = json.loads(ws.material_plan)
+        except json.JSONDecodeError:
+            pass
+    if ws.workstream_type == "PPF_INSTALLATION":
+        from ppf_allocation_service import build_default_ppf_allocation
+
+        if getattr(ws, "ppf_allocation_json", None):
+            try:
+                d["ppf_allocation"] = json.loads(ws.ppf_allocation_json)
+            except json.JSONDecodeError:
+                d["ppf_allocation"] = build_default_ppf_allocation(ws)
+        else:
+            d["ppf_allocation"] = build_default_ppf_allocation(ws)
+    if ws.workstream_type == "WINDOW_FILM_INSTALLATION":
+        from wf_allocation_service import build_default_wf_allocation
+
+        if getattr(ws, "wf_allocation_json", None):
+            try:
+                d["wf_allocation"] = json.loads(ws.wf_allocation_json)
+            except json.JSONDecodeError:
+                d["wf_allocation"] = build_default_wf_allocation(db, ws) if db else {"items": [], "workstream_id": ws.workstream_id}
+        else:
+            d["wf_allocation"] = build_default_wf_allocation(db, ws) if db else {"items": [], "workstream_id": ws.workstream_id}
+    d.pop("ppf_allocation_json", None)
+    d.pop("wf_allocation_json", None)
+    return d
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # WORKSTREAM APIs
 # ═══════════════════════════════════════════════════════════════════════════════
 @app.get("/api/workstreams")
 def get_all_workstreams(db: Session = Depends(get_db)):
     wss = db.query(DbWorkstream).order_by(DbWorkstream.created_at.desc()).all()
-    result = []
-    for ws in wss:
-        d = ws.__dict__.copy(); d.pop("_sa_instance_state", None)
-        if ws.material_plan:
-            try: d["material_plan"] = json.loads(ws.material_plan)
-            except: pass
-        result.append(d)
-    return result
+    return [_serialize_workstream(ws, db) for ws in wss]
 
 @app.get("/api/workstreams/{ws_id}")
 def get_workstream(ws_id: str, db: Session = Depends(get_db)):
     ws = db.query(DbWorkstream).filter(DbWorkstream.workstream_id == ws_id).first()
-    if not ws: raise HTTPException(404, "Workstream not found")
-    d = ws.__dict__.copy(); d.pop("_sa_instance_state", None)
-    if ws.material_plan:
-        try: d["material_plan"] = json.loads(ws.material_plan)
-        except: pass
-    return d
+    if not ws:
+        raise HTTPException(404, "Workstream not found")
+    return _serialize_workstream(ws, db)
+
+
+@app.put("/api/workstreams/{ws_id}/ppf-allocation")
+def put_ppf_allocation_route(ws_id: str, data: dict = Body(...), db: Session = Depends(get_db)):
+    """Lưu proposal phân bổ PPF nhiều nguồn (trước duyệt). Không trừ kho."""
+    from ppf_allocation_service import (
+        put_ppf_allocation,
+        audit_ppf_allocation_save,
+        build_default_ppf_allocation,
+    )
+
+    ws = db.query(DbWorkstream).filter(DbWorkstream.workstream_id == ws_id).first()
+    if not ws:
+        raise HTTPException(404, "Workstream not found")
+    prev_raw = getattr(ws, "ppf_allocation_json", None) or ""
+    prev_snap = {}
+    if prev_raw:
+        try:
+            prev_snap = json.loads(prev_raw)
+        except json.JSONDecodeError:
+            prev_snap = {}
+    if not prev_snap:
+        prev_snap = build_default_ppf_allocation(ws)
+    prev_type = ws.selected_material_code or prev_snap.get("ppf_type")
+
+    out = put_ppf_allocation(db, ws_id, data, actor=data.get("actor", "QL-002"))
+    for fld in ("technician_team", "assigned_technician_id", "assigned_technician_name"):
+        if fld in data and data.get(fld) is not None:
+            setattr(ws, fld, data.get(fld))
+    new_raw = ws.ppf_allocation_json or "{}"
+    try:
+        new_snap = json.loads(new_raw)
+    except json.JSONDecodeError:
+        new_snap = {}
+
+    new_type = (new_snap.get("ppf_type") or "").strip()
+    old_type = (prev_snap.get("ppf_type") or prev_type or "").strip()
+    if new_type and old_type and new_type != old_type:
+        _audit(
+            db,
+            ws.request_id,
+            "PPF_TYPE_CHANGED",
+            "WORKSTREAM",
+            ws_id,
+            old_type,
+            new_type,
+            data.get("change_reason") or "PUT ppf-allocation",
+            data.get("actor", "QL-002"),
+            ws_id,
+            ws.workstream_type,
+        )
+
+    def _full_item(snap):
+        return next((x for x in (snap.get("items") or []) if x.get("item_code") == "FULL_VEHICLE_PPF"), {})
+
+    fp, fn = _full_item(prev_snap), _full_item(new_snap)
+    if (fn.get("planned_cut_block") or "") != (fp.get("planned_cut_block") or "") or abs(
+        float(fn.get("required_length_m") or 0) - float(fp.get("required_length_m") or 0)
+    ) > 1e-5:
+        _audit(
+            db,
+            ws.request_id,
+            "PPF_SIZE_OVERRIDDEN",
+            "WORKSTREAM",
+            ws_id,
+            json.dumps({"block": fp.get("planned_cut_block"), "req_m": fp.get("required_length_m")}, ensure_ascii=False),
+            json.dumps({"block": fn.get("planned_cut_block"), "req_m": fn.get("required_length_m")}, ensure_ascii=False),
+            data.get("change_reason") or "Chỉnh kích thước / chiều dài PPF",
+            data.get("actor", "QL-002"),
+            ws_id,
+            ws.workstream_type,
+        )
+
+    prev_codes = {x.get("item_code") for x in (prev_snap.get("items") or []) if x.get("is_selected")}
+    for it in new_snap.get("items") or []:
+        code = it.get("item_code")
+        if it.get("is_selected") and code and code not in prev_codes and code != "FULL_VEHICLE_PPF":
+            _audit(
+                db,
+                ws.request_id,
+                "PPF_ITEM_ADDED",
+                "WORKSTREAM",
+                ws_id,
+                "not_selected",
+                code,
+                data.get("change_reason") or "Thêm hạng mục PPF",
+                data.get("actor", "QL-002"),
+                ws_id,
+                ws.workstream_type,
+            )
+
+    prev_ns = sum(len((x.get("sources") or [])) for x in (prev_snap.get("items") or []) if x.get("is_selected"))
+    new_ns = sum(len((x.get("sources") or [])) for x in (new_snap.get("items") or []) if x.get("is_selected"))
+    if prev_raw.strip() and new_ns > prev_ns:
+        _audit(
+            db,
+            ws.request_id,
+            "PPF_SOURCE_SPLIT",
+            "WORKSTREAM",
+            ws_id,
+            str(prev_ns),
+            str(new_ns),
+            data.get("change_reason") or "Chia thêm nguồn PPF",
+            data.get("actor", "QL-002"),
+            ws_id,
+            ws.workstream_type,
+        )
+
+    audit_ppf_allocation_save(
+        db,
+        ws,
+        prev_raw,
+        new_raw,
+        data.get("change_reason") or "",
+        data.get("actor", "QL-002"),
+        lambda rid, tt, st, sid, bv, av, r, act, ws_id_a, ws_type_a: _audit(
+            db, rid, tt, st, sid, bv, av, r, act, ws_id_a, ws_type_a
+        ),
+    )
+    db.commit()
+    return out
+
+
+def _put_wf_allocation_route(ws_id: str, data: dict, db: Session):
+    """Lưu proposal phân bổ Window Film (nhiều hạng mục + nguồn). Không trừ kho."""
+    from wf_allocation_service import put_wf_allocation, build_default_wf_allocation
+
+    ws = db.query(DbWorkstream).filter(DbWorkstream.workstream_id == ws_id).first()
+    if not ws:
+        raise HTTPException(404, "Workstream not found")
+    prev_raw = getattr(ws, "wf_allocation_json", None) or ""
+    prev_snap: dict = {}
+    if prev_raw:
+        try:
+            prev_snap = json.loads(prev_raw)
+        except json.JSONDecodeError:
+            prev_snap = {}
+    if not prev_snap:
+        prev_snap = build_default_wf_allocation(db, ws)
+
+    out = put_wf_allocation(db, ws_id, data, actor=data.get("actor", "QL-002"))
+    for fld in ("technician_team", "assigned_technician_id", "assigned_technician_name"):
+        if fld in data and data.get(fld) is not None:
+            setattr(ws, fld, data.get(fld))
+    new_raw = ws.wf_allocation_json or "{}"
+    try:
+        new_snap = json.loads(new_raw)
+    except json.JSONDecodeError:
+        new_snap = {}
+
+    old_items = {x.get("item_code"): x for x in (prev_snap.get("items") or [])}
+    for it in new_snap.get("items") or []:
+        code = it.get("item_code")
+        o = old_items.get(code) or {}
+        if it.get("is_selected") and o.get("material_code") and (it.get("material_code") or "") != (o.get("material_code") or ""):
+            _audit(
+                db,
+                ws.request_id,
+                "REQUEST_MATERIAL_OVERRIDDEN",
+                "WORKSTREAM",
+                ws_id,
+                str(o.get("material_code") or ""),
+                str(it.get("material_code") or ""),
+                data.get("change_reason") or "PUT allocation WF",
+                data.get("actor", "QL-002"),
+                ws_id,
+                ws.workstream_type,
+            )
+
+    prev_ns = sum(len((x.get("sources") or [])) for x in (prev_snap.get("items") or []) if x.get("is_selected"))
+    new_ns = sum(len((x.get("sources") or [])) for x in (new_snap.get("items") or []) if x.get("is_selected"))
+    if prev_raw.strip() and new_ns > prev_ns:
+        _audit(
+            db,
+            ws.request_id,
+            "WINDOW_FILM_SOURCE_SPLIT",
+            "WORKSTREAM",
+            ws_id,
+            str(prev_ns),
+            str(new_ns),
+            data.get("change_reason") or "Chia thêm nguồn WF",
+            data.get("actor", "QL-002"),
+            ws_id,
+            ws.workstream_type,
+        )
+
+    _audit(
+        db,
+        ws.request_id,
+        "WORKSTREAM_ALLOCATION_UPDATED",
+        "WORKSTREAM",
+        ws_id,
+        (prev_raw or "")[:2000],
+        (new_raw or "")[:2000],
+        data.get("change_reason") or "Cập nhật phân bổ WF trước duyệt",
+        data.get("actor", "QL-002"),
+        ws_id,
+        ws.workstream_type,
+    )
+    db.commit()
+    return out
+
+
+@app.put("/api/workstreams/{ws_id}/allocation")
+def put_workstream_allocation_unified(ws_id: str, data: dict = Body(...), db: Session = Depends(get_db)):
+    """API chung PPF + Phim cách nhiệt — UI ưu tiên endpoint này."""
+    ws = db.query(DbWorkstream).filter(DbWorkstream.workstream_id == ws_id).first()
+    if not ws:
+        raise HTTPException(404, "Workstream not found")
+    wt = (data.get("workstream_type") or ws.workstream_type or "").strip()
+    if wt != ws.workstream_type:
+        raise HTTPException(
+            400,
+            detail={"error": "WORKSTREAM_TYPE_MISMATCH", "message": "workstream_type trong body không khớp workstream."},
+        )
+    if ws.workstream_type == "PPF_INSTALLATION":
+        body = dict(data)
+        if not body.get("ppf_type"):
+            full = next((x for x in (body.get("items") or []) if x.get("item_code") == "FULL_VEHICLE_PPF"), {})
+            body["ppf_type"] = (full.get("material_code") or ws.selected_material_code or "T-TYPE").strip()
+        return put_ppf_allocation_route(ws_id, body, db)
+    return _put_wf_allocation_route(ws_id, data, db)
+
 
 @app.post("/api/workstreams/{ws_id}/approve")
 def approve_workstream(ws_id: str, data: dict = None, db: Session = Depends(get_db)):
@@ -800,14 +1129,63 @@ def approve_workstream(ws_id: str, data: dict = None, db: Session = Depends(get_
             ws.allocated_source_type = "LOT"
             ws.allocated_source_id = f"LOT-{mat}-001"
 
-    # Soft Lock
-    if ws.allocated_source_type == "LOT":
-        lot = db.query(DbLotInventory).filter(
-            DbLotInventory.lot_id == ws.allocated_source_id).first()
-        if lot: lot.is_locked = True
+    approver = data.get("approved_by", "QL-002")
+
+    from ppf_allocation_service import validate_ppf_allocation_at_approve
+
+    if ws.workstream_type == "PPF_INSTALLATION":
+        validate_ppf_allocation_at_approve(db, ws)
+    elif ws.workstream_type == "WINDOW_FILM_INSTALLATION":
+        from wf_allocation_service import validate_wf_allocation_at_approve
+
+        validate_wf_allocation_at_approve(db, ws)
+
+    used_ppf_multi_lock = False
+    ppf_json = getattr(ws, "ppf_allocation_json", None)
+    if ws.workstream_type == "PPF_INSTALLATION" and ppf_json:
+        try:
+            _alloc_chk = json.loads(ppf_json)
+        except json.JSONDecodeError:
+            _alloc_chk = {}
+        if _alloc_chk.get("items"):
+            from ppf_allocation_service import soft_lock_ppf_allocation_sources
+
+            n_lock = soft_lock_ppf_allocation_sources(db, ws, approver, lambda *args: _audit(db, *args))
+            if n_lock > 0:
+                used_ppf_multi_lock = True
+
+    used_wf_multi_lock = False
+    wf_json = getattr(ws, "wf_allocation_json", None)
+    if ws.workstream_type == "WINDOW_FILM_INSTALLATION" and wf_json:
+        try:
+            _wf_chk = json.loads(wf_json)
+        except json.JSONDecodeError:
+            _wf_chk = {}
+        if _wf_chk.get("items"):
+            from wf_allocation_service import soft_lock_wf_allocation_sources
+
+            n_wf = soft_lock_wf_allocation_sources(db, ws, approver, lambda *args: _audit(db, *args))
+            if n_wf > 0:
+                used_wf_multi_lock = True
+
+    if not used_ppf_multi_lock and not used_wf_multi_lock:
+        if ws.allocated_source_type == "LOT":
+            lot = db.query(DbLotInventory).filter(
+                DbLotInventory.lot_id == ws.allocated_source_id).first()
+            if lot:
+                lot.is_locked = True
+                lot.locked_by_request_id = ws.request_id
+                lot.locked_by_workstream_id = ws.workstream_id
+        elif ws.allocated_source_type == "OFFCUT":
+            oc = db.query(DbOffcutInventory).filter(
+                DbOffcutInventory.offcut_id == ws.allocated_source_id).first()
+            if oc:
+                oc.is_locked = True
+                oc.locked_by_request_id = ws.request_id
+                oc.locked_by_workstream_id = ws.workstream_id
     ws.is_locked = True
     ws.status = "APPROVED"
-    ws.approved_by = data.get("approved_by", "QL-002")
+    ws.approved_by = approver
     ws.approved_at = _now()
 
     _audit(db, ws.request_id, "WORKSTREAM_APPROVED",
@@ -815,11 +1193,12 @@ def approve_workstream(ws_id: str, data: dict = None, db: Session = Depends(get_
            "PENDING_APPROVAL", "APPROVED",
            f"Quản lý {ws.approved_by} phê duyệt {ws.workstream_type}",
            ws.approved_by, ws_id, ws.workstream_type)
-    _audit(db, ws.request_id, "SOFT_LOCK_RECORDED",
-           ws.allocated_source_type or "LOT", ws.allocated_source_id or "—",
-           "is_locked=false", "is_locked=true",
-           f"Soft Lock {ws.workstream_type} sau phê duyệt",
-           ws.approved_by, ws_id, ws.workstream_type)
+    if not used_ppf_multi_lock and not used_wf_multi_lock:
+        _audit(db, ws.request_id, "SOFT_LOCK_RECORDED",
+               ws.allocated_source_type or "LOT", ws.allocated_source_id or "—",
+               "is_locked=false", "is_locked=true",
+               f"Soft Lock {ws.workstream_type} sau phê duyệt",
+               ws.approved_by, ws_id, ws.workstream_type)
 
     # Create Job Card
     today = datetime.date.today().strftime("%Y%m%d")

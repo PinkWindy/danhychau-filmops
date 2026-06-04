@@ -2728,6 +2728,54 @@ async function hienThiThePheDuyet(requestId) {
     const mauChinh = isPpf ? 'var(--red-light)' : 'var(--blue-light)';
     const icon = isPpf ? 'fa-shield-film' : 'fa-window-restore';
     const tenDoi = isPpf ? 'Dán Phim PPF' : 'Dán Phim Cách Nhiệt';
+    let ppfAllocHtml = '';
+    if (isPpf && ws.ppf_allocation) {
+      const pa = ws.ppf_allocation;
+      const fullIt = (pa.items || []).find((x) => x.item_code === 'FULL_VEHICLE_PPF');
+      const reqM = fullIt && fullIt.required_length_m != null ? Number(fullIt.required_length_m) : 13;
+      const srcLines = (fullIt && fullIt.sources) || [];
+      const tot = srcLines.reduce((s, x) => s + (parseFloat(x.allocated_length_m) || 0), 0);
+      const nSrc = srcLines.filter((s) => (s.source_id || '').trim()).length;
+      const splitBadge =
+        nSrc > 1
+          ? '<span style="margin-left:6px;padding:2px 8px;border-radius:6px;background:rgba(0,188,212,0.2);color:var(--teal-light);font-weight:700;font-size:10px">Chia nguồn</span>'
+          : '';
+      const ok = tot + 1e-6 >= reqM;
+      const stLabel = ok ? 'Đủ vật tư' : 'Thiếu vật tư';
+      const stColor = ok ? 'var(--teal-light)' : 'var(--amber)';
+      const lines =
+        srcLines.filter((s) => (s.source_id || '').trim()).map((s) => `${s.source_id}: ${s.allocated_length_m}m`).join(' · ') || '—';
+      ppfAllocHtml = `<br><span style="color:var(--text-secondary)">Hạng mục:</span> <strong>Full xe</strong> ·
+        <span style="color:var(--text-secondary)">Tổng yêu cầu:</span> <strong>${reqM}m</strong> ·
+        <span style="color:var(--text-secondary)">Đã phân bổ:</span> <strong>${tot.toFixed(1)}m</strong>${splitBadge}<br>
+        <span style="color:var(--text-secondary)">Nguồn:</span> ${lines}<br>
+        <span style="color:${stColor};font-weight:700">${stLabel}</span>`;
+    }
+    let wfAllocHtml = '';
+    if (!isPpf && ws.wf_allocation) {
+      const wfa = ws.wf_allocation;
+      const sel = (wfa.items || []).filter((x) => x.is_selected);
+      let nsrc = 0;
+      let hasOff = false;
+      const lines = [];
+      for (const it of sel) {
+        nsrc += (it.sources || []).filter((s) => (s.source_id || '').trim()).length;
+        if ((it.sources || []).some((s) => (s.source_type || '').toUpperCase() === 'OFFCUT')) hasOff = true;
+        const tot = (it.sources || []).reduce((s, x) => s + (parseFloat(x.allocated_length_m) || 0), 0);
+        const req = parseFloat(it.required_length_m) || 0;
+        const ok = req <= 0 || tot + 1e-6 >= req;
+        const sl = (it.sources || []).filter((s) => (s.source_id || '').trim()).map((s) => `${s.source_id}: ${s.allocated_length_m}m`).join(' · ');
+        lines.push(`${it.item_name} [${it.material_code}] ${ok ? '✓' : '⚠'} — ${sl}`);
+      }
+      const splitWf = nsrc > sel.length && sel.length > 0;
+      const splitBadge = splitWf
+        ? '<span style="margin-left:6px;padding:2px 8px;border-radius:6px;background:rgba(0,188,212,0.2);color:var(--teal-light);font-weight:700;font-size:10px">Chia nguồn</span>'
+        : '';
+      const offB = hasOff
+        ? '<span style="margin-left:6px;padding:2px 8px;border-radius:6px;background:rgba(156,39,176,0.25);font-weight:700;font-size:10px">Dùng mảnh dư</span>'
+        : '';
+      wfAllocHtml = `<br><span style="color:var(--text-secondary)">Phân bổ WF:</span>${splitBadge}${offB}<br>${lines.join('<br>')}`;
+    }
     return `<div style="border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:12px;margin-bottom:10px;background:var(--bg-card)">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
         <strong style="color:${mauChinh};font-size:13px"><i class="fa-solid ${icon}" style="margin-right:6px"></i>${tenDoi}</strong>
@@ -2737,6 +2785,7 @@ async function hienThiThePheDuyet(requestId) {
         ${isPpf ? `Loại phim PPF: <strong style="color:${mauChinh}">${ws.selected_material_code || 'T-TYPE'}</strong> | Kích thước: ${ws.planned_cut_block || '152x1300'}` :
           `Nhóm cắt: ${ws.cut_group_id || '—'} | Kích thước: ${ws.planned_cut_block || '152x143'}`}
         <br>Đội: ${ws.technician_team} | KTV: ${ws.assigned_technician_name || '—'} | Nguồn: ${ws.allocated_source_id || '—'}
+        ${ppfAllocHtml}${wfAllocHtml}
       </div>
       <div style="display:flex;gap:6px;flex-wrap:wrap">
         ${ws.status === 'PENDING_APPROVAL' ? `
@@ -2771,6 +2820,70 @@ async function hienThiTheLuong(requestId) {
     const progress = { 'PENDING_APPROVAL':0,'APPROVED':30,'IN_PROGRESS':60,'ACTUAL_CONFIRMATION_REQUIRED':75,'COMPLETED':90,'CLOSED':100 }[ws.status] || 0;
     const tenPhim = { 'T-TYPE':'T-TYPE (Trong suốt)', 'M-TYPE':'M-TYPE (Mờ)', 'JB20':'JB20 (Cách nhiệt)', 'RT40':'RT40 (Kính lái)' };
 
+    const ppfTypeCode =
+      isPpf && ws.ppf_allocation && ws.ppf_allocation.ppf_type
+        ? ws.ppf_allocation.ppf_type
+        : ws.selected_material_code;
+    const ppfFilmLabel = isPpf ? tenPhim[ppfTypeCode] || ppfTypeCode || '—' : '';
+    let ppfBlockDisplay = ws.planned_cut_block || '—';
+    let ppfLenDisplay = ws.planned_deduction_length_m;
+    let ppfSourceBlock = `<div class="ws-info-row"><span class="ws-label">Nguồn vật tư</span><span class="ws-value">${ws.allocated_source_type || '—'}: ${ws.allocated_source_id || '—'}</span></div>`;
+    if (isPpf && ws.ppf_allocation) {
+      const pa = ws.ppf_allocation;
+      const fullIt = (pa.items || []).find((x) => x.item_code === 'FULL_VEHICLE_PPF');
+      if (fullIt) {
+        if (fullIt.planned_cut_block) ppfBlockDisplay = fullIt.planned_cut_block;
+        if (fullIt.required_length_m != null) ppfLenDisplay = fullIt.required_length_m;
+      }
+      const srcLines = (fullIt && fullIt.sources) || [];
+      const tot = srcLines.reduce((s, x) => s + (parseFloat(x.allocated_length_m) || 0), 0);
+      const reqM = fullIt && fullIt.required_length_m != null ? Number(fullIt.required_length_m) : 13;
+      const nSrc = srcLines.filter((s) => (s.source_id || '').trim()).length;
+      const splitBadge =
+        nSrc > 1
+          ? ' <span style="margin-left:4px;padding:2px 7px;border-radius:6px;background:rgba(0,188,212,0.2);color:var(--teal-light);font-weight:700;font-size:9px">Chia nguồn</span>'
+          : '';
+      const ok = tot + 1e-6 >= reqM;
+      const stLabel = ok ? 'Đủ vật tư' : 'Thiếu vật tư';
+      const stColor = ok ? 'var(--teal-light)' : 'var(--amber)';
+      const lines =
+        srcLines
+          .filter((s) => (s.source_id || '').trim())
+          .map((s) => `${s.source_id}: ${s.allocated_length_m}m`)
+          .join('<br>') || '—';
+      ppfSourceBlock = `<div class="ws-info-row"><span class="ws-label">Hạng mục</span><span class="ws-value">Full xe</span></div>
+        <div class="ws-info-row"><span class="ws-label">Nguồn vật tư</span><span class="ws-value" style="font-size:11px;line-height:1.45">${lines}${splitBadge}</span></div>
+        <div class="ws-info-row"><span class="ws-label">Trạng thái phân bổ</span><span class="ws-value"><span style="color:${stColor};font-weight:700">${stLabel}</span> · Yêu cầu ${reqM}m · Đã phân bổ ${tot.toFixed(1)}m</span></div>`;
+    }
+
+    let wfSourceBlock = `<div class="ws-info-row"><span class="ws-label">Nguồn vật tư</span><span class="ws-value">${ws.allocated_source_type || '—'}: ${ws.allocated_source_id || '—'}</span></div>`;
+    if (!isPpf && ws.wf_allocation) {
+      const wfa = ws.wf_allocation;
+      const sel = (wfa.items || []).filter((x) => x.is_selected);
+      let nsrc = 0;
+      let hasOff = false;
+      const parts = [];
+      for (const it of sel) {
+        nsrc += (it.sources || []).filter((s) => (s.source_id || '').trim()).length;
+        if ((it.sources || []).some((s) => (s.source_type || '').toUpperCase() === 'OFFCUT')) hasOff = true;
+        const tot = (it.sources || []).reduce((s, x) => s + (parseFloat(x.allocated_length_m) || 0), 0);
+        const req = parseFloat(it.required_length_m) || 0;
+        const ok = req <= 0 || tot + 1e-6 >= req;
+        const sl = (it.sources || []).filter((s) => (s.source_id || '').trim()).map((s) => `${s.source_id}: ${s.allocated_length_m}m`).join('<br>');
+        parts.push(
+          `<div style="margin-bottom:6px"><strong>${it.item_name}</strong> <span class="mat-code">${it.material_code}</span> — ${ok ? '<span style="color:var(--teal-light)">Đủ</span>' : '<span style="color:var(--amber)">Thiếu</span>'}<div style="font-size:11px;margin-top:2px">${sl || '—'}</div></div>`
+        );
+      }
+      const splitBadge =
+        nsrc > sel.length && sel.length
+          ? ' <span style="padding:2px 7px;border-radius:6px;background:rgba(0,188,212,0.2);font-size:9px;font-weight:700">Chia nguồn</span>'
+          : '';
+      const offBadge = hasOff
+        ? ' <span style="padding:2px 7px;border-radius:6px;background:rgba(156,39,176,0.25);font-size:9px;font-weight:700">Dùng mảnh dư</span>'
+        : '';
+      wfSourceBlock = `<div class="ws-info-row"><span class="ws-label">Phân bổ vật tư WF</span><span class="ws-value" style="font-size:11px">${splitBadge}${offBadge}<div style="margin-top:6px">${parts.join('')}</div></span></div>`;
+    }
+
     return `<div class="ws-card ${typeClass}">
       <div class="ws-card-header">
         <div class="ws-card-title"><i class="fa-solid ${icon} ws-type-icon"></i>${tenLoai}</div>
@@ -2782,13 +2895,21 @@ async function hienThiTheLuong(requestId) {
         <div class="ws-info-row"><span class="ws-label">Mã luồng</span><span class="ws-value" style="font-size:11px">${ws.workstream_id}</span></div>
         <div class="ws-info-row"><span class="ws-label">Đội thi công</span><span class="ws-value">${ws.technician_team}</span></div>
         <div class="ws-info-row"><span class="ws-label">KTV phụ trách</span><span class="ws-value">${ws.assigned_technician_name || '—'}</span></div>
+        ${isPpf ? `
+        <div class="ws-info-row"><span class="ws-label">Loại PPF</span>
+          <span class="ws-value" style="color:var(--red-light)">${ppfFilmLabel}</span>
+        </div>
+        <div class="ws-info-row"><span class="ws-label">Kích thước block</span><span class="ws-value">${ppfBlockDisplay}</span></div>
+        <div class="ws-info-row"><span class="ws-label">Chiều dài trừ kho (Full xe)</span><span class="ws-value">${ppfLenDisplay != null && ppfLenDisplay !== '' ? ppfLenDisplay : '—'} m</span></div>
+        ` : `
         <div class="ws-info-row"><span class="ws-label">Loại phim</span>
-          <span class="ws-value" style="color:${isPpf ? 'var(--red-light)' : 'var(--blue-light)'}">
+          <span class="ws-value" style="color:var(--blue-light)">
             ${tenPhim[ws.selected_material_code] || ws.selected_material_code || '—'}
           </span>
         </div>
         <div class="ws-info-row"><span class="ws-label">Kích thước block</span><span class="ws-value">${ws.planned_cut_block || '—'}</span></div>
         <div class="ws-info-row"><span class="ws-label">Chiều dài khấu trừ</span><span class="ws-value">${ws.planned_deduction_length_m || '—'} m</span></div>
+        `}
 
         ${!isPpf && matPlan.length > 0 ? `<div class="wf-material-plan">
           <div style="font-size:11px;font-weight:700;color:var(--text-secondary);margin-bottom:6px">Kế hoạch vật tư từng kính:</div>
@@ -2800,7 +2921,7 @@ async function hienThiTheLuong(requestId) {
             </div>`).join('')}
         </div>` : ''}
 
-        <div class="ws-info-row"><span class="ws-label">Nguồn vật tư</span><span class="ws-value">${ws.allocated_source_type || '—'}: ${ws.allocated_source_id || '—'}</span></div>
+        ${isPpf ? ppfSourceBlock : wfSourceBlock}
         <div class="ws-info-row"><span class="ws-label">Mã lệnh thi công</span><span class="ws-value">${ws.job_card_id || 'Chưa tạo'}</span></div>
         <div class="ws-info-row"><span class="ws-label">Thời gian bắt đầu</span><span class="ws-value">${fmtDt(ws.started_at)}</span></div>
         <div class="ws-info-row"><span class="ws-label">Thời gian hoàn tất</span><span class="ws-value">${fmtDt(ws.completed_at)}</span></div>
@@ -2987,13 +3108,33 @@ window.xacNhanVaHoanTat = async function() {
   } catch(e) { toast('error', 'Lỗi xác nhận', e.message); }
 };
 
-// ─── CHỈNH SỬA LUỒNG (FORM ĐẦY ĐỦ) ──────────────────────────────────────────
+// ─── CHỈNH SỬA LUỒNG (WF: form đầy đủ | PPF PENDING: modal phân bổ ppf_preflight_editor.js) ───
 let currentWsEditId = null;
+let _wsEditDirty = false;
+let _wsEditModePpf = false;
 
 window.chiinhSuaWs = async function(wsId) {
   currentWsEditId = wsId;
   const ws = await fetch(`/api/workstreams/${wsId}`).then(r => r.json());
   const isPpf = ws.workstream_type === 'PPF_INSTALLATION';
+  const isWf = ws.workstream_type === 'WINDOW_FILM_INSTALLATION';
+  if (
+    ws.status === 'PENDING_APPROVAL' &&
+    (isPpf || isWf) &&
+    typeof window.openWorkstreamAllocationModal === 'function'
+  ) {
+    const [lots, offcuts] = await Promise.all([
+      fetch('/api/lots').then((r) => r.json()),
+      fetch('/api/offcuts').then((r) => r.json()),
+    ]);
+    _wsEditModePpf = true;
+    _wsEditDirty = false;
+    await window.openWorkstreamAllocationModal(wsId, ws, lots, offcuts);
+    return;
+  }
+  _wsEditModePpf = false;
+  const _mse = document.querySelector('.ws-edit-modal-inner');
+  if (_mse) _mse.style.maxWidth = '';
   const tenLoai = isPpf ? 'Dán Phim PPF' : 'Dán Phim Cách Nhiệt';
   const mauIcon = isPpf ? 'var(--red)' : 'var(--blue-light)';
 
@@ -3178,6 +3319,13 @@ async function luuChinhSuaWs(ws, isPpf) {
 }
 
 window.closeWsEdit = function() {
+  if (typeof _wsEditDirty !== 'undefined' && _wsEditDirty && typeof _wsEditModePpf !== 'undefined' && _wsEditModePpf) {
+    if (!confirm('Bạn có thay đổi chưa lưu. Đóng cửa sổ?')) return;
+  }
+  _wsEditDirty = false;
+  _wsEditModePpf = false;
+  const inner = document.querySelector('.ws-edit-modal-inner');
+  if (inner) inner.style.maxWidth = '';
   document.getElementById('ws-edit-modal').style.display = 'none';
   currentWsEditId = null;
 };

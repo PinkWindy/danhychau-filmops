@@ -481,6 +481,11 @@ def confirm_lexus_test_ocr(
     )
     db.add(ws_w)
 
+    db.flush()
+    from wf_allocation_service import build_default_wf_allocation
+
+    ws_w.wf_allocation_json = json.dumps(build_default_wf_allocation(db, ws_w), ensure_ascii=False)
+
     draft.review_status = "CONFIRMED"
     draft.confirmed_by = actor
     draft.confirmed_at = _now()

@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """Inventory admin APIs — mounted from main.py. All ops write DbInventoryTransaction + DbAuditLog."""
 import datetime
+import json
 import uuid
 from typing import Optional
 
@@ -53,6 +54,131 @@ def _norm_offcut_status(o: DbOffcutInventory) -> str:
 
 def assert_source_valid_for_wf6_commit(db: Session, ws: DbWorkstream):
     """Raise HTTPException if allocated LOT/OFFCUT cannot be committed (cleared / insufficient)."""
+    if ws.workstream_type == "WINDOW_FILM_INSTALLATION" and getattr(ws, "wf_allocation_json", None):
+        try:
+            wf_alloc = json.loads(ws.wf_allocation_json)
+        except json.JSONDecodeError:
+            wf_alloc = {}
+        items = wf_alloc.get("items") or []
+        any_src = False
+        for it in items:
+            if not it.get("is_selected"):
+                continue
+            mc = (it.get("material_code") or "").strip()
+            for s in it.get("sources") or []:
+                sid = (s.get("source_id") or "").strip()
+                st = (s.get("source_type") or "LOT").upper()
+                need = float(s.get("allocated_length_m") or 0)
+                if not sid or need <= 1e-9:
+                    continue
+                any_src = True
+                if st == "LOT":
+                    lot = db.query(DbLotInventory).filter(DbLotInventory.lot_id == sid).first()
+                    if not lot:
+                        raise HTTPException(
+                            400,
+                            f"Nguồn LOT {sid} không tồn tại — Quản lý cần chọn lại nguồn cho luồng {ws.workstream_id}.",
+                        )
+                    ls = _norm_lot_status(lot)
+                    if ls in LOT_TERMINAL or ls == "DEPLETED" or (lot.remaining_length_m or 0) <= 1e-9:
+                        raise HTTPException(
+                            400,
+                            f"LOT {sid} không còn dùng được (trạng thái {ls}, tồn {lot.remaining_length_m}m). Quản lý cần chọn lại nguồn.",
+                        )
+                    if (lot.material_code or "").strip() != mc:
+                        raise HTTPException(400, f"LOT {sid} không khớp material {mc} cho hạng mục WF.")
+                    if (lot.remaining_length_m or 0) < need - 1e-6:
+                        raise HTTPException(
+                            400,
+                            f"LOT {sid} không đủ tồn ({lot.remaining_length_m}m). Cần {need}m.",
+                        )
+                elif st == "OFFCUT":
+                    oc = db.query(DbOffcutInventory).filter(DbOffcutInventory.offcut_id == sid).first()
+                    if not oc:
+                        raise HTTPException(
+                            400,
+                            f"Mảnh dư {sid} không tồn tại — Quản lý cần chọn lại nguồn.",
+                        )
+                    eff = _norm_offcut_status(oc)
+                    if eff in OFFCUT_TERMINAL:
+                        raise HTTPException(
+                            400,
+                            f"Mảnh dư {sid} đã {eff} — không thể trừ kho. Quản lý cần chọn lại nguồn.",
+                        )
+                    if eff not in OFFCUT_ISSUEABLE or (oc.length_m or 0) <= 0 or (oc.width_m or 0) <= 0:
+                        raise HTTPException(400, f"Mảnh dư {sid} không còn khả dụng ({eff}) — không thể complete.")
+                    if (oc.material_code or "").strip() != mc:
+                        raise HTTPException(400, f"Offcut {sid} không khớp material {mc}.")
+                    if (oc.length_m or 0) < need - 1e-6:
+                        raise HTTPException(
+                            400,
+                            f"Mảnh dư {sid} không đủ chiều dài ({oc.length_m}m). Cần {need}m.",
+                        )
+                else:
+                    raise HTTPException(400, f"Loại nguồn không hợp lệ: {st}")
+        if any_src:
+            return
+
+    if ws.workstream_type == "PPF_INSTALLATION" and getattr(ws, "ppf_allocation_json", None):
+        try:
+            alloc = json.loads(ws.ppf_allocation_json)
+        except json.JSONDecodeError:
+            alloc = {}
+        items = alloc.get("items") or []
+        any_src = False
+        for it in items:
+            if not it.get("is_selected"):
+                continue
+            for s in it.get("sources") or []:
+                sid = (s.get("source_id") or "").strip()
+                st = (s.get("source_type") or "LOT").upper()
+                need = float(s.get("allocated_length_m") or 0)
+                if not sid or need <= 1e-9:
+                    continue
+                any_src = True
+                if st == "LOT":
+                    lot = db.query(DbLotInventory).filter(DbLotInventory.lot_id == sid).first()
+                    if not lot:
+                        raise HTTPException(
+                            400,
+                            f"Nguồn LOT {sid} không tồn tại — Quản lý cần chọn lại nguồn cho luồng {ws.workstream_id}.",
+                        )
+                    ls = _norm_lot_status(lot)
+                    if ls in LOT_TERMINAL or ls == "DEPLETED" or (lot.remaining_length_m or 0) <= 1e-9:
+                        raise HTTPException(
+                            400,
+                            f"LOT {sid} không còn dùng được (trạng thái {ls}, tồn {lot.remaining_length_m}m). Quản lý cần chọn lại nguồn.",
+                        )
+                    if (lot.remaining_length_m or 0) < need - 1e-6:
+                        raise HTTPException(
+                            400,
+                            f"LOT {sid} không đủ tồn ({lot.remaining_length_m}m). Cần {need}m.",
+                        )
+                elif st == "OFFCUT":
+                    oc = db.query(DbOffcutInventory).filter(DbOffcutInventory.offcut_id == sid).first()
+                    if not oc:
+                        raise HTTPException(
+                            400,
+                            f"Mảnh dư {sid} không tồn tại — Quản lý cần chọn lại nguồn.",
+                        )
+                    eff = _norm_offcut_status(oc)
+                    if eff in OFFCUT_TERMINAL:
+                        raise HTTPException(
+                            400,
+                            f"Mảnh dư {sid} đã {eff} — không thể trừ kho. Quản lý cần chọn lại nguồn.",
+                        )
+                    if eff not in OFFCUT_ISSUEABLE or (oc.length_m or 0) <= 0 or (oc.width_m or 0) <= 0:
+                        raise HTTPException(400, f"Mảnh dư {sid} không còn khả dụng ({eff}) — không thể complete.")
+                    if (oc.length_m or 0) < need - 1e-6:
+                        raise HTTPException(
+                            400,
+                            f"Mảnh dư {sid} không đủ chiều dài ({oc.length_m}m). Cần {need}m.",
+                        )
+                else:
+                    raise HTTPException(400, f"Loại nguồn không hợp lệ: {st}")
+        if any_src:
+            return
+
     sid = ws.allocated_source_id
     st = (ws.allocated_source_type or "LOT").upper()
     if not sid:
@@ -956,6 +1082,105 @@ def register_inventory_routes(app, get_db):
                 continue
             out.append(t)
         return out
+
+    @router.get("/lots/active-options")
+    def lots_active_options(
+        db: Session = Depends(get_db),
+        material_code: str = QueryParam(..., description="Mã vật tư (JB20, T-TYPE, …)"),
+        min_length_m: float = QueryParam(0.0),
+        min_width_m: float = QueryParam(0.0),
+        request_id: Optional[str] = QueryParam(None),
+        workstream_id: Optional[str] = QueryParam(None),
+        workstream_type: Optional[str] = QueryParam(None),
+    ):
+        """LOT dùng cho allocation — loại terminal / hết tồn / lock request khác."""
+        _ = (workstream_id, workstream_type)
+        rows = db.query(DbLotInventory).filter(DbLotInventory.material_code == material_code).all()
+        out = []
+        for l in rows:
+            eff = _norm_lot_status(l)
+            if eff in LOT_TERMINAL or eff == "DEPLETED":
+                continue
+            if eff not in ("NEW", "IN_USE"):
+                continue
+            rem = float(l.remaining_length_m or 0)
+            if rem <= 1e-9:
+                continue
+            if min_length_m > 0 and rem + 1e-9 < min_length_m:
+                continue
+            wm = float(l.original_width_m or 0)
+            if min_width_m > 0 and wm > 0 and wm + 1e-9 < min_width_m:
+                continue
+            lr = (l.locked_by_request_id or "").strip()
+            if l.is_locked and lr and request_id and lr != request_id:
+                continue
+            loc = l.storage_location or "—"
+            out.append(
+                {
+                    "source_type": "LOT",
+                    "source_id": l.lot_id,
+                    "material_code": l.material_code,
+                    "remaining_length_m": round(rem, 3),
+                    "width_m": wm,
+                    "storage_location": l.storage_location,
+                    "status": eff,
+                    "is_locked": bool(l.is_locked),
+                    "display_name": f"{l.lot_id} — còn {rem:.2f}m — {loc}",
+                }
+            )
+        return {"items": out, "count": len(out)}
+
+    @router.get("/offcuts/active-options")
+    def offcuts_active_options(
+        db: Session = Depends(get_db),
+        material_code: str = QueryParam(...),
+        min_length_m: float = QueryParam(0.0),
+        min_width_m: float = QueryParam(0.0),
+        request_id: Optional[str] = QueryParam(None),
+        workstream_id: Optional[str] = QueryParam(None),
+        workstream_type: Optional[str] = QueryParam(None),
+    ):
+        _ = (workstream_id, workstream_type)
+        rows = db.query(DbOffcutInventory).filter(DbOffcutInventory.material_code == material_code).all()
+        out = []
+        for o in rows:
+            eff = _norm_offcut_status(o)
+            if eff in OFFCUT_TERMINAL:
+                continue
+            if eff not in OFFCUT_ISSUEABLE:
+                continue
+            ql = (o.quality_status or "NORMAL").upper()
+            if ql == "POOR":
+                continue
+            olen = float(o.length_m or 0)
+            ow = float(o.width_m or 0)
+            if olen <= 1e-9 or ow <= 1e-9:
+                continue
+            if min_length_m > 0 and olen + 1e-9 < min_length_m:
+                continue
+            if min_width_m > 0 and ow + 1e-9 < min_width_m:
+                continue
+            lr = (o.locked_by_request_id or "").strip()
+            if o.is_locked and lr and request_id and lr != request_id:
+                continue
+            loc = o.storage_location or "—"
+            area = round((o.area_m2 or ow * olen), 3)
+            out.append(
+                {
+                    "source_type": "OFFCUT",
+                    "source_id": o.offcut_id,
+                    "material_code": o.material_code,
+                    "width_m": ow,
+                    "length_m": olen,
+                    "area_m2": area,
+                    "quality_status": o.quality_status or "NORMAL",
+                    "storage_location": o.storage_location,
+                    "status": eff,
+                    "is_locked": bool(o.is_locked),
+                    "display_name": f"{o.offcut_id} — {ow:.2f} x {olen:.2f}m — {ql} — {loc}",
+                }
+            )
+        return {"items": out, "count": len(out)}
 
     @router.get("/validate-sources/{request_id}")
     def validate_sources_for_request(request_id: str, db: Session = Depends(get_db)):
