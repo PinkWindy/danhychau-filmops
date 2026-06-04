@@ -115,6 +115,45 @@ function toast(type, title, message, duration = 4000) {
   setTimeout(() => { el.style.animation = 'slideOut 0.3s ease forwards'; setTimeout(() => el.remove(), 300); }, duration);
 }
 
+/** Parse JSON an toàn — không gọi .json() trực tiếp khi server có thể trả HTML/text lỗi */
+async function fetchJSON(url, options = {}) {
+  const res = await fetch(url, options);
+  const contentType = res.headers.get('content-type') || '';
+  const rawText = await res.text();
+  let data = null;
+  if (contentType.includes('application/json')) {
+    try {
+      data = rawText ? JSON.parse(rawText) : null;
+    } catch (e) {
+      throw new Error(`API trả JSON không hợp lệ từ ${url}: ${rawText.slice(0, 120)}`);
+    }
+  } else {
+    if (!res.ok) {
+      throw new Error(`API lỗi ${res.status} từ ${url}: ${rawText.slice(0, 160)}`);
+    }
+    throw new Error(`API không trả JSON từ ${url}: ${rawText.slice(0, 160)}`);
+  }
+  if (!res.ok) {
+    const msg = (data && (data.message || data.detail)) || `API lỗi ${res.status} từ ${url}`;
+    throw new Error(typeof msg === 'string' ? msg : JSON.stringify(msg).slice(0, 200));
+  }
+  return data;
+}
+
+const DASH_KPI_DEFAULTS = {
+  total_lots: 0,
+  active_offcuts: 0,
+  ppf_completed: 0,
+  wf_completed: 0,
+  pending_approval_workstreams: 0,
+  closed_requests: 0,
+  total_customers: 0,
+  total_dealers: 0,
+  total_vehicles: 0,
+  manual_requests_today: 0,
+  ocr_requests_today: 0,
+};
+
 function trangThaiBadge(status) {
   if (!status) return '<span class="status-badge">—</span>';
   const nhan = TRANG_THAI_VI[status] || status;
@@ -556,11 +595,35 @@ document.getElementById('btn-view-result').addEventListener('click', () => {
 // ═══════════════════════════════════════════════════════════════════════════════
 async function taiTongQuan() {
   try {
-    const [dash, wss, notifs] = await Promise.all([
-      fetch('/api/dashboard').then(r => r.json()),
-      fetch('/api/workstreams').then(r => r.json()),
-      fetch('/api/notifications').then(r => r.json()),
-    ]);
+    let dash;
+    try {
+      dash = await fetchJSON('/api/dashboard');
+    } catch (e) {
+      console.error('[taiTongQuan] /api/dashboard', e);
+      toast('warning', 'Không tải được Tổng quan', 'Vui lòng kiểm tra API /api/dashboard hoặc database schema.');
+      dash = { ok: false, fallback: { ...DASH_KPI_DEFAULTS } };
+    }
+    if (dash && dash.ok === false) {
+      console.warn('[taiTongQuan] dashboard degraded:', dash.detail || dash.message || '');
+      toast('warning', dash.message || 'Tổng quan', 'Dữ liệu KPI tạm hiển thị 0. Xem log server (Render) để biết chi tiết.');
+      dash = { ...DASH_KPI_DEFAULTS, ...(dash.fallback || {}) };
+    } else {
+      dash = { ...DASH_KPI_DEFAULTS, ...dash };
+    }
+
+    let wss = [];
+    let notifs = [];
+    try {
+      wss = await fetchJSON('/api/workstreams');
+    } catch (e) {
+      console.error('[taiTongQuan] /api/workstreams', e);
+      toast('warning', 'Luồng thi công', 'Không tải được danh sách workstream.');
+    }
+    try {
+      notifs = await fetchJSON('/api/notifications');
+    } catch (e) {
+      console.error('[taiTongQuan] /api/notifications', e);
+    }
 
     document.getElementById('stat-lots').textContent = dash.total_lots;
     document.getElementById('stat-offcuts').textContent = dash.active_offcuts;

@@ -1,9 +1,10 @@
-import os, uuid, datetime, json
+import os, uuid, datetime, json, logging, traceback
+from contextlib import asynccontextmanager
 from typing import Optional
 
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Query
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
@@ -19,7 +20,24 @@ from database import (
 from inventory_api import register_inventory_routes, assert_source_valid_for_wf6_commit
 from customer_api import register_customer_routes
 
-app = FastAPI(title="DYC Film Warehouse — Multi-Workstream Agentic Portal")
+_log = logging.getLogger("uvicorn.error")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Đảm bảo SQLite có bảng/cột mới (Render / production) trước khi nhận request."""
+    try:
+        init_db()
+        _log.info("DYC init_db() completed (schema / migrations).")
+    except Exception:
+        _log.exception("DYC init_db() failed — một số API có thể lỗi cho đến khi sửa DB.")
+    yield
+
+
+app = FastAPI(
+    title="DYC Film Warehouse — Multi-Workstream Agentic Portal",
+    lifespan=lifespan,
+)
 
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True,
                    allow_methods=["*"], allow_headers=["*"])
@@ -229,76 +247,132 @@ def _commit_workstream_inventory(db: Session, ws: DbWorkstream, tech_id: str = "
 # ═══════════════════════════════════════════════════════════════════════════════
 # DASHBOARD
 # ═══════════════════════════════════════════════════════════════════════════════
+def _dashboard_fallback_payload(detail: str):
+    """Luôn trả JSON (không plain text) cho frontend — HTTP 200 để fetch không fail parse."""
+    fb = {
+        "total_lots": 0,
+        "active_offcuts": 0,
+        "total_scrap_m2": 0.0,
+        "total_requests": 0,
+        "closed_requests": 0,
+        "partial_requests": 0,
+        "reusability_rate": 0.0,
+        "hitl_approval_needed": 0,
+        "tech_confirmation_needed": 0,
+        "completed_requests": 0,
+        "ppf_in_progress": 0,
+        "wf_in_progress": 0,
+        "ppf_completed": 0,
+        "wf_completed": 0,
+        "pending_approval_workstreams": 0,
+        "jobs_in_progress": 0,
+        "unread_notifications": 0,
+        "ocr_pending_review": 0,
+        "total_customers": 0,
+        "total_dealers": 0,
+        "total_vehicles": 0,
+        "manual_requests_today": 0,
+        "ocr_requests_today": 0,
+    }
+    return {
+        "ok": False,
+        "error": "DASHBOARD_LOAD_FAILED",
+        "message": "Không tải được dữ liệu tổng quan",
+        "detail": (detail or "")[:500],
+        "fallback": fb,
+    }
+
+
 @app.get("/api/dashboard")
 def get_dashboard(db: Session = Depends(get_db)):
-    total_lots = db.query(DbLotInventory).count()
-    active_offcuts = db.query(DbOffcutInventory).filter(
-        DbOffcutInventory.status == "ACTIVE").count()
-    scrap_m2 = sum(r.scrap_area_m2 or 0 for r in db.query(DbRequest).all()) + 0.15
-    total_reqs = db.query(DbRequest).count()
-    closed_reqs = db.query(DbRequest).filter(DbRequest.status == "CLOSED").count()
-    partial_reqs = db.query(DbRequest).filter(
-        DbRequest.status == "PARTIALLY_COMPLETED").count()
-    used_offcuts = db.query(DbOffcutInventory).filter(
-        DbOffcutInventory.status == "USED").count()
-    total_offcuts = db.query(DbOffcutInventory).count()
-    reusability = round(used_offcuts / total_offcuts * 100, 1) if total_offcuts else 64.2
+    try:
+        total_lots = db.query(DbLotInventory).count()
+        active_offcuts = db.query(DbOffcutInventory).filter(
+            DbOffcutInventory.status == "ACTIVE").count()
+        scrap_m2 = sum(r.scrap_area_m2 or 0 for r in db.query(DbRequest).all()) + 0.15
+        total_reqs = db.query(DbRequest).count()
+        closed_reqs = db.query(DbRequest).filter(DbRequest.status == "CLOSED").count()
+        partial_reqs = db.query(DbRequest).filter(
+            DbRequest.status == "PARTIALLY_COMPLETED").count()
+        used_offcuts = db.query(DbOffcutInventory).filter(
+            DbOffcutInventory.status == "USED").count()
+        total_offcuts = db.query(DbOffcutInventory).count()
+        reusability = round(used_offcuts / total_offcuts * 100, 1) if total_offcuts else 64.2
 
-    # Workstream stats
-    all_ws = db.query(DbWorkstream).all()
-    ppf_ws = [w for w in all_ws if w.workstream_type == "PPF_INSTALLATION"]
-    wf_ws  = [w for w in all_ws if w.workstream_type == "WINDOW_FILM_INSTALLATION"]
-    ppf_in_progress  = sum(1 for w in ppf_ws if w.status == "IN_PROGRESS")
-    wf_in_progress   = sum(1 for w in wf_ws  if w.status == "IN_PROGRESS")
-    ppf_completed    = sum(1 for w in ppf_ws if w.status in ("CLOSED","COMPLETED"))
-    wf_completed     = sum(1 for w in wf_ws  if w.status in ("CLOSED","COMPLETED"))
+        all_ws = db.query(DbWorkstream).all()
+        ppf_ws = [w for w in all_ws if w.workstream_type == "PPF_INSTALLATION"]
+        wf_ws = [w for w in all_ws if w.workstream_type == "WINDOW_FILM_INSTALLATION"]
+        ppf_in_progress = sum(1 for w in ppf_ws if w.status == "IN_PROGRESS")
+        wf_in_progress = sum(1 for w in wf_ws if w.status == "IN_PROGRESS")
+        ppf_completed = sum(1 for w in ppf_ws if w.status in ("CLOSED", "COMPLETED"))
+        wf_completed = sum(1 for w in wf_ws if w.status in ("CLOSED", "COMPLETED"))
 
-    pending_approval_ws = db.query(DbWorkstream).filter(
-        DbWorkstream.status == "PENDING_APPROVAL").count()
-    approval_needed = db.query(DbRequest).filter(
-        DbRequest.status == "ALLOCATED").count()
-    tech_needed = db.query(DbRequest).filter(
-        DbRequest.status.in_(["APPROVED","IN_PROGRESS"])).count()
+        pending_approval_ws = db.query(DbWorkstream).filter(
+            DbWorkstream.status == "PENDING_APPROVAL").count()
+        approval_needed = db.query(DbRequest).filter(
+            DbRequest.status == "ALLOCATED").count()
+        tech_needed = db.query(DbRequest).filter(
+            DbRequest.status.in_(["APPROVED", "IN_PROGRESS"])).count()
 
-    unread_notifs = db.query(DbNotification).filter(
-        DbNotification.is_read == False).count()
-    ocr_pending = db.query(DbOcrDraft).filter(
-        DbOcrDraft.review_status == "REVIEWING").count()
-    total_customers = db.query(DbCustomer).count()
-    total_dealers = db.query(DbDealer).count()
-    total_vehicles = db.query(DbVehicleProfile).count()
-    today_prefix = datetime.date.today().strftime("%Y-%m-%d")
-    manual_today = db.query(DbRequest).filter(
-        DbRequest.source_channel == "MANUAL",
-        DbRequest.created_at.like(f"{today_prefix}%"),
-    ).count()
-    ocr_today = db.query(DbRequest).filter(
-        DbRequest.created_at.like(f"{today_prefix}%"),
-        or_(DbRequest.source_channel == "OCR", DbRequest.source_channel == None),
-    ).count()
-    jobs_in_progress = db.query(DbJobCard).filter(
-        DbJobCard.status == "IN_PROGRESS").count()
+        unread_notifs = db.query(DbNotification).filter(
+            DbNotification.is_read == False).count()
+        ocr_pending = db.query(DbOcrDraft).filter(
+            DbOcrDraft.review_status == "REVIEWING").count()
+        total_customers = db.query(DbCustomer).count()
+        total_dealers = db.query(DbDealer).count()
+        total_vehicles = db.query(DbVehicleProfile).count()
+        today_prefix = datetime.date.today().strftime("%Y-%m-%d")
+        manual_today = db.query(DbRequest).filter(
+            DbRequest.source_channel == "MANUAL",
+            DbRequest.created_at.like(f"{today_prefix}%"),
+        ).count()
+        ocr_today = db.query(DbRequest).filter(
+            DbRequest.created_at.like(f"{today_prefix}%"),
+            or_(DbRequest.source_channel == "OCR", DbRequest.source_channel == None),
+        ).count()
+        jobs_in_progress = db.query(DbJobCard).filter(
+            DbJobCard.status == "IN_PROGRESS").count()
 
-    return {
-        "total_lots": total_lots, "active_offcuts": active_offcuts,
-        "total_scrap_m2": round(scrap_m2, 3), "total_requests": total_reqs,
-        "closed_requests": closed_reqs, "partial_requests": partial_reqs,
-        "reusability_rate": reusability,
-        "hitl_approval_needed": approval_needed,
-        "tech_confirmation_needed": tech_needed,
-        "completed_requests": closed_reqs,
-        "ppf_in_progress": ppf_in_progress, "wf_in_progress": wf_in_progress,
-        "ppf_completed": ppf_completed, "wf_completed": wf_completed,
-        "pending_approval_workstreams": pending_approval_ws,
-        "jobs_in_progress": jobs_in_progress,
-        "unread_notifications": unread_notifs,
-        "ocr_pending_review": ocr_pending,
-        "total_customers": total_customers,
-        "total_dealers": total_dealers,
-        "total_vehicles": total_vehicles,
-        "manual_requests_today": manual_today,
-        "ocr_requests_today": ocr_today,
-    }
+        body = {
+            "ok": True,
+            "total_lots": total_lots,
+            "active_offcuts": active_offcuts,
+            "total_scrap_m2": round(scrap_m2, 3),
+            "total_requests": total_reqs,
+            "closed_requests": closed_reqs,
+            "partial_requests": partial_reqs,
+            "reusability_rate": reusability,
+            "hitl_approval_needed": approval_needed,
+            "tech_confirmation_needed": tech_needed,
+            "completed_requests": closed_reqs,
+            "ppf_in_progress": ppf_in_progress,
+            "wf_in_progress": wf_in_progress,
+            "ppf_completed": ppf_completed,
+            "wf_completed": wf_completed,
+            "pending_approval_workstreams": pending_approval_ws,
+            "jobs_in_progress": jobs_in_progress,
+            "unread_notifications": unread_notifs,
+            "ocr_pending_review": ocr_pending,
+            "total_customers": total_customers,
+            "total_dealers": total_dealers,
+            "total_vehicles": total_vehicles,
+            "manual_requests_today": manual_today,
+            "ocr_requests_today": ocr_today,
+        }
+        return JSONResponse(content=body, media_type="application/json")
+    except Exception as e:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        tb = traceback.format_exc()
+        _log.error("GET /api/dashboard failed:\n%s", tb)
+        safe = str(e)[:300] if str(e) else type(e).__name__
+        return JSONResponse(
+            status_code=200,
+            content=_dashboard_fallback_payload(safe),
+            media_type="application/json",
+        )
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # MONTHLY DASHBOARD
