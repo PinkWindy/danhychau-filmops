@@ -32,13 +32,26 @@ async def lifespan(app: FastAPI):
         init_db()
         _log.info("DYC init_db() completed (schema / migrations).")
         from populate_db import _seed_amis_and_vehicle_norms
+        from film_norm_excel_import import try_import_excel_norms
         db = SessionLocal()
         try:
             _seed_amis_and_vehicle_norms(db)
             db.commit()
-            _log.info("DYC AMIS + vehicle norms seed checked.")
+            _log.info("DYC AMIS seed checked.")
+            imp = try_import_excel_norms(db)
+            db.commit()
+            if imp.get("ok"):
+                _log.info(
+                    "DYC Excel norms: inserted=%s updated=%s skipped=%s path=%s",
+                    imp.get("inserted"),
+                    imp.get("updated"),
+                    imp.get("skipped"),
+                    imp.get("path"),
+                )
+            else:
+                _log.warning("DYC Excel norms import: %s", imp.get("error"))
         except Exception:
-            _log.exception("DYC seed AMIS/norms skipped or partial.")
+            _log.exception("DYC seed AMIS / Excel norms skipped or partial.")
         finally:
             db.close()
     except Exception:

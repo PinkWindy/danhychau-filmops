@@ -573,6 +573,104 @@ body { font-family: var(--font); background: var(--bg-base); color: var(--text-p
 .demo-step-item.error { color: var(--red-light); background: rgba(229,57,53,0.07); }
 .demo-modal-footer { padding: 14px 20px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 10px; }
 
+/* Quick modal — stacked labels/inputs (Sửa KH / định mức / tạo nhanh) */
+.demo-modal.dyc-modal-wide { max-width: 720px; }
+#modal-quick-body.dyc-modal-body {
+  padding: 0 22px 16px;
+  max-height: min(70vh, 560px);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.dyc-modal-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding-top: 6px;
+}
+.dyc-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.dyc-field > label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  letter-spacing: 0.02em;
+}
+.dyc-field .req { color: var(--red-light); margin-left: 2px; }
+.dyc-field input,
+.dyc-field select,
+.dyc-field textarea {
+  width: 100%;
+  min-width: 0;
+  padding: 10px 12px;
+  font-size: 13px;
+  font-family: var(--font);
+  color: var(--text-primary);
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  transition: var(--transition);
+}
+.dyc-field input:focus,
+.dyc-field select:focus,
+.dyc-field textarea:focus {
+  outline: none;
+  border-color: rgba(229, 57, 53, 0.45);
+  box-shadow: 0 0 0 2px rgba(229, 57, 53, 0.12);
+}
+.dyc-field input[readonly] {
+  opacity: 0.88;
+  cursor: default;
+  background: rgba(255, 255, 255, 0.04);
+}
+.dyc-form-section {
+  margin: 4px 0 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+.dyc-form-row-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px 16px;
+}
+@media (max-width: 560px) {
+  .dyc-form-row-2 { grid-template-columns: 1fr; }
+}
+
+/* Bảng định mức phim — đủ cột như Excel */
+.table-norms-excel-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  max-width: 100%;
+}
+.table-norms-excel {
+  font-size: 11px;
+  min-width: 1100px;
+}
+.table-norms-excel th {
+  white-space: nowrap;
+  font-weight: 700;
+  color: var(--text-secondary);
+  background: rgba(0, 0, 0, 0.2);
+}
+.table-norms-excel td {
+  white-space: nowrap;
+  vertical-align: middle;
+}
+.table-norms-excel td:first-child {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* ══════════════════════════════════════════════════
    FORM CHỈNH SỬA LUỒNG (WS EDIT FORM)
 ══════════════════════════════════════════════════ */

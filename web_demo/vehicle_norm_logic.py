@@ -6,6 +6,7 @@ import re
 from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy.orm import Session
+from sqlalchemy import case
 
 from database import DbVehicleFilmNorm
 
@@ -142,7 +143,13 @@ def find_active_vehicle_norm(
     )
     if ft:
         q = q.filter(DbVehicleFilmNorm.film_type == ft)
-    rows = q.order_by(DbVehicleFilmNorm.norm_id).all()
+    rows = (
+        q.order_by(
+            case((DbVehicleFilmNorm.norm_id.like("NORM-XLS-%"), 0), else_=1),
+            DbVehicleFilmNorm.norm_id,
+        )
+        .all()
+    )
     for row in rows:
         if model_year_in_range(model_year, row.model_year_range):
             return row

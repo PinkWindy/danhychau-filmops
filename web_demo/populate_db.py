@@ -3,7 +3,7 @@ import csv
 import json
 import datetime
 from sqlalchemy import text
-from database import SessionLocal, init_db, DbDealer, DbCustomer, DbVehicleProfile, DbLotInventory, DbOffcutInventory, DbCuttingGroupMatrix, DbRequest, DbAuditLog, DbWorkstream, DbNotification, DbInventoryTransaction, DbVehicleFilmNorm
+from database import SessionLocal, init_db, DbDealer, DbCustomer, DbVehicleProfile, DbLotInventory, DbOffcutInventory, DbCuttingGroupMatrix, DbRequest, DbAuditLog, DbWorkstream, DbNotification, DbInventoryTransaction
 
 def map_lot_id(old_id):
     if not old_id:
@@ -96,7 +96,7 @@ def _seed_customer_management_demo(db):
 
 
 def _seed_amis_and_vehicle_norms(db):
-    """Mẫu AMIS + định mức RX300/RX350 — idempotent."""
+    """Mẫu AMIS — định mức phim nạp từ Excel (film_norm_excel_import) khi app khởi động."""
     ts = datetime.datetime.utcnow().isoformat() + "Z"
     did = "DEALER_LEXUS_SAMCO_AMIS"
     if not db.query(DbDealer).filter(DbDealer.dealer_id == did).first():
@@ -143,45 +143,6 @@ def _seed_amis_and_vehicle_norms(db):
                 customer_type="END_CUSTOMER",
                 crm_status="NEW_PENDING_VERIFICATION",
                 created_at=ts,
-            )
-        )
-    norm_defs = [
-        ("NORM-RX300-2013-2022", "Phim cách nhiệt", "RX300", "2013 - 2022"),
-        ("NORM-RX350-2013-2022", "Phim cách nhiệt", "RX350", "2013 - 2022"),
-    ]
-    for nid, ftype, vcode, myr in norm_defs:
-        if db.query(DbVehicleFilmNorm).filter(DbVehicleFilmNorm.norm_id == nid).first():
-            continue
-        db.add(
-            DbVehicleFilmNorm(
-                norm_id=nid,
-                film_type=ftype,
-                vehicle_model_code=vcode,
-                model_year_range=myr,
-                windshield_size="90x152",
-                windshield_width_cm=90,
-                windshield_length_cm=152,
-                rear_window_size="60x130",
-                rear_window_width_cm=60,
-                rear_window_length_cm=130,
-                front_side_size="92x130",
-                front_side_width_cm=92,
-                front_side_length_cm=130,
-                rear_side_triangle_size="50x152",
-                rear_side_triangle_width_cm=50,
-                rear_side_triangle_length_cm=152,
-                triangle_size="",
-                triangle_width_cm=0,
-                triangle_length_cm=0,
-                rear_side_size="",
-                rear_side_width_cm=0,
-                rear_side_length_cm=0,
-                sunroof_size="",
-                sunroof_width_cm=0,
-                sunroof_length_cm=0,
-                status="ACTIVE",
-                created_at=ts,
-                note="Seed định mức demo",
             )
         )
 
@@ -279,107 +240,6 @@ def _ensure_five_lots_per_material(db):
                     note="Seed: đơn hàng Lexus đại lý gửi kho DYC",
                 )
             )
-
-
-def _seed_amis_and_vehicle_norms(db):
-    """Mẫu AMIS + định mức RX300/RX350 — idempotent."""
-    ts = datetime.datetime.utcnow().isoformat() + "Z"
-    did = "DEALER_LEXUS_SAMCO_AMIS"
-    if not db.query(DbDealer).filter(DbDealer.dealer_id == did).first():
-        fa = "Số 264, Đường Trần Hưng Đạo, Phường Cầu Ông Lãnh, Thành phố Hồ Chí Minh"
-        db.add(
-            DbDealer(
-                dealer_id=did,
-                dealer_name="LEXUS TRUNG TÂM SÀI GÒN – Công Ty TNHH Ôtô Toyotsu Samco",
-                legal_name="LEXUS TRUNG TÂM SÀI GÒN – Công Ty TNHH Ôtô Toyotsu Samco",
-                tax_code="0312348339",
-                address=fa,
-                contact_phone="",
-                customer_category="DEALER",
-                address_no="Số 264",
-                street="Trần Hưng Đạo",
-                ward="Cầu Ông Lãnh",
-                city="Thành phố Hồ Chí Minh",
-                full_address=fa,
-                amis_customer_code="KH00009",
-                status="ACTIVE",
-                created_at=ts,
-            )
-        )
-    cid = "CUS_AMIS_RETAIL_001"
-    if not db.query(DbCustomer).filter(DbCustomer.customer_id == cid).first():
-        fa2 = "1B, ĐC 19, Khu phố 4, Phường An Phú, Thành phố Hồ Chí Minh"
-        db.add(
-            DbCustomer(
-                customer_id=cid,
-                customer_name="LÊ THANH PHƯƠNG",
-                customer_masked="LÊ THANH PHƯƠNG",
-                customer_category="RETAIL_CUSTOMER",
-                tax_code="",
-                phone="",
-                address=fa2,
-                address_no="Số 1B",
-                street="ĐC 19, Khu phố 4",
-                ward="An Phú",
-                city="Thành phố Hồ Chí Minh",
-                full_address=fa2,
-                amis_customer_code="",
-                status="ACTIVE",
-                source_channel="DIRECT",
-                customer_type="END_CUSTOMER",
-                crm_status="NEW_PENDING_VERIFICATION",
-                created_at=ts,
-            )
-        )
-    norm_defs = [
-        (
-            "NORM-RX300-2013-2022",
-            "Phim cách nhiệt",
-            "RX300",
-            "2013 - 2022",
-        ),
-        (
-            "NORM-RX350-2013-2022",
-            "Phim cách nhiệt",
-            "RX350",
-            "2013 - 2022",
-        ),
-    ]
-    for nid, ftype, vcode, myr in norm_defs:
-        if db.query(DbVehicleFilmNorm).filter(DbVehicleFilmNorm.norm_id == nid).first():
-            continue
-        db.add(
-            DbVehicleFilmNorm(
-                norm_id=nid,
-                film_type=ftype,
-                vehicle_model_code=vcode,
-                model_year_range=myr,
-                windshield_size="90x152",
-                windshield_width_cm=90,
-                windshield_length_cm=152,
-                rear_window_size="60x130",
-                rear_window_width_cm=60,
-                rear_window_length_cm=130,
-                front_side_size="92x130",
-                front_side_width_cm=92,
-                front_side_length_cm=130,
-                rear_side_triangle_size="50x152",
-                rear_side_triangle_width_cm=50,
-                rear_side_triangle_length_cm=152,
-                triangle_size="",
-                triangle_width_cm=0,
-                triangle_length_cm=0,
-                rear_side_size="",
-                rear_side_width_cm=0,
-                rear_side_length_cm=0,
-                sunroof_size="",
-                sunroof_width_cm=0,
-                sunroof_length_cm=0,
-                status="ACTIVE",
-                created_at=ts,
-                note="Seed định mức demo",
-            )
-        )
 
 
 def clean_and_load_csv():

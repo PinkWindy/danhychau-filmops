@@ -11,6 +11,20 @@ function _esc(s) {
     .replace(/"/g, '&quot;');
 }
 
+/** Kích thước như file Excel: ưu tiên chuỗi (90x152), không có thì ghép từ cm. */
+function _normSizeDisplay(n, sizeKey, wKey, lKey) {
+  const raw = String(n[sizeKey] ?? '').trim();
+  if (raw && raw !== '0') return _esc(raw);
+  const w = parseFloat(n[wKey]) || 0;
+  const l = parseFloat(n[lKey]) || 0;
+  if (w > 0 && l > 0) {
+    const wi = w === Math.floor(w) ? Math.floor(w) : w;
+    const li = l === Math.floor(l) ? Math.floor(l) : l;
+    return _esc(`${wi}x${li}`);
+  }
+  return '—';
+}
+
 // ─── DANH MỤC THI CÔNG ────────────────────────────────────────────────────────
 const HANG_MUC_PPF = [
   { id: 'HOOD',          label: 'Nắp ca-pô' },
@@ -352,26 +366,41 @@ async function taiKhachHang() {
           </tbody></table></div>
         </div>
         <div id="cust-veh-norms-wrap" style="display:${vehSub === 'norms' ? 'block' : 'none'}">
-          <p class="muted" style="font-size:12px;margin-bottom:8px">Định mức phim cách nhiệt theo dòng xe / năm model.</p>
+          <p class="muted" style="font-size:12px;margin-bottom:8px">Định mức phim (dữ liệu chuẩn trong hệ thống — cùng cấu trúc file Excel: Loại phim, Dòng xe, Năm model, các kích thước kính).</p>
           <button type="button" class="btn btn-primary btn-sm" id="btn-norm-add" style="margin-bottom:8px">+ Thêm định mức</button>
-          <div class="table-wrap" style="overflow-x:auto"><table class="data-table" style="font-size:10px"><thead><tr>
-            <th>Phim</th><th>Dòng xe</th><th>Năm</th><th>KL w/l</th><th>KH w/l</th><th>ST w/l</th><th>SSTG w/l</th><th>TG</th><th>SS</th><th>KT</th><th>TT</th><th></th>
+          <div class="table-wrap table-norms-excel-wrap"><table class="data-table table-norms-excel"><thead><tr>
+            <th>Mã định mức</th>
+            <th>Loại phim</th>
+            <th>Dòng xe</th>
+            <th>Năm model</th>
+            <th>Kính lái</th>
+            <th>Kính hậu</th>
+            <th>Sườn trước</th>
+            <th>Sườn sau + TG</th>
+            <th>Kính trời</th>
+            <th>Sườn sau</th>
+            <th>Tam giác</th>
+            <th>TT</th>
+            <th></th>
           </tr></thead><tbody>
           ${(norms || []).map(n => `<tr>
-            <td>${_esc(n.film_type)}</td><td>${_esc(n.vehicle_model_code)}</td><td>${_esc(n.model_year_range)}</td>
-            <td>${n.windshield_width_cm||0}/${n.windshield_length_cm||0}</td>
-            <td>${n.rear_window_width_cm||0}/${n.rear_window_length_cm||0}</td>
-            <td>${n.front_side_width_cm||0}/${n.front_side_length_cm||0}</td>
-            <td>${n.rear_side_triangle_width_cm||0}/${n.rear_side_triangle_length_cm||0}</td>
-            <td>${n.triangle_width_cm||0}/${n.triangle_length_cm||0}</td>
-            <td>${n.rear_side_width_cm||0}/${n.rear_side_length_cm||0}</td>
-            <td>${n.sunroof_width_cm||0}/${n.sunroof_length_cm||0}</td>
+            <td title="${_esc(n.norm_id)}"><strong>${_esc(n.norm_id)}</strong></td>
+            <td title="${_esc(n.film_type)}">${_esc(n.film_type)}</td>
+            <td>${_esc(n.vehicle_model_code)}</td>
+            <td>${_esc(n.model_year_range)}</td>
+            <td>${_normSizeDisplay(n, 'windshield_size', 'windshield_width_cm', 'windshield_length_cm')}</td>
+            <td>${_normSizeDisplay(n, 'rear_window_size', 'rear_window_width_cm', 'rear_window_length_cm')}</td>
+            <td>${_normSizeDisplay(n, 'front_side_size', 'front_side_width_cm', 'front_side_length_cm')}</td>
+            <td>${_normSizeDisplay(n, 'rear_side_triangle_size', 'rear_side_triangle_width_cm', 'rear_side_triangle_length_cm')}</td>
+            <td>${_normSizeDisplay(n, 'sunroof_size', 'sunroof_width_cm', 'sunroof_length_cm')}</td>
+            <td>${_normSizeDisplay(n, 'rear_side_size', 'rear_side_width_cm', 'rear_side_length_cm')}</td>
+            <td>${_normSizeDisplay(n, 'triangle_size', 'triangle_width_cm', 'triangle_length_cm')}</td>
             <td>${_esc(n.status)}</td>
             <td style="white-space:nowrap">
-              <button type="button" class="btn btn-outline btn-sm" onclick="moFormNorm('${n.norm_id}')">Sửa</button>
+              <button type="button" class="btn btn-outline btn-sm" onclick="moFormNorm(${JSON.stringify(n.norm_id)})">Sửa</button>
               ${n.status === 'ACTIVE'
-                ? `<button type="button" class="btn btn-outline btn-sm" onclick="moToggleNorm('${n.norm_id}','deactivate')">Off</button>`
-                : `<button type="button" class="btn btn-outline btn-sm" onclick="moToggleNorm('${n.norm_id}','activate')">On</button>`}
+                ? `<button type="button" class="btn btn-outline btn-sm" onclick="moToggleNorm(${JSON.stringify(n.norm_id)},'deactivate')">Off</button>`
+                : `<button type="button" class="btn btn-outline btn-sm" onclick="moToggleNorm(${JSON.stringify(n.norm_id)},'activate')">On</button>`}
             </td></tr>`).join('')}
           </tbody></table></div>
         </div>`;
@@ -489,53 +518,98 @@ window.moToggleNorm = async function(normId, act) {
 window.moFormDealer = async function(id) {
   const rows = await fetch('/api/dealers').then(r => r.json());
   const d = rows.find(x => x.dealer_id === id) || {};
-  const reasonBox = id ? '<label>Reason sửa *</label><input id="ed-d-reason" class="wide" />' : '';
-  _openQuick(id ? 'Sửa đại lý' : 'Đại lý', `
-    ${reasonBox}
-    <label>Tên khách hàng</label><input id="ed-d-name" class="wide" value="${_esc(d.customer_name || d.dealer_name || '')}" />
-    <label>MST</label><input id="ed-d-tax" value="${_esc(d.tax_code || '')}" />
-    <label>SĐT</label><input id="ed-d-phone" value="${_esc(d.phone || '')}" />
-    <label>Địa chỉ (số nhà)</label><input id="ed-d-ano" value="${_esc(d.address_no || '')}" />
-    <label>Đường</label><input id="ed-d-st" value="${_esc(d.street || '')}" />
-    <label>Phường</label><input id="ed-d-ward" value="${_esc(d.ward || '')}" />
-    <label>Thành phố</label><input id="ed-d-city" value="${_esc(d.city || '')}" />
-    <label>Full address</label><input id="ed-d-full" value="${_esc(d.full_address || '')}" />
-    <label>Mã AMIS</label><input id="ed-d-amis" value="${_esc(d.amis_customer_code || '')}" />
-  `);
+  const reasonBox = id
+    ? `<div class="dyc-field"><label>Lý do sửa<span class="req">*</span></label><input id="ed-d-reason" placeholder="Bắt buộc — nhật ký kiểm toán" autocomplete="off" /></div>`
+    : '';
+  _openQuick(
+    id ? 'Sửa đại lý' : 'Đại lý',
+    `
+<div class="dyc-modal-form">
+  ${reasonBox}
+  <div class="dyc-field"><label>Tên khách hàng / đại lý</label><input id="ed-d-name" value="${_esc(d.customer_name || d.dealer_name || '')}" /></div>
+  <div class="dyc-form-row-2">
+    <div class="dyc-field"><label>MST</label><input id="ed-d-tax" value="${_esc(d.tax_code || '')}" /></div>
+    <div class="dyc-field"><label>SĐT</label><input id="ed-d-phone" value="${_esc(d.phone || '')}" /></div>
+  </div>
+  <div class="dyc-form-row-2">
+    <div class="dyc-field"><label>Địa chỉ (số nhà)</label><input id="ed-d-ano" value="${_esc(d.address_no || '')}" /></div>
+    <div class="dyc-field"><label>Đường</label><input id="ed-d-st" value="${_esc(d.street || '')}" /></div>
+  </div>
+  <div class="dyc-form-row-2">
+    <div class="dyc-field"><label>Phường</label><input id="ed-d-ward" value="${_esc(d.ward || '')}" /></div>
+    <div class="dyc-field"><label>Thành phố</label><input id="ed-d-city" value="${_esc(d.city || '')}" /></div>
+  </div>
+  <div class="dyc-field"><label>Địa chỉ đầy đủ</label><input id="ed-d-full" value="${_esc(d.full_address || '')}" /></div>
+  <div class="dyc-field"><label>Mã AMIS</label><input id="ed-d-amis" value="${_esc(d.amis_customer_code || '')}" /></div>
+</div>`,
+    { wide: true },
+  );
   window._editDealerId = id;
   _mcQuickMode = 'edit-dealer';
 };
 window.moFormCustomer = async function(id) {
   const rows = await fetch('/api/end-customers').then(r => r.json());
   const c = rows.find(x => x.customer_id === id) || {};
-  _openQuick('Sửa khách hàng', `
-    <label>Reason *</label><input id="ed-c-reason" class="wide" />
-    <label>Tên</label><input id="ed-c-name" class="wide" value="${_esc(c.customer_name || '')}" />
-    <label>MST</label><input id="ed-c-tax" value="${_esc(c.tax_code || '')}" />
-    <label>SĐT</label><input id="ed-c-phone" value="${_esc(c.phone || c.phone_masked || '')}" />
-    <label>Địa chỉ</label><input id="ed-c-ano" value="${_esc(c.address_no || '')}" />
-    <label>Đường</label><input id="ed-c-st" value="${_esc(c.street || '')}" />
-    <label>Phường</label><input id="ed-c-ward" value="${_esc(c.ward || '')}" />
-    <label>TP</label><input id="ed-c-city" value="${_esc(c.city || '')}" />
-    <label>Full</label><input id="ed-c-full" value="${_esc(c.full_address || '')}" />
-    <label>AMIS</label><input id="ed-c-amis" value="${_esc(c.amis_customer_code || '')}" />
-  `);
+  _openQuick(
+    'Sửa khách hàng',
+    `
+<div class="dyc-modal-form">
+  <div class="dyc-field"><label>Lý do sửa<span class="req">*</span></label><input id="ed-c-reason" placeholder="Bắt buộc — nhật ký kiểm toán" autocomplete="off" /></div>
+  <div class="dyc-field"><label>Tên khách hàng</label><input id="ed-c-name" value="${_esc(c.customer_name || '')}" /></div>
+  <div class="dyc-form-row-2">
+    <div class="dyc-field"><label>MST</label><input id="ed-c-tax" value="${_esc(c.tax_code || '')}" /></div>
+    <div class="dyc-field"><label>SĐT</label><input id="ed-c-phone" value="${_esc(c.phone || c.phone_masked || '')}" /></div>
+  </div>
+  <div class="dyc-form-row-2">
+    <div class="dyc-field"><label>Số nhà / địa chỉ ngắn</label><input id="ed-c-ano" value="${_esc(c.address_no || '')}" /></div>
+    <div class="dyc-field"><label>Đường</label><input id="ed-c-st" value="${_esc(c.street || '')}" /></div>
+  </div>
+  <div class="dyc-form-row-2">
+    <div class="dyc-field"><label>Phường / xã</label><input id="ed-c-ward" value="${_esc(c.ward || '')}" /></div>
+    <div class="dyc-field"><label>Tỉnh / thành phố</label><input id="ed-c-city" value="${_esc(c.city || '')}" /></div>
+  </div>
+  <div class="dyc-field"><label>Địa chỉ đầy đủ</label><input id="ed-c-full" value="${_esc(c.full_address || '')}" /></div>
+  <div class="dyc-field"><label>Mã AMIS</label><input id="ed-c-amis" value="${_esc(c.amis_customer_code || '')}" /></div>
+</div>`,
+    { wide: true },
+  );
   window._editCustomerId = id;
   _mcQuickMode = 'edit-customer';
 };
 window.moFormNorm = function(normId) {
   const isNew = !normId;
-  _openQuick(isNew ? 'Thêm định mức' : 'Sửa định mức', `
-    ${isNew ? '' : '<label>Reason sửa *</label><input id="ed-n-reason" class="wide" />'}
-    <label>norm_id</label><input id="ed-n-id" ${isNew ? '' : 'readonly'} value="${_esc(normId)}" />
-    <label>film_type *</label><input id="ed-n-ft" value="Phim cách nhiệt" />
-    <label>vehicle_model_code *</label><input id="ed-n-vc" />
-    <label>model_year_range *</label><input id="ed-n-myr" value="2013 - 2022" />
-    <label>Kính lái size</label><input id="ed-n-ws" value="90x152" />
-    <label>Kính hậu</label><input id="ed-n-rs" value="60x130" />
-    <label>Sườn trước</label><input id="ed-n-fs" value="92x130" />
-    <label>Sườn sau + TG</label><input id="ed-n-sst" value="50x152" />
-  `);
+  const reasonBlock = isNew
+    ? ''
+    : `<div class="dyc-field"><label>Lý do sửa<span class="req">*</span></label><input id="ed-n-reason" placeholder="Bắt buộc khi sửa định mức" autocomplete="off" /></div>`;
+  _openQuick(
+    isNew ? 'Thêm định mức' : 'Sửa định mức',
+    `
+<div class="dyc-modal-form">
+  ${reasonBlock}
+  <div class="dyc-form-section">Định danh</div>
+  <div class="dyc-field"><label>Mã định mức (norm_id)</label><input id="ed-n-id" ${isNew ? '' : 'readonly'} value="${_esc(normId)}" /></div>
+  <div class="dyc-form-row-2">
+    <div class="dyc-field"><label>Loại phim<span class="req">*</span></label><input id="ed-n-ft" value="Phim cách nhiệt" /></div>
+    <div class="dyc-field"><label>Dòng xe (mã)<span class="req">*</span></label><input id="ed-n-vc" placeholder="VD: RX300" /></div>
+  </div>
+  <div class="dyc-field"><label>Năm / khoảng model<span class="req">*</span></label><input id="ed-n-myr" placeholder="VD: 2018 hoặc 2013 - 2022" value="2013 - 2022" /></div>
+  <div class="dyc-form-section">Kích thước kính (WxL, cm — như Excel)</div>
+  <div class="dyc-form-row-2">
+    <div class="dyc-field"><label>Kính lái</label><input id="ed-n-ws" placeholder="VD: 90x152" value="90x152" /></div>
+    <div class="dyc-field"><label>Kính hậu</label><input id="ed-n-rs" placeholder="VD: 60x130" value="60x130" /></div>
+  </div>
+  <div class="dyc-form-row-2">
+    <div class="dyc-field"><label>Sườn trước</label><input id="ed-n-fs" placeholder="VD: 92x130" value="92x130" /></div>
+    <div class="dyc-field"><label>Sườn sau + tam giác</label><input id="ed-n-sst" placeholder="VD: 50x152" value="50x152" /></div>
+  </div>
+  <div class="dyc-form-row-2">
+    <div class="dyc-field"><label>Kính trời</label><input id="ed-n-sun" placeholder="0 hoặc WxL" /></div>
+    <div class="dyc-field"><label>Sườn sau (riêng)</label><input id="ed-n-rside" placeholder="WxL nếu tách khỏi SST" /></div>
+  </div>
+  <div class="dyc-field"><label>Tam giác (riêng)</label><input id="ed-n-tri" placeholder="WxL nếu tách" /></div>
+</div>`,
+    { wide: true },
+  );
   window._editNormId = normId;
   _mcQuickMode = isNew ? 'create-norm' : 'edit-norm';
   if (!isNew) {
@@ -549,11 +623,17 @@ window.moFormNorm = function(normId) {
       document.getElementById('ed-n-rs').value = n.rear_window_size || '';
       document.getElementById('ed-n-fs').value = n.front_side_size || '';
       document.getElementById('ed-n-sst').value = n.rear_side_triangle_size || '';
+      document.getElementById('ed-n-sun').value = n.sunroof_size || '';
+      document.getElementById('ed-n-rside').value = n.rear_side_size || '';
+      document.getElementById('ed-n-tri').value = n.triangle_size || '';
     });
   }
 };
 
-function _openQuick(title, html) {
+function _openQuick(title, html, opts) {
+  opts = opts || {};
+  const shell = document.getElementById('modal-quick-shell');
+  if (shell) shell.classList.toggle('dyc-modal-wide', !!opts.wide);
   document.getElementById('modal-quick-title').textContent = title;
   document.getElementById('modal-quick-body').innerHTML = html;
   document.getElementById('modal-quick-overlay').style.display = 'flex';
@@ -620,6 +700,9 @@ document.getElementById('modal-quick-ok')?.addEventListener('click', async () =>
         rear_window_size: document.getElementById('ed-n-rs').value.trim(),
         front_side_size: document.getElementById('ed-n-fs').value.trim(),
         rear_side_triangle_size: document.getElementById('ed-n-sst').value.trim(),
+        sunroof_size: document.getElementById('ed-n-sun').value.trim(),
+        rear_side_size: document.getElementById('ed-n-rside').value.trim(),
+        triangle_size: document.getElementById('ed-n-tri').value.trim(),
         created_by: actor,
       };
       const r = await fetch('/api/vehicle-norms', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -637,6 +720,9 @@ document.getElementById('modal-quick-ok')?.addEventListener('click', async () =>
         rear_window_size: document.getElementById('ed-n-rs').value.trim(),
         front_side_size: document.getElementById('ed-n-fs').value.trim(),
         rear_side_triangle_size: document.getElementById('ed-n-sst').value.trim(),
+        sunroof_size: document.getElementById('ed-n-sun').value.trim(),
+        rear_side_size: document.getElementById('ed-n-rside').value.trim(),
+        triangle_size: document.getElementById('ed-n-tri').value.trim(),
         reason,
         updated_by: actor,
       };
@@ -701,35 +787,63 @@ document.getElementById('modal-quick-ok')?.addEventListener('click', async () =>
 document.getElementById('mc-btn-quick-dealer')?.addEventListener('click', () => {
   _mcQuickMode = 'dealer';
   const sug = 'DEALER-Q-' + Date.now().toString().slice(-6);
-  _openQuick('Tạo đại lý nhanh', `
-    <label>dealer_id</label><input id="qc-dealer-id" class="wide" value="${sug}" />
-    <label>dealer_name</label><input id="qc-dealer-name" />
-    <label>legal_name</label><input id="qc-dealer-legal" />
-    <label>dealer_group</label><input id="qc-dealer-group" />
-    <label>address_masked</label><input id="qc-dealer-addr" value="ADDRESS_MASKED" />
-    <label>phone_masked</label><input id="qc-dealer-phone" value="PHONE_MASKED" />
-    <label>note</label><input id="qc-dealer-note" />`);
+  _openQuick(
+    'Tạo đại lý nhanh',
+    `
+<div class="dyc-modal-form">
+  <div class="dyc-field"><label>dealer_id</label><input id="qc-dealer-id" value="${sug}" /></div>
+  <div class="dyc-field"><label>dealer_name</label><input id="qc-dealer-name" /></div>
+  <div class="dyc-form-row-2">
+    <div class="dyc-field"><label>legal_name</label><input id="qc-dealer-legal" /></div>
+    <div class="dyc-field"><label>dealer_group</label><input id="qc-dealer-group" /></div>
+  </div>
+  <div class="dyc-form-row-2">
+    <div class="dyc-field"><label>address_masked</label><input id="qc-dealer-addr" value="ADDRESS_MASKED" /></div>
+    <div class="dyc-field"><label>phone_masked</label><input id="qc-dealer-phone" value="PHONE_MASKED" /></div>
+  </div>
+  <div class="dyc-field"><label>note</label><input id="qc-dealer-note" /></div>
+</div>`,
+    { wide: true },
+  );
 });
 document.getElementById('mc-btn-quick-cust')?.addEventListener('click', () => {
   _mcQuickMode = 'customer';
   const sug = 'CUS-Q-' + Date.now().toString().slice(-6);
-  _openQuick('Tạo khách hàng nhanh', `
-    <label>customer_id</label><input id="qc-cust-id" value="${sug}" />
-    <label>customer_masked</label><input id="qc-cust-mask" value="KH_MASKED_Q" />
-    <label>phone_masked</label><input id="qc-cust-phone" />
-    <label>address_masked</label><input id="qc-cust-addr" />
-    <label>note</label><input id="qc-cust-note" />`);
+  _openQuick(
+    'Tạo khách hàng nhanh',
+    `
+<div class="dyc-modal-form">
+  <div class="dyc-field"><label>customer_id</label><input id="qc-cust-id" value="${sug}" /></div>
+  <div class="dyc-field"><label>customer_masked</label><input id="qc-cust-mask" value="KH_MASKED_Q" /></div>
+  <div class="dyc-form-row-2">
+    <div class="dyc-field"><label>phone_masked</label><input id="qc-cust-phone" /></div>
+    <div class="dyc-field"><label>address_masked</label><input id="qc-cust-addr" /></div>
+  </div>
+  <div class="dyc-field"><label>note</label><input id="qc-cust-note" /></div>
+</div>`,
+    { wide: true },
+  );
 });
 document.getElementById('mc-btn-quick-veh')?.addEventListener('click', () => {
   _mcQuickMode = 'vehicle';
   const sug = 'VEH-Q-' + Date.now().toString().slice(-6);
-  _openQuick('Tạo xe nhanh', `
-    <label>vehicle_id</label><input id="qc-veh-id" value="${sug}" />
-    <label>vehicle_model_code</label><input id="qc-veh-code" value="LEXUS_RX350" />
-    <label>model_name</label><input id="qc-veh-model" value="Lexus RX350" />
-    <label>vin_masked</label><input id="qc-veh-vin" value="VIN_MASKED_Q" />
-    <label>delivery_date</label><input id="qc-veh-deliv" type="date" />
-    <label>note</label><input id="qc-veh-note" />`);
+  _openQuick(
+    'Tạo xe nhanh',
+    `
+<div class="dyc-modal-form">
+  <div class="dyc-field"><label>vehicle_id</label><input id="qc-veh-id" value="${sug}" /></div>
+  <div class="dyc-form-row-2">
+    <div class="dyc-field"><label>vehicle_model_code</label><input id="qc-veh-code" value="LEXUS_RX350" /></div>
+    <div class="dyc-field"><label>model_name</label><input id="qc-veh-model" value="Lexus RX350" /></div>
+  </div>
+  <div class="dyc-form-row-2">
+    <div class="dyc-field"><label>vin_masked</label><input id="qc-veh-vin" value="VIN_MASKED_Q" /></div>
+    <div class="dyc-field"><label>delivery_date</label><input id="qc-veh-deliv" type="date" /></div>
+  </div>
+  <div class="dyc-field"><label>note</label><input id="qc-veh-note" /></div>
+</div>`,
+    { wide: true },
+  );
 });
 
 document.getElementById('mc-dealer-select')?.addEventListener('change', (e) => {
