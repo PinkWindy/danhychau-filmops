@@ -1,0 +1,31 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "MappingConfig",
+  "description": "Schema JSON xác thực cấu trúc cấu hình ánh xạ dịch vụ x dòng xe -> mã vật tư phim chuẩn",
+  "type": "object",
+  "properties": {
+    "vehicle_model_code": {
+      "type": "string",
+      "description": "Mã đời xe chuẩn dán phim"
+    },
+    "job_item_id": {
+      "type": "string",
+      "description": "Mã hạng mục thi công chuẩn (ví dụ: JOB_FILM_WINDSHIELD)"
+    },
+    "material_code": {
+      "type": "string",
+      "description": "Mã vật tư phim chỉ định dán (ví dụ: RT40, JB20)"
+    },
+    "film_type": {
+      "type": "string",
+      "enum": ["PPF", "WINDOW_FILM"],
+      "description": "Phân loại dòng phim dán"
+    },
+    "status": {
+      "type": "string",
+      "enum": ["ACTIVE", "INACTIVE"],
+      "description": "Trạng thái hoạt động của cấu hình"
+    }
+  },
+  "required": ["vehicle_model_code", "job_item_id", "material_code", "film_type", "status"]
+}

@@ -1,0 +1,11 @@
+vehicle_model_code,model_name,brand,category
+LEXUS_RX350,Lexus RX350,Lexus,SUV_LARGE
+LEXUS_ES250,Lexus ES250,Lexus,SEDAN_MID
+LEXUS_NX350,Lexus NX350,Lexus,SUV_MID
+LEXUS_LX600,Lexus LX600,Lexus,SUV_FULL_SIZE
+LEXUS_LM500H,Lexus LM500h,Lexus,MPV_LARGE
+TOYOTA_CAMRY,Toyota Camry,Toyota,SEDAN_MID
+TOYOTA_FORTUNER,Toyota Fortuner,Toyota,SUV_LARGE
+BENZ_C300,Mercedes-Benz C300,Mercedes-Benz,SEDAN_MID
+BENZ_GLC300,Mercedes-Benz GLC300,Mercedes-Benz,SUV_MID
+BMW_X5,BMW X5,BMW,SUV_LARGE

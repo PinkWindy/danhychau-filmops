@@ -1,0 +1,53 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "IngestedRequest",
+  "description": "Schema JSON xác thực dữ liệu đầu vào của Phiếu yêu cầu thi công dán xe",
+  "type": "object",
+  "properties": {
+    "request_id": {
+      "type": "string",
+      "description": "Mã định danh duy nhất của yêu cầu dán xe (ví dụ: REQ-20260601-001)"
+    },
+    "dealer_id": {
+      "type": "string",
+      "description": "Mã liên kết đại lý gửi yêu cầu dán xe (bắt buộc đối với yêu cầu B2B)"
+    },
+    "customer_id": {
+      "type": "string",
+      "description": "Mã liên kết khách hàng lẻ / chủ xe trực tiếp"
+    },
+    "vehicle_id": {
+      "type": "string",
+      "description": "Mã liên kết hồ sơ xe trong vehicle_profile_master"
+    },
+    "vin_number": {
+      "type": "string",
+      "pattern": "^[A-HJ-NPR-Z0-9]{17}$",
+      "description": "Số khung xe (VIN) gồm đúng 17 ký tự chữ và số (không chứa I, O, Q)"
+    },
+    "vehicle_model_raw": {
+      "type": "string",
+      "description": "Dòng xe thô do đại lý nhập (ví dụ: Lexus RX350)"
+    },
+    "service_raw": {
+      "type": "string",
+      "description": "Hạng mục thi công dán xe thô (ví dụ: Dán sườn xe)"
+    },
+    "request_date": {
+      "type": "string",
+      "format": "date",
+      "description": "Ngày tiếp nhận yêu cầu (Y-M-D)"
+    },
+    "delivery_date": {
+      "type": "string",
+      "format": "date",
+      "description": "Ngày hẹn giao xe dán xong"
+    },
+    "status": {
+      "type": "string",
+      "enum": ["DRAFT", "PROCESSING", "VALIDATED", "STANDARDIZED", "NORM_ASSIGNED", "ALLOCATED", "PENDING_APPROVAL", "APPROVED", "TECH_CONFIRMING", "COMPLETED", "INVALID", "CONFLICT_SUSPENDED"],
+      "description": "Trạng thái xử lý của yêu cầu"
+    }
+  },
+  "required": ["request_id", "vin_number", "vehicle_model_raw", "service_raw", "request_date"]
+}

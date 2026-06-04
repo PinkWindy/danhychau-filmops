@@ -1,0 +1,11 @@
+customer_id,customer_name,phone,email,address,source_dealer_id,created_from_request_id,is_temp
+CUST_001,Nguyen Van An,0903123xxx,an.nguyen@gmail.com,"456 Le Loi, Quan 1, TP. HCM",DEALER_LEXUS_SG,REQ-20260601-001,false
+CUST_002,Tran Thi Binh,0909456xxx,binh.tran@yahoo.com,"789 Nguyen Hue, Quan 1, TP. HCM",DEALER_TOYOTA_BENTHANH,REQ-20260601-002,false
+CUST_003,Le Hoang Nam,0913789xxx,nam.le@outlook.com,"101 Ton That Thuyet, Quan 4, TP. HCM",,REQ-20260602-001,false
+CUST_004,Pham Minh Duc,0989123xxx,duc.pham@hotmail.com,"12 Hoang Hoa Tham, Binh Thanh, TP. HCM",DEALER_MERCEDES_HAXECO,REQ-20260602-002,false
+CUST_005,Vu Hoang Yen,0934567xxx,yen.vu@gmail.com,"34 Phu My Hung, Quan 7, TP. HCM",DEALER_BMW_PHUMYHUNG,REQ-20260603-001,false
+CUST_006,Dang Anh Tuan,0912112xxx,tuan.dang@live.com,"88 Nguyen Chi Thanh, Quan 10, TP. HCM",,REQ-20260603-002,false
+CUST_007,Bui Minh Tri,0908889xxx,tri.bui@gmail.com,"112 CMT8, Quan 3, TP. HCM",DEALER_LEXUS_SG,REQ-20260603-003,true
+CUST_008,Hoang Xuan Vinh,0987776xxx,vinh.hx@outlook.com,"15 Vo Thi Sau, Quan 3, TP. HCM",DEALER_AUDI_Q1,REQ-20260603-004,false
+CUST_009,Ngo Quoc Bao,0919998xxx,bao.ngo@gmail.com,"90 Tran Hung Dao, Quan 5, TP. HCM",,REQ-20260603-005,false
+CUST_010,Trinh Ngoc Mai,0933334xxx,mai.trinh@gmail.com,"45 Dien Bien Phu, Binh Thanh, TP. HCM",DEALER_TOYOTA_BENTHANH,REQ-20260603-006,true

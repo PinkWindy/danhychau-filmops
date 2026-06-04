@@ -1,0 +1,83 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "VehicleFilmNorm",
+  "description": "Schema JSON cho định mức phim lý thuyết cần cắt dán của từng xe lẻ",
+  "type": "object",
+  "properties": {
+    "vehicle_model_code": {
+      "type": "string",
+      "description": "Mã đời xe chuẩn"
+    },
+    "job_item_id": {
+      "type": "string",
+      "description": "Mã hạng mục dán chuẩn"
+    },
+    "material_code": {
+      "type": "string",
+      "description": "Mã phim chuẩn thi công"
+    },
+    "base_width_m": {
+      "type": "number",
+      "minimum": 0.1,
+      "description": "Chiều rộng cơ sở lý thuyết (mét)"
+    },
+    "base_length_m": {
+      "type": "number",
+      "minimum": 0.1,
+      "description": "Chiều dài cơ sở lý thuyết (mét)"
+    },
+    "safety_margin_percent": {
+      "type": "integer",
+      "enum": [5, 10],
+      "description": "Biên an toàn áp dụng (5% cho PPF, 10% cho phim cách nhiệt)"
+    },
+    "required_width_m": {
+      "type": "number",
+      "description": "Chiều rộng yêu cầu sau sấy dán (bằng base_width_m)"
+    },
+    "required_length_m": {
+      "type": "number",
+      "description": "Chiều dài yêu cầu sau sấy dán (dài cơ sở * 1.05 hoặc 1.10)"
+    },
+    "required_area_m2": {
+      "type": "number",
+      "description": "Diện tích yêu cầu (dài yêu cầu * rộng yêu cầu)"
+    },
+    "tolerance_percent": {
+      "type": "integer",
+      "description": "Dung sai độ dài cho phép dán xe"
+    },
+    "piece_width_cm": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Chiều rộng thực tế của mảnh dán lẻ (cm) (ví dụ: 92cm sườn, 60cm hậu)"
+    },
+    "piece_length_cm": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Chiều dài thực tế của mảnh dán lẻ (cm) (ví dụ: 130cm)"
+    },
+    "cut_group_id": {
+      "type": "string",
+      "description": "Mã liên kết nhóm cắt trong cutting_group_matrix (để trống nếu cắt lẻ)"
+    },
+    "is_grouped_cut": {
+      "type": "boolean",
+      "description": "Cờ đánh dấu dán nhóm. LƯU Ý QUAN TRỌNG: Nếu is_grouped_cut = true, hệ thống tuyệt đối KHÔNG được dùng dòng định mức này để trừ kho ảo trực tiếp, mà phải gộp dán theo block quy định tại cutting_group_matrix.csv"
+    },
+    "status": {
+      "type": "string",
+      "enum": ["ACTIVE", "INACTIVE"],
+      "description": "Trạng thái định mức"
+    },
+    "note": {
+      "type": "string",
+      "description": "Ghi chú thêm về định mức dán xe"
+    }
+  },
+  "required": [
+    "vehicle_model_code", "job_item_id", "material_code", "base_width_m", "base_length_m",
+    "safety_margin_percent", "required_width_m", "required_length_m", "required_area_m2",
+    "piece_width_cm", "piece_length_cm", "is_grouped_cut", "status"
+  ]
+}

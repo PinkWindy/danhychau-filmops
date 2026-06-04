@@ -1,0 +1,758 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DYC — Hệ Thống Quản Lý Kho Phim</title>
+<meta name="description" content="Hệ thống quản lý kho phim DYC — PPF & Phim Cách Nhiệt, Đa Đội Thi Công.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@700;800;900&display=swap" rel="stylesheet">
+<link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<!-- THANH ĐIỀU HƯỚNG -->
+<nav class="navbar">
+  <div class="nav-container">
+    <div class="logo-area">
+      <div class="logo-icon"><i class="fa-solid fa-film"></i></div>
+      <div>
+        <span class="logo-title">DYC</span>
+        <span class="logo-sub">HỆ THỐNG QUẢN LÝ KHO PHIM</span>
+      </div>
+    </div>
+
+    <div class="nav-links" id="nav-links">
+      <button class="nav-tab active" data-tab="dashboard"><i class="fa-solid fa-gauge-high"></i> Tổng quan</button>
+      <button class="nav-tab" data-tab="ocr"><i class="fa-solid fa-camera"></i> Nhập phiếu OCR</button>
+      <button class="nav-tab" data-tab="requests"><i class="fa-solid fa-file-lines"></i> Đơn thi công</button>
+      <button class="nav-tab" data-tab="workstreams"><i class="fa-solid fa-layer-group"></i> Luồng thi công</button>
+      <button class="nav-tab" data-tab="jobcards"><i class="fa-solid fa-screwdriver-wrench"></i> Lệnh thi công</button>
+      <button class="nav-tab" data-tab="lots"><i class="fa-solid fa-scroll"></i> Kho cuộn LOT</button>
+      <button class="nav-tab" data-tab="inventory"><i class="fa-solid fa-warehouse"></i> Quản lý kho</button>
+      <button class="nav-tab" data-tab="offcuts"><i class="fa-solid fa-scissors"></i> Mảnh dư</button>
+      <button class="nav-tab" data-tab="monthly"><i class="fa-solid fa-chart-column"></i> Báo cáo tháng</button>
+      <button class="nav-tab" data-tab="audit"><i class="fa-solid fa-shield-halved"></i> Nhật ký kiểm toán</button>
+    </div>
+
+    <div class="nav-right">
+      <button class="btn btn-demo-run btn-sm" id="btn-global-demo">
+        <i class="fa-solid fa-rocket"></i> Demo tự động
+      </button>
+      <button class="notif-btn" id="btn-notif-bell">
+        <i class="fa-solid fa-bell"></i>
+        <span class="notif-badge" id="notif-badge" style="display:none">0</span>
+      </button>
+      <div class="user-info">
+        <div class="avatar">QL</div>
+        <span class="user-label">Quản Lý</span>
+      </div>
+      <button class="hamburger" id="hamburger"><i class="fa-solid fa-bars"></i></button>
+    </div>
+  </div>
+</nav>
+
+<!-- BẢNG THÔNG BÁO -->
+<div class="notif-overlay" id="notif-overlay"></div>
+<div class="notif-drawer" id="notif-drawer">
+  <div class="notif-header">
+    <h3><i class="fa-solid fa-bell" style="color:var(--red);margin-right:8px"></i>Thông Báo</h3>
+    <button class="btn btn-outline btn-sm" id="btn-read-all">Đánh dấu đã đọc</button>
+  </div>
+  <div class="notif-list" id="notif-list"></div>
+</div>
+
+<!-- MODAL DEMO E2E -->
+<div class="modal-overlay" id="demo-modal-overlay" style="display:none">
+  <div class="demo-modal">
+    <div class="demo-modal-header">
+      <i class="fa-solid fa-rocket"></i>
+      <div>
+        <h3>🚀 Chạy Demo Tự Động — Đa Luồng Thi Công</h3>
+        <p style="font-size:12px;color:var(--text-secondary);margin-top:4px">PPF + Phim cách nhiệt — đồng thời 2 đội</p>
+      </div>
+    </div>
+    <div id="demo-steps-log"></div>
+    <div class="demo-modal-footer" id="demo-modal-footer" style="display:none">
+      <button class="btn btn-outline" id="btn-close-demo-modal">Đóng</button>
+      <button class="btn btn-primary" id="btn-view-result"><i class="fa-solid fa-eye"></i> Xem kết quả</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL CHỈNH SỬA LUỒNG THI CÔNG -->
+<div class="modal-overlay" id="ws-edit-modal" style="display:none">
+  <div class="demo-modal ws-edit-modal-inner" style="max-width:680px;max-height:90vh;overflow-y:auto">
+    <div class="demo-modal-header">
+      <i class="fa-solid fa-pen-to-square" style="color:var(--orange)"></i>
+      <div>
+        <h3 id="ws-edit-title">Chỉnh Sửa Luồng Thi Công</h3>
+        <p id="ws-edit-subtitle" style="font-size:12px;color:var(--text-secondary);margin-top:4px"></p>
+      </div>
+    </div>
+    <div id="ws-edit-body" style="padding:0 20px 16px"></div>
+    <div class="demo-modal-footer" style="display:flex">
+      <button class="btn btn-outline" onclick="closeWsEdit()"><i class="fa-solid fa-xmark"></i> Hủy</button>
+      <button class="btn btn-primary" id="btn-ws-edit-save"><i class="fa-solid fa-floppy-disk"></i> Lưu thay đổi</button>
+    </div>
+  </div>
+</div>
+
+<!-- NỘI DUNG CHÍNH -->
+<main class="main-content">
+
+  <!-- ════════════════ TỔNG QUAN ════════════════ -->
+  <div class="tab-pane active" id="tab-dashboard">
+    <div class="hero-section">
+      <div class="hero-text">
+        <h1>DYC — Quản Lý Kho Phim Thông Minh</h1>
+        <p>Theo dõi PPF & Phim Cách Nhiệt — 2 đội thi công độc lập, cập nhật theo thời gian thực</p>
+      </div>
+      <button class="btn btn-demo-run" id="btn-global-demo-2">
+        <i class="fa-solid fa-rocket"></i> Chạy Demo Tự Động
+      </button>
+    </div>
+
+    <!-- Chỉ số tổng quan -->
+    <div class="kpi-grid">
+      <div class="kpi-card" data-color="blue">
+        <div class="kpi-icon"><i class="fa-solid fa-scroll"></i></div>
+        <div><div class="kpi-val" id="stat-lots">—</div><div class="kpi-label">Cuộn LOT trong kho</div></div>
+      </div>
+      <div class="kpi-card" data-color="orange">
+        <div class="kpi-icon"><i class="fa-solid fa-scissors"></i></div>
+        <div><div class="kpi-val" id="stat-offcuts">—</div><div class="kpi-label">Mảnh dư khả dụng</div></div>
+      </div>
+      <div class="kpi-card" data-color="green">
+        <div class="kpi-icon"><i class="fa-solid fa-shield-film"></i></div>
+        <div><div class="kpi-val" id="stat-ppf-done">—</div><div class="kpi-label">Luồng PPF hoàn tất</div></div>
+      </div>
+      <div class="kpi-card" data-color="teal">
+        <div class="kpi-icon"><i class="fa-solid fa-window-restore"></i></div>
+        <div><div class="kpi-val" id="stat-wf-done">—</div><div class="kpi-label">Luồng Cách Nhiệt hoàn tất</div></div>
+      </div>
+      <div class="kpi-card" data-color="red">
+        <div class="kpi-icon"><i class="fa-solid fa-circle-exclamation"></i></div>
+        <div><div class="kpi-val" id="stat-approval-ws">—</div><div class="kpi-label">Luồng chờ phê duyệt</div></div>
+      </div>
+      <div class="kpi-card" data-color="purple">
+        <div class="kpi-icon"><i class="fa-solid fa-circle-check"></i></div>
+        <div><div class="kpi-val" id="stat-closed">—</div><div class="kpi-label">Đơn đã hoàn tất</div></div>
+      </div>
+    </div>
+
+    <div class="dashboard-panels">
+      <!-- Hàng chờ phê duyệt -->
+      <div class="panel">
+        <div class="panel-header">
+          <h3><i class="fa-solid fa-user-check"></i> Luồng Chờ Phê Duyệt</h3>
+          <span class="badge-count" id="badge-ws-approve">0</span>
+        </div>
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead><tr>
+              <th>Mã luồng</th><th>Loại</th><th>Mã đơn</th><th>Vật tư</th><th>Nguồn</th><th>Thao tác</th>
+            </tr></thead>
+            <tbody id="table-ws-approve"></tbody>
+          </table>
+        </div>
+      </div>
+      <!-- Đang thi công -->
+      <div class="panel">
+        <div class="panel-header">
+          <h3><i class="fa-solid fa-wrench"></i> Đang Thi Công</h3>
+          <span class="badge-count" id="badge-inprogress">0</span>
+        </div>
+        <div id="dash-inprogress-list" style="padding:8px"></div>
+      </div>
+    </div>
+
+    <div class="dashboard-panels">
+      <div class="panel">
+        <div class="panel-header">
+          <h3><i class="fa-solid fa-layer-group"></i> Trạng Thái Luồng Thi Công</h3>
+        </div>
+        <div id="dash-ws-status" style="padding:12px"></div>
+      </div>
+      <div class="panel">
+        <div class="panel-header">
+          <h3><i class="fa-solid fa-bell"></i> Thông Báo Gần Nhất</h3>
+        </div>
+        <div id="dash-notif-quick" style="padding:8px"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════════ NHẬP PHIẾU OCR ════════════════ -->
+  <div class="tab-pane" id="tab-ocr">
+    <div class="section-header">
+      <h2><i class="fa-solid fa-camera"></i> Nhập Phiếu Bằng Hình Ảnh (OCR)</h2>
+      <p>Tải ảnh phiếu yêu cầu từ Lexus/đại lý — Hệ thống AI tự động đọc và trích xuất thông tin</p>
+    </div>
+    <div class="ocr-layout">
+      <div class="ocr-left">
+        <div class="upload-zone" id="upload-zone" onclick="document.getElementById('file-input').click()">
+          <div class="upload-icon"><i class="fa-solid fa-cloud-arrow-up"></i></div>
+          <h3>Kéo thả ảnh phiếu vào đây</h3>
+          <p>Hỗ trợ JPG, PNG, PDF. AI sẽ tự động đọc và điền thông tin.</p>
+          <button class="btn btn-primary" type="button">
+            <i class="fa-solid fa-folder-open"></i> Chọn tệp
+          </button>
+          <input type="file" id="file-input" accept="image/*,.pdf" style="display:none">
+        </div>
+        <div class="ocr-drafts-panel">
+          <div class="panel-header"><h3><i class="fa-solid fa-list"></i> Danh sách phiếu chờ duyệt</h3></div>
+          <div id="ocr-drafts-list"><p class="text-center muted pad-20">Chưa có phiếu nào.</p></div>
+        </div>
+      </div>
+      <div class="ocr-right" id="ocr-review-panel" style="display:none">
+        <div class="panel" style="background:var(--bg-card)">
+          <div class="panel-header">
+            <h3><i class="fa-solid fa-magnifying-glass"></i> Kiểm tra thông tin trích xuất</h3>
+            <span id="ocr-status-badge" class="status-badge"></span>
+          </div>
+          <div class="confidence-bar-wrap">
+            <span>Độ chính xác:</span>
+            <div class="confidence-bar"><div class="confidence-fill" id="confidence-fill" style="width:0%"></div></div>
+            <span id="confidence-pct">0%</span>
+          </div>
+          <div class="ocr-fields" id="ocr-fields-form"></div>
+          <div id="ocr-services-box" style="padding:0 16px 12px">
+            <div class="hitl-alert">
+              <i class="fa-solid fa-layer-group"></i>
+              <div>
+                <strong>Phát hiện đa dịch vụ</strong>
+                <p id="ocr-services-text">Phiếu chứa cả PPF + Phim cách nhiệt. Hệ thống sẽ tạo 2 luồng thi công sau khi xác nhận.</p>
+              </div>
+            </div>
+          </div>
+          <div class="ocr-actions">
+            <button class="btn btn-green" id="btn-confirm-ocr" style="flex:1">
+              <i class="fa-solid fa-check-circle"></i> Xác nhận & Tạo đơn thi công
+            </button>
+            <button class="btn btn-outline btn-danger" id="btn-cancel-ocr">
+              <i class="fa-solid fa-xmark"></i> Hủy phiếu
+            </button>
+          </div>
+        </div>
+      </div>
+      <div id="ocr-empty-state" style="display:flex;align-items:center;justify-content:center;min-height:300px">
+        <div class="empty-state">
+          <i class="fa-solid fa-image"></i>
+          <h3>Tải ảnh phiếu để bắt đầu</h3>
+          <p>Sau khi tải lên, chọn phiếu từ danh sách bên trái để xem và xác nhận.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════════ ĐƠN THI CÔNG E2E ════════════════ -->
+  <div class="tab-pane" id="tab-requests">
+    <div class="section-header">
+      <h2><i class="fa-solid fa-file-lines"></i> Đơn Thi Công — Luồng Xử Lý Đầu Cuối</h2>
+      <p>Toàn bộ quy trình từ tiếp nhận đến hoàn tất — PPF & Phim Cách Nhiệt.</p>
+    </div>
+    <div class="e2e-layout">
+      <div class="e2e-sidebar">
+        <div class="sidebar-header">
+          <h3><i class="fa-solid fa-list"></i> Danh sách đơn</h3>
+          <span class="badge-count" id="req-list-count">0</span>
+        </div>
+        <div class="req-list" id="demo-req-list"></div>
+      </div>
+      <div class="e2e-main">
+        <div id="no-req-selected" class="empty-state" style="height:500px">
+          <i class="fa-solid fa-hand-pointer"></i>
+          <h3>Chọn một đơn thi công</h3>
+          <p>Nhấn vào đơn ở danh sách bên trái để xem chi tiết và thao tác.</p>
+        </div>
+        <div id="req-demo-board" style="display:none">
+          <div class="board-top">
+            <div>
+              <h3 id="board-req-title">—</h3>
+              <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:6px">
+                <span id="board-req-status" class="status-badge"></span>
+                <span id="board-multi-ws-badge" style="display:none" class="status-badge ws-type-ppf">Đa luồng thi công</span>
+              </div>
+            </div>
+            <div style="display:flex;gap:8px">
+              <button class="btn btn-outline btn-sm" id="btn-run-step">
+                <i class="fa-solid fa-robot"></i> Chạy AI Agent
+              </button>
+              <button class="btn btn-demo-run btn-sm" id="btn-run-all-e2e">
+                <i class="fa-solid fa-rocket"></i> Chạy toàn bộ
+              </button>
+            </div>
+          </div>
+          <div id="ws-source-warnings" class="hitl-alert" style="display:none;margin-top:12px;border-color:rgba(229,57,53,0.4);background:rgba(229,57,53,0.08)"></div>
+
+          <!-- Tiến trình xử lý -->
+          <div class="steps-track">
+            <div class="step-item" id="step-DRAFT"><div class="step-dot"><i class="fa-solid fa-file-circle-plus"></i></div><span class="step-label">Tiếp nhận</span></div>
+            <div class="step-connector"></div>
+            <div class="step-item" id="step-STANDARDIZED"><div class="step-dot"><i class="fa-solid fa-file-check"></i></div><span class="step-label">Chuẩn hóa</span></div>
+            <div class="step-connector"></div>
+            <div class="step-item" id="step-NORM_ASSIGNED"><div class="step-dot"><i class="fa-solid fa-ruler"></i></div><span class="step-label">Định mức</span></div>
+            <div class="step-connector"></div>
+            <div class="step-item" id="step-ALLOCATED"><div class="step-dot"><i class="fa-solid fa-box-open"></i></div><span class="step-label">Phân bổ vật tư</span></div>
+            <div class="step-connector"></div>
+            <div class="step-item" id="step-APPROVED"><div class="step-dot"><i class="fa-solid fa-user-check"></i></div><span class="step-label">Đã duyệt</span></div>
+            <div class="step-connector"></div>
+            <div class="step-item" id="step-IN_PROGRESS"><div class="step-dot"><i class="fa-solid fa-wrench"></i></div><span class="step-label">Thi công</span></div>
+            <div class="step-connector"></div>
+            <div class="step-item" id="step-CLOSED"><div class="step-dot"><i class="fa-solid fa-flag-checkered"></i></div><span class="step-label">Hoàn tất</span></div>
+          </div>
+
+          <!-- Khu vực thao tác -->
+          <div class="work-area">
+            <div class="detail-card">
+              <h4><i class="fa-solid fa-car"></i> Thông Tin Xe & Khách Hàng</h4>
+              <div class="detail-grid">
+                <span class="dl">Đại lý</span><span class="dv" id="det-dealer">—</span>
+                <span class="dl">Khách hàng</span><span class="dv" id="det-customer">—</span>
+                <span class="dl">Dòng xe</span><span class="dv" id="det-model">—</span>
+                <span class="dl">Số VIN</span><span class="dv" id="det-vin">—</span>
+                <span class="dl">Hạn giao xe</span><span class="dv highlight-red" id="det-deadline">—</span>
+              </div>
+              <div class="cutting-group-box" id="cutting-group-box" style="display:none">
+                <i class="fa-solid fa-layer-group cg-icon"></i>
+                <div class="cg-info">
+                  <strong>Nhóm cắt phim (Cutting Group)</strong>
+                  <div class="cg-details">
+                    <span><i class="fa-solid fa-tag"></i> Mã nhóm: <span id="det-cg-id">—</span></span>
+                    <span><i class="fa-solid fa-cube"></i> Kích thước block: <span id="det-cg-block">—</span></span>
+                    <span><i class="fa-solid fa-ruler"></i> Chiều dài khấu: <span id="det-cg-len">—</span></span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="action-card">
+              <h4><i class="fa-solid fa-bolt"></i> Thao Tác</h4>
+              <p class="info-box" id="action-desc">Chọn đơn và nhấn nút để thực hiện từng bước.</p>
+
+              <div id="agent-run-zone" style="display:none">
+                <button class="btn btn-primary btn-full" id="btn-run-step-2">
+                  <i class="fa-solid fa-robot"></i> AI Agent xử lý bước tiếp theo
+                </button>
+              </div>
+
+              <!-- Phê duyệt từng luồng (đa luồng) -->
+              <div id="hitl-ws-zone" style="display:none">
+                <div class="hitl-alert">
+                  <i class="fa-solid fa-layer-group"></i>
+                  <div>
+                    <strong>Phê duyệt từng luồng thi công</strong>
+                    <p>Mỗi luồng có thể phê duyệt độc lập. Sau khi duyệt → Soft Lock tự động tạo & lệnh thi công gửi cho KTV.</p>
+                  </div>
+                </div>
+                <div id="ws-approval-cards"></div>
+              </div>
+
+              <!-- Phê duyệt đơn thường -->
+              <div id="hitl-1-zone" style="display:none">
+                <div class="hitl-alert">
+                  <i class="fa-solid fa-user-tie"></i>
+                  <div><strong>Quản lý cần phê duyệt phương án vật tư</strong>
+                  <p>Hệ thống đề xuất nguồn vật tư:</p></div>
+                </div>
+                <div class="proposal-box">
+                  <div class="prop-row"><span>Nguồn vật tư</span><strong id="prop-source">—</strong></div>
+                  <div class="prop-row"><span>Chiều dài sử dụng</span><strong id="prop-len">—</strong></div>
+                </div>
+                <button class="btn btn-green btn-full" id="btn-hitl-approve">
+                  <i class="fa-solid fa-check"></i> Phê Duyệt & Tạo Soft Lock
+                </button>
+              </div>
+
+              <!-- KTV xác nhận thực tế (đơn thường) -->
+              <div id="hitl-2-zone" style="display:none">
+                <div class="hitl-alert tech">
+                  <i class="fa-solid fa-ruler-combined"></i>
+                  <div><strong>Kỹ thuật viên xác nhận kích thước thực tế</strong>
+                  <p>Nhập số liệu thực tế sau khi thi công để hệ thống trừ kho ảo.</p></div>
+                </div>
+                <div class="form-grid">
+                  <div class="field-group"><label>Kích thước block thực tế</label><input type="text" id="input-actual-block" class="field-input" placeholder="vd: 152x143"></div>
+                  <div class="field-group"><label>Chiều dài thực tế (m)</label><input type="number" id="input-actual-len" class="field-input" step="0.01"></div>
+                  <div class="field-group"><label>Chiều dài mảnh dư (m)</label><input type="number" id="input-offcut-len" class="field-input" value="0" step="0.01"></div>
+                  <div class="field-group"><label>Chiều rộng mảnh dư (m)</label><input type="number" id="input-offcut-width" class="field-input" value="0" step="0.01"></div>
+                  <div class="field-group"><label>Chất lượng mảnh dư</label><select id="input-offcut-quality" class="field-input"><option value="NORMAL">Bình thường</option><option value="GOOD">Tốt</option><option value="POOR">Kém</option></select></div>
+                  <div class="field-group"><label>Vị trí lưu mảnh dư</label><input type="text" id="input-offcut-location" class="field-input" value="OFFCUT-RACK-C"></div>
+                  <div class="field-group"><label>Diện tích phế liệu (m²)</label><input type="number" id="input-scrap" class="field-input" value="0" step="0.01"></div>
+                  <div class="field-group"><label>Lý do ngoại lệ (nếu có)</label><input type="text" id="input-exception" class="field-input" placeholder="Nhập nếu kích thước khác kế hoạch"></div>
+                </div>
+                <button class="btn btn-primary btn-full" id="btn-hitl-complete">
+                  <i class="fa-solid fa-warehouse"></i> Xác Nhận & Trừ Kho Ảo
+                </button>
+              </div>
+
+              <!-- Hoàn tất -->
+              <div id="completed-zone" style="display:none">
+                <div class="success-box">
+                  <div class="success-icon"><i class="fa-solid fa-circle-check"></i></div>
+                  <h3>Xe Đã Hoàn Tất!</h3>
+                  <p>Tất cả luồng thi công đã đóng. Kho ảo đã được cập nhật. Xe sẵn sàng bàn giao.</p>
+                </div>
+              </div>
+
+              <!-- Hoàn tất một phần -->
+              <div id="partial-zone" style="display:none">
+                <div class="hitl-alert" style="border-color:rgba(124,77,255,0.3);background:rgba(124,77,255,0.07)">
+                  <i class="fa-solid fa-circle-half-stroke" style="color:var(--purple-light)"></i>
+                  <div><strong style="color:var(--purple-light)">HOÀN TẤT MỘT PHẦN</strong>
+                  <p id="partial-detail">Một luồng đã hoàn tất. Đội còn lại vẫn đang thi công.</p></div>
+                </div>
+              </div>
+
+              <!-- Ngoại lệ -->
+              <div id="exception-zone" style="display:none">
+                <div class="exception-box">
+                  <i class="fa-solid fa-triangle-exclamation"></i>
+                  <h3>Có Ngoại Lệ</h3>
+                  <p id="exception-reason-text">—</p>
+                  <button class="btn btn-outline" style="margin-top:8px" id="btn-retry-exception">
+                    <i class="fa-solid fa-rotate"></i> Thử lại
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- PHẦN LUỒNG THI CÔNG -->
+          <div id="workstream-section" style="display:none;margin-top:24px">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+              <h3 style="font-family:var(--font-heading);font-size:18px;font-weight:700;display:flex;align-items:center;gap:8px">
+                <i class="fa-solid fa-layer-group" style="color:var(--red)"></i>
+                Tiến Độ Từng Luồng Thi Công
+              </h3>
+              <span id="ws-overall-status" class="status-badge">—</span>
+            </div>
+            <div class="ws-cards-grid" id="ws-cards-container"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════════ LUỒNG THI CÔNG ════════════════ -->
+  <div class="tab-pane" id="tab-workstreams">
+    <div class="section-header">
+      <h2><i class="fa-solid fa-layer-group"></i> Tất Cả Luồng Thi Công</h2>
+      <p>Dán Phim PPF & Dán Phim Cách Nhiệt — xem và thao tác theo từng luồng</p>
+    </div>
+    <div class="panel">
+      <div class="panel-header">
+        <h3><i class="fa-solid fa-list"></i> Danh sách luồng thi công</h3>
+        <div style="display:flex;gap:8px">
+          <select id="ws-filter-type" class="field-input" style="width:200px;padding:6px 10px;font-size:12px">
+            <option value="">Tất cả loại</option>
+            <option value="PPF_INSTALLATION">Dán Phim PPF</option>
+            <option value="WINDOW_FILM_INSTALLATION">Dán Phim Cách Nhiệt</option>
+          </select>
+          <select id="ws-filter-status" class="field-input" style="width:200px;padding:6px 10px;font-size:12px">
+            <option value="">Tất cả trạng thái</option>
+            <option value="PENDING_APPROVAL">Chờ phê duyệt</option>
+            <option value="APPROVED">Đã phê duyệt</option>
+            <option value="IN_PROGRESS">Đang thi công</option>
+            <option value="CLOSED">Đã hoàn tất</option>
+          </select>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead><tr>
+            <th>Mã luồng</th><th>Mã đơn</th><th>Loại thi công</th><th>Đội</th>
+            <th>Loại phim</th><th>Kích thước block</th><th>Nguồn vật tư</th>
+            <th>Trạng thái</th><th>Bắt đầu</th><th>Hoàn tất</th><th>Thao tác</th>
+          </tr></thead>
+          <tbody id="table-ws-body"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════════ LỆNH THI CÔNG (JOB CARDS) ════════════════ -->
+  <div class="tab-pane" id="tab-jobcards">
+    <div class="section-header">
+      <h2><i class="fa-solid fa-screwdriver-wrench"></i> Lệnh Thi Công</h2>
+      <p>Kỹ thuật viên nhận lệnh theo từng luồng — Đội PPF & Đội Phim Cách Nhiệt.</p>
+    </div>
+    <div class="job-layout">
+      <div class="job-list-panel">
+        <div class="panel-header"><h3><i class="fa-solid fa-list"></i> Danh sách lệnh</h3></div>
+        <div id="job-cards-list"></div>
+      </div>
+      <div class="job-detail-panel">
+        <div id="no-job-selected" class="empty-state">
+          <i class="fa-solid fa-screwdriver-wrench"></i>
+          <h3>Chọn lệnh thi công</h3>
+          <p>Nhấn vào lệnh ở danh sách bên trái để xem chi tiết.</p>
+        </div>
+        <div id="job-detail-board" style="display:none">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:10px">
+            <div>
+              <h3 id="jc-id" style="font-family:var(--font-heading);font-size:20px;font-weight:700"></h3>
+              <div style="display:flex;gap:8px;margin-top:6px;flex-wrap:wrap">
+                <span id="jc-status" class="status-badge"></span>
+                <span id="jc-ws-type-badge" class="status-badge"></span>
+                <span id="jc-ontime-badge"></span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Tiến trình lệnh thi công -->
+          <div class="job-timeline">
+            <div class="tl-step" id="tl-pending"><div class="tl-dot"><i class="fa-solid fa-clock"></i></div><span class="tl-label">Chờ KTV</span></div>
+            <div class="tl-line"></div>
+            <div class="tl-step" id="tl-inprogress"><div class="tl-dot"><i class="fa-solid fa-wrench"></i></div><span class="tl-label">Thi công</span></div>
+            <div class="tl-line"></div>
+            <div class="tl-step" id="tl-confirmation"><div class="tl-dot"><i class="fa-solid fa-clipboard-check"></i></div><span class="tl-label">Xác nhận thực tế</span></div>
+            <div class="tl-line"></div>
+            <div class="tl-step" id="tl-done"><div class="tl-dot"><i class="fa-solid fa-flag-checkered"></i></div><span class="tl-label">Hoàn tất</span></div>
+          </div>
+
+          <div class="job-info-grid" id="jc-info-grid"></div>
+          <div id="jc-ws-detail" style="margin:16px 0"></div>
+          <div id="jc-action-zone" class="jc-actions"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════════ KHO CUỘN LOT ════════════════ -->
+  <div class="tab-pane" id="tab-lots">
+    <div class="section-header">
+      <h2><i class="fa-solid fa-scroll"></i> Kho Cuộn Phim (LOT)</h2>
+      <p>Tồn kho cuộn phim nguyên — JB20, RT40, T-TYPE, M-TYPE, RS20</p>
+    </div>
+    <div class="panel">
+      <div class="panel-header"><h3><i class="fa-solid fa-boxes-stacked"></i> Danh Sách Cuộn LOT</h3></div>
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead><tr>
+            <th>Mã LOT</th><th>Loại phim</th><th>Rộng (m)</th><th>Dài gốc (m)</th>
+            <th>Còn lại (m)</th><th>Đã khui</th><th>Đang khóa</th><th>Ngày nhập</th><th>Trạng thái</th>
+          </tr></thead>
+          <tbody id="table-lots-body"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════════ QUẢN LÝ KHO (ADMIN) ════════════════ -->
+  <div class="tab-pane" id="tab-inventory">
+    <div class="section-header">
+      <h2><i class="fa-solid fa-warehouse"></i> Quản Lý Kho — LOT & Mảnh Dư</h2>
+      <p>Nhập / xuất / clear / release lock — mọi thao tác ghi Inventory Transaction & Audit Log.</p>
+      <p style="font-size:11px;opacity:0.88;margin-top:6px"><i class="fa-solid fa-circle-check" style="color:var(--teal-light);margin-right:6px"></i>Inventory Admin smoke test: <strong>18/18 PASS</strong> — báo cáo: <code style="font-size:10px">audit/inventory-admin-test-report.md</code></p>
+    </div>
+    <div id="inv-kpi-row" class="inv-kpi-row"></div>
+    <div class="inv-subtabs" id="inv-subtabs">
+      <button type="button" class="inv-subtab active" data-inv-sub="lots">LOT</button>
+      <button type="button" class="inv-subtab" data-inv-sub="offcuts">Mảnh dư</button>
+      <button type="button" class="inv-subtab" data-inv-sub="tx">Giao dịch kho</button>
+      <button type="button" class="inv-subtab" data-inv-sub="locked">Đang khóa</button>
+    </div>
+    <div class="inv-toolbar" id="inv-toolbar-lots">
+      <button type="button" class="btn btn-primary btn-sm" onclick="openImportLotModal()"><i class="fa-solid fa-file-circle-plus"></i> Nhập LOT mới</button>
+      <button type="button" class="btn btn-outline btn-sm" onclick="openReleaseLockModal('LOT','')"><i class="fa-solid fa-unlock"></i> Mở khóa</button>
+    </div>
+    <div class="inv-toolbar" id="inv-toolbar-offcuts" style="display:none">
+      <button type="button" class="btn btn-primary btn-sm" onclick="openImportOffcutModal()"><i class="fa-solid fa-scissors"></i> Nhập mảnh dư thủ công</button>
+      <button type="button" class="btn btn-outline btn-sm" onclick="openReleaseLockModal('OFFCUT','')"><i class="fa-solid fa-unlock"></i> Mở khóa</button>
+    </div>
+    <div class="inv-toolbar" id="inv-toolbar-tx" style="display:none">
+      <select id="inv-filter-tx-type" class="field-input" style="max-width:220px;padding:6px 10px;font-size:12px">
+        <option value="">Mọi loại giao dịch</option>
+        <option value="IMPORT_LOT">IMPORT_LOT</option>
+        <option value="IMPORT_OFFCUT_MANUAL">IMPORT_OFFCUT_MANUAL</option>
+        <option value="MANUAL_ISSUE_LOT">MANUAL_ISSUE_LOT</option>
+        <option value="MANUAL_ISSUE_OFFCUT">MANUAL_ISSUE_OFFCUT</option>
+        <option value="CLEAR_LOT">CLEAR_LOT</option>
+        <option value="CLEAR_OFFCUT">CLEAR_OFFCUT</option>
+        <option value="RELEASE_LOCK_MANUAL">RELEASE_LOCK_MANUAL</option>
+      </select>
+      <input type="text" id="inv-filter-tx-mat" class="field-input" placeholder="material_code" style="max-width:120px;padding:6px 10px;font-size:12px">
+      <input type="date" id="inv-filter-tx-from" class="field-input" style="padding:6px 10px;font-size:12px">
+      <input type="date" id="inv-filter-tx-to" class="field-input" style="padding:6px 10px;font-size:12px">
+      <button type="button" class="btn btn-outline btn-sm" onclick="loadInventoryTransactions()"><i class="fa-solid fa-filter"></i> Lọc</button>
+    </div>
+    <div id="inv-panel-lots" class="inv-panel">
+      <div class="panel"><div class="panel-header"><h3><i class="fa-solid fa-scroll"></i> LOT (lọc API)</h3></div>
+        <div class="inv-inline-filters">
+          <input type="text" id="inv-lot-q" class="field-input" placeholder="Tìm nhanh (q)" style="max-width:200px;padding:6px 10px;font-size:12px">
+          <select id="inv-lot-status" class="field-input" style="max-width:160px;padding:6px 10px;font-size:12px">
+            <option value="">Mọi trạng thái</option>
+            <option value="NEW">NEW</option>
+            <option value="IN_USE">IN_USE</option>
+            <option value="LOCKED">LOCKED</option>
+            <option value="DEPLETED">DEPLETED</option>
+            <option value="CLOSED">CLOSED</option>
+            <option value="CLEARED">CLEARED</option>
+            <option value="SCRAPPED">SCRAPPED</option>
+          </select>
+          <button type="button" class="btn btn-outline btn-sm" onclick="loadLots()">Tải lại</button>
+        </div>
+        <div class="table-wrap"><table class="data-table">
+          <thead><tr><th>lot_id</th><th>material_code</th><th>còn / gốc (m)</th><th>lot_status</th><th>is_locked</th><th>storage_location</th><th>Thao tác</th></tr></thead>
+          <tbody id="inv-table-lots"></tbody>
+        </table></div>
+      </div>
+    </div>
+    <div id="inv-panel-offcuts" class="inv-panel" style="display:none">
+      <div class="panel"><div class="panel-header"><h3><i class="fa-solid fa-scissors"></i> Mảnh dư</h3></div>
+        <div class="inv-inline-filters">
+          <input type="text" id="inv-oc-q" class="field-input" placeholder="Tìm (q)" style="max-width:200px;padding:6px 10px;font-size:12px">
+          <button type="button" class="btn btn-outline btn-sm" onclick="loadOffcuts()">Tải lại</button>
+        </div>
+        <div class="table-wrap"><table class="data-table">
+          <thead><tr><th>offcut_id</th><th>material_code</th><th>width×length</th><th>area_m²</th><th>quality</th><th>offcut_status</th><th>is_locked</th><th>storage_location</th><th>Thao tác</th></tr></thead>
+          <tbody id="inv-table-offcuts"></tbody>
+        </table></div>
+      </div>
+    </div>
+    <div id="inv-panel-tx" class="inv-panel" style="display:none">
+      <div class="panel"><div class="panel-header"><h3><i class="fa-solid fa-list-timeline"></i> Inventory Transactions</h3></div>
+        <div class="table-wrap"><table class="data-table">
+          <thead><tr><th>transaction_id</th><th>transaction_type</th><th>source</th><th>material_code</th><th>before→after</th><th>reason</th><th>performed_by</th><th>performed_at</th></tr></thead>
+          <tbody id="inv-table-tx"></tbody>
+        </table></div>
+      </div>
+    </div>
+    <div id="inv-panel-locked" class="inv-panel" style="display:none">
+      <div class="panel"><div class="panel-header"><h3><i class="fa-solid fa-lock"></i> LOT / Mảnh dư đang Soft Lock</h3></div>
+        <div id="inv-locked-list"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════════ MẢNH DƯ ════════════════ -->
+  <div class="tab-pane" id="tab-offcuts">
+    <div class="section-header">
+      <h2><i class="fa-solid fa-scissors"></i> Kho Mảnh Dư (Offcut)</h2>
+      <p>Mảnh phim còn lại sau khi cắt — ưu tiên tái sử dụng theo thứ tự nhập kho (FIFO).</p>
+    </div>
+    <div class="panel">
+      <div class="panel-header"><h3><i class="fa-solid fa-puzzle-piece"></i> Danh Sách Mảnh Dư</h3></div>
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead><tr>
+            <th>Mã mảnh dư</th><th>LOT gốc</th><th>Loại phim</th><th>Rộng (m)</th>
+            <th>Dài (m)</th><th>Diện tích (m²)</th><th>Đang khóa</th><th>Vị trí</th><th>Ngày nhập</th><th>Trạng thái</th>
+          </tr></thead>
+          <tbody id="table-offcuts-body"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════════ BÁO CÁO THÁNG ════════════════ -->
+  <div class="tab-pane" id="tab-monthly">
+    <div class="section-header">
+      <h2><i class="fa-solid fa-chart-column"></i> Báo Cáo Tháng — Chỉ Số Đa Luồng</h2>
+      <p>Phân tích PPF & Phim Cách Nhiệt — Đúng hạn, Tiêu hao vật tư, Hiệu suất đội</p>
+    </div>
+    <div id="monthly-kpis" class="monthly-kpis"></div>
+    <div class="dashboard-panels" style="margin-bottom:20px">
+      <div class="panel" style="padding:20px">
+        <h3 style="font-size:14px;font-weight:700;margin-bottom:12px;color:var(--red-light)">
+          <i class="fa-solid fa-shield-film"></i> Thống Kê Dán Phim PPF
+        </h3>
+        <div id="ppf-stats" class="detail-grid"></div>
+      </div>
+      <div class="panel" style="padding:20px">
+        <h3 style="font-size:14px;font-weight:700;margin-bottom:12px;color:var(--blue-light)">
+          <i class="fa-solid fa-window-restore"></i> Thống Kê Dán Phim Cách Nhiệt
+        </h3>
+        <div id="wf-stats" class="detail-grid"></div>
+      </div>
+    </div>
+    <div class="charts-grid">
+      <div class="chart-card"><h3>📊 Số đơn xe theo tháng</h3><canvas id="chart-requests" height="180"></canvas></div>
+      <div class="chart-card"><h3>⏱ Tỷ lệ giao xe đúng hạn (%)</h3><canvas id="chart-ontime" height="180"></canvas></div>
+      <div class="chart-card"><h3>🛡 PPF — T-TYPE (Trong) vs M-TYPE (Mờ)</h3><canvas id="chart-ppf-type" height="180"></canvas></div>
+      <div class="chart-card"><h3>🪟 Cách nhiệt — RT40 vs JB20</h3><canvas id="chart-wf-material" height="180"></canvas></div>
+    </div>
+    <div class="monthly-table-wrap">
+      <h3>Bảng chi tiết theo từng tháng</h3>
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead><tr>
+            <th>Tháng</th><th>Tổng đơn</th><th>Hoàn tất</th><th>Đúng hạn</th>
+            <th>Đơn PPF</th><th>Đơn Cách Nhiệt</th><th>T-TYPE</th><th>M-TYPE</th>
+            <th>Phế liệu</th>
+          </tr></thead>
+          <tbody id="table-monthly-body"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════════ NHẬT KÝ KIỂM TOÁN ════════════════ -->
+  <div class="tab-pane" id="tab-audit">
+    <div class="section-header">
+      <h2><i class="fa-solid fa-shield-halved"></i> Nhật Ký Kiểm Toán — Bất Biến</h2>
+      <p>Mọi giao dịch kho và thao tác trên luồng thi công đều được ghi nhận tự động, không thể xóa.</p>
+    </div>
+    <div class="inv-toolbar audit-filters" style="margin-bottom:12px">
+      <input type="text" id="audit-filter-action" class="field-input" placeholder="transaction_type" style="max-width:180px;padding:6px 10px;font-size:12px">
+      <input type="text" id="audit-filter-entity-type" class="field-input" placeholder="source_type" style="max-width:140px;padding:6px 10px;font-size:12px">
+      <input type="text" id="audit-filter-entity-id" class="field-input" placeholder="source_id" style="max-width:140px;padding:6px 10px;font-size:12px">
+      <input type="text" id="audit-filter-request" class="field-input" placeholder="request_id" style="max-width:160px;padding:6px 10px;font-size:12px">
+      <input type="text" id="audit-filter-actor" class="field-input" placeholder="actor" style="max-width:120px;padding:6px 10px;font-size:12px">
+      <input type="date" id="audit-filter-from" class="field-input" style="padding:6px 10px;font-size:12px">
+      <input type="date" id="audit-filter-to" class="field-input" style="padding:6px 10px;font-size:12px">
+      <button type="button" class="btn btn-outline btn-sm" onclick="taiNhatKy()"><i class="fa-solid fa-filter"></i> Lọc</button>
+    </div>
+    <div class="panel">
+      <div class="panel-header"><h3><i class="fa-solid fa-list-check"></i> Lịch Sử Giao Dịch</h3></div>
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead><tr>
+            <th>Mã log</th><th>Mã đơn</th><th>Mã luồng</th><th>action (transaction_type)</th>
+            <th>entity_type</th><th>entity_id</th><th>Trước</th><th>Sau</th>
+            <th>Lý do</th><th>actor</th><th>timestamp</th>
+          </tr></thead>
+          <tbody id="table-audit-body"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</main>
+
+<!-- FOOTER -->
+<footer class="site-footer">
+  <div class="footer-inner">
+    <div class="footer-brand">
+      <div class="logo-area"><div class="logo-icon"><i class="fa-solid fa-film"></i></div><span class="logo-title">DYC</span></div>
+      <p>Hệ thống quản lý kho phim dán xe thông minh — PPF & Phim Cách Nhiệt, Đa Đội Thi Công.<br>Được hỗ trợ bởi FastAPI + AI Agent.</p>
+    </div>
+    <div class="footer-links">
+      <h4>Phân hệ</h4>
+      <ul>
+        <li><i class="fa-solid fa-circle"></i>Luồng dán PPF</li>
+        <li><i class="fa-solid fa-circle"></i>Luồng phim cách nhiệt</li>
+        <li><i class="fa-solid fa-circle"></i>Nhập phiếu OCR</li>
+        <li><i class="fa-solid fa-circle"></i>Lệnh thi công đa đội</li>
+        <li><i class="fa-solid fa-circle"></i>Báo cáo tháng</li>
+      </ul>
+    </div>
+    <div class="footer-contact">
+      <h4>Thông tin hệ thống</h4>
+      <p><i class="fa-solid fa-code-branch"></i>Phiên bản 3.0 — Đa Luồng (Inventory smoke 18/18)</p>
+      <p><i class="fa-solid fa-server"></i>FastAPI + SQLite</p>
+      <p><i class="fa-solid fa-shield-halved"></i>Nhật ký kiểm toán bất biến</p>
+    </div>
+  </div>
+  <div class="footer-bottom">
+    © 2026 DYC Film Warehouse Agentic Workspace — Hệ Thống Quản Lý Kho Phim Đa Luồng Thi Công
+  </div>
+</footer>
+
+<div id="toast-container"></div>
+<script src="/static/app.js"></script>
+</body>
+</html>

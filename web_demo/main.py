@@ -1,0 +1,1164 @@
+import os, uuid, datetime, json
+from typing import Optional
+
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Query
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy.orm import Session
+
+from database import (
+    SessionLocal, init_db,
+    DbDealer, DbCustomer, DbVehicleProfile,
+    DbLotInventory, DbOffcutInventory,
+    DbRequest, DbWorkstream, DbJobCard,
+    DbAuditLog, DbCuttingGroupMatrix,
+    DbOcrDraft, DbNotification
+)
+from inventory_api import register_inventory_routes, assert_source_valid_for_wf6_commit
+
+app = FastAPI(title="DYC Film Warehouse — Multi-Workstream Agentic Portal")
+
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True,
+                   allow_methods=["*"], allow_headers=["*"])
+
+@app.middleware("http")
+async def no_cache(request, call_next):
+    response = await call_next(request)
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    return response
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+register_inventory_routes(app, get_db)
+
+def _now():
+    return datetime.datetime.utcnow().isoformat() + "Z"
+
+def _uid(prefix=""):
+    return f"{prefix}{uuid.uuid4().hex[:8].upper()}"
+
+# ─── MATERIAL RULES ───────────────────────────────────────────────────────────
+PPF_DEFAULTS = {
+    "planned_cut_block": "152x1300",
+    "planned_deduction_length_m": 13.0,
+    "options": ["T-TYPE", "M-TYPE"],
+    "default_material": "T-TYPE",
+}
+
+WINDOW_FILM_PLAN = [
+    {"job_item": "WINDSHIELD",         "material_code": "RT40", "note": "Kính lái cố định dùng RT40"},
+    {"job_item": "REAR_WINDOW",        "material_code": "JB20"},
+    {"job_item": "FRONT_SIDE",         "material_code": "JB20"},
+    {"job_item": "REAR_SIDE_TRIANGLE", "material_code": "JB20"},
+    {"job_item": "SUNROOF",            "material_code": "JB20"},
+]
+
+# ─── HELPERS ──────────────────────────────────────────────────────────────────
+def _add_notif(db: Session, title: str, body: str, notif_type: str,
+               related_id: str, related_type: str, recipient_role: str,
+               workstream_id: str = None, workstream_type: str = None, team_type: str = None):
+    db.add(DbNotification(
+        notif_id=f"NOTIF-{_uid()}",
+        title=title, body=body, notif_type=notif_type,
+        related_id=related_id, related_type=related_type,
+        workstream_id=workstream_id, workstream_type=workstream_type,
+        team_type=team_type, recipient_role=recipient_role,
+        is_read=False, created_at=_now()
+    ))
+
+def _audit(db: Session, request_id, transaction_type, source_type, source_id,
+           before_value, after_value, reason, actor,
+           workstream_id=None, workstream_type=None, cut_group_id=None):
+    sfx = (workstream_id or request_id or "SYS")[-4:].upper()
+    ts = datetime.date.today().strftime("%Y%m%d")
+    db.add(DbAuditLog(
+        log_id=f"AUD-{ts}-{sfx}-{_uid('')[:4]}",
+        transaction_id=f"TXN-{ts}-{sfx}-{_uid('')[:4]}",
+        request_id=request_id, workstream_id=workstream_id,
+        workstream_type=workstream_type, cut_group_id=cut_group_id,
+        transaction_type=transaction_type, transaction_status="CONFIRMED",
+        source_type=source_type, source_id=source_id,
+        before_value=before_value, after_value=after_value,
+        reason=reason, actor=actor, timestamp=_now()
+    ))
+
+def _create_workstreams_for_request(db: Session, req: DbRequest) -> list:
+    """Auto-create PPF + Window Film workstreams for a request."""
+    today = datetime.date.today().strftime("%Y%m%d")
+    wss = []
+
+    # 1. PPF Workstream
+    ppf_ws = DbWorkstream(
+        workstream_id=f"WS-PPF-{today}-{req.request_id[-3:]}",
+        request_id=req.request_id,
+        workstream_type="PPF_INSTALLATION",
+        team_type="PPF_TEAM",
+        technician_team="PPF_TEAM_A",
+        assigned_technician_id="KTV-PPF-001",
+        assigned_technician_name="Trần Văn Bình",
+        selected_material_code="T-TYPE",
+        material_plan=None,
+        planned_cut_block=PPF_DEFAULTS["planned_cut_block"],
+        planned_deduction_length_m=PPF_DEFAULTS["planned_deduction_length_m"],
+        status="PENDING_APPROVAL",
+        actual_confirmation_status="PENDING",
+        created_at=_now(),
+    )
+    db.add(ppf_ws)
+    wss.append(ppf_ws)
+
+    # 2. Window Film Workstream
+    wf_ws = DbWorkstream(
+        workstream_id=f"WS-WF-{today}-{req.request_id[-3:]}",
+        request_id=req.request_id,
+        workstream_type="WINDOW_FILM_INSTALLATION",
+        team_type="WINDOW_FILM_TEAM",
+        technician_team="WINDOW_FILM_TEAM_B",
+        assigned_technician_id="KTV-003",
+        assigned_technician_name="Nguyễn Văn An",
+        selected_material_code="JB20",
+        material_plan=json.dumps(WINDOW_FILM_PLAN, ensure_ascii=False),
+        cut_group_id="CG_RX350_SIDE_REAR",
+        planned_cut_block="152x143",
+        planned_deduction_length_m=1.43,
+        status="PENDING_APPROVAL",
+        actual_confirmation_status="PENDING",
+        created_at=_now(),
+    )
+    db.add(wf_ws)
+    wss.append(wf_ws)
+
+    req.is_multi_workstream = True
+    return wss
+
+def _update_request_status_from_workstreams(db: Session, req: DbRequest):
+    """Compute request aggregate status from workstream statuses."""
+    wss = db.query(DbWorkstream).filter(DbWorkstream.request_id == req.request_id).all()
+    if not wss:
+        return
+    statuses = [ws.status for ws in wss]
+    if all(s == "CLOSED" for s in statuses):
+        req.status = "CLOSED"
+    elif all(s in ("CLOSED", "COMPLETED") for s in statuses):
+        req.status = "WAITING_INVENTORY_COMMIT"
+    elif any(s == "CLOSED" for s in statuses):
+        req.status = "PARTIALLY_COMPLETED"
+    elif any(s == "IN_PROGRESS" for s in statuses):
+        req.status = "IN_PROGRESS"
+    elif any(s == "APPROVED" for s in statuses):
+        req.status = "APPROVED"
+    elif all(s == "PENDING_APPROVAL" for s in statuses):
+        req.status = "ALLOCATED"  # ready for approval
+
+def _commit_workstream_inventory(db: Session, ws: DbWorkstream, tech_id: str = "KTV-003"):
+    """Commit inventory transaction for a single workstream."""
+    source_type = ws.allocated_source_type or "LOT"
+    source_id = ws.allocated_source_id or f"LOT-{ws.selected_material_code}-001"
+    before_bal, after_bal = 0.0, 0.0
+    actual_len = ws.actual_length_m or ws.planned_deduction_length_m or 0.0
+
+    if source_type == "LOT":
+        lot = db.query(DbLotInventory).filter(DbLotInventory.lot_id == source_id).first()
+        if lot:
+            before_bal = lot.remaining_length_m
+            lot.remaining_length_m = round(max(0.0, lot.remaining_length_m - actual_len), 3)
+            after_bal = lot.remaining_length_m
+            lot.is_locked = False
+            lot.is_opened = True
+    elif source_type == "OFFCUT":
+        oc = db.query(DbOffcutInventory).filter(DbOffcutInventory.offcut_id == source_id).first()
+        if oc:
+            before_bal = oc.length_m
+            oc.length_m = 0.0; oc.area_m2 = 0.0; oc.status = "USED"; oc.is_locked = False
+            after_bal = 0.0
+
+    _audit(db, ws.request_id, f"ISSUE_FROM_{source_type}", source_type, source_id,
+           f"{before_bal}m", f"{after_bal}m",
+           f"Commit kho {ws.workstream_type} — KTV {tech_id}",
+           tech_id, ws.workstream_id, ws.workstream_type)
+
+    # Create offcut if any
+    new_offcut_id = None
+    if ws.has_new_offcut and ws.offcut_length_m and ws.offcut_width_m:
+        base = f"SUBLOT-{ws.selected_material_code}"
+        cnt = db.query(DbOffcutInventory).filter(
+            DbOffcutInventory.offcut_id.like(f"{base}-%")).count()
+        new_offcut_id = f"{base}-{str(cnt+1).zfill(3)}"
+        db.add(DbOffcutInventory(
+            offcut_id=new_offcut_id,
+            parent_lot_id=source_id if source_type == "LOT" else None,
+            material_code=ws.selected_material_code,
+            width_m=ws.offcut_width_m, length_m=ws.offcut_length_m,
+            area_m2=round(ws.offcut_width_m * ws.offcut_length_m, 3),
+            is_locked=False, storage_location=ws.offcut_storage_location or "OFFCUT-RACK-C",
+            import_date=datetime.date.today().isoformat(), status="ACTIVE"
+        ))
+        ws.created_offcut_id = new_offcut_id
+        _audit(db, ws.request_id, "CREATE_OFFCUT", source_type, source_id,
+               "None", f"{new_offcut_id}",
+               f"Mảnh dư mới từ {ws.workstream_type}",
+               tech_id, ws.workstream_id, ws.workstream_type)
+
+    if ws.has_scrap and ws.scrap_area_m2:
+        _audit(db, ws.request_id, "RECORD_SCRAP", source_type, source_id,
+               "None", f"Scrap {ws.scrap_area_m2}m²",
+               f"Phế liệu phát sinh {ws.workstream_type}",
+               tech_id, ws.workstream_id, ws.workstream_type)
+
+    _audit(db, ws.request_id, "RELEASE_LOCK", source_type, source_id,
+           "is_locked=true", "is_locked=false",
+           f"Giải phóng Soft Lock sau commit {ws.workstream_type}",
+           "SYSTEM", ws.workstream_id, ws.workstream_type)
+
+    ws.inventory_committed = True
+    ws.status = "CLOSED"
+    ws.closed_at = _now()
+    return new_offcut_id
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# DASHBOARD
+# ═══════════════════════════════════════════════════════════════════════════════
+@app.get("/api/dashboard")
+def get_dashboard(db: Session = Depends(get_db)):
+    total_lots = db.query(DbLotInventory).count()
+    active_offcuts = db.query(DbOffcutInventory).filter(
+        DbOffcutInventory.status == "ACTIVE").count()
+    scrap_m2 = sum(r.scrap_area_m2 or 0 for r in db.query(DbRequest).all()) + 0.15
+    total_reqs = db.query(DbRequest).count()
+    closed_reqs = db.query(DbRequest).filter(DbRequest.status == "CLOSED").count()
+    partial_reqs = db.query(DbRequest).filter(
+        DbRequest.status == "PARTIALLY_COMPLETED").count()
+    used_offcuts = db.query(DbOffcutInventory).filter(
+        DbOffcutInventory.status == "USED").count()
+    total_offcuts = db.query(DbOffcutInventory).count()
+    reusability = round(used_offcuts / total_offcuts * 100, 1) if total_offcuts else 64.2
+
+    # Workstream stats
+    all_ws = db.query(DbWorkstream).all()
+    ppf_ws = [w for w in all_ws if w.workstream_type == "PPF_INSTALLATION"]
+    wf_ws  = [w for w in all_ws if w.workstream_type == "WINDOW_FILM_INSTALLATION"]
+    ppf_in_progress  = sum(1 for w in ppf_ws if w.status == "IN_PROGRESS")
+    wf_in_progress   = sum(1 for w in wf_ws  if w.status == "IN_PROGRESS")
+    ppf_completed    = sum(1 for w in ppf_ws if w.status in ("CLOSED","COMPLETED"))
+    wf_completed     = sum(1 for w in wf_ws  if w.status in ("CLOSED","COMPLETED"))
+
+    pending_approval_ws = db.query(DbWorkstream).filter(
+        DbWorkstream.status == "PENDING_APPROVAL").count()
+    approval_needed = db.query(DbRequest).filter(
+        DbRequest.status == "ALLOCATED").count()
+    tech_needed = db.query(DbRequest).filter(
+        DbRequest.status.in_(["APPROVED","IN_PROGRESS"])).count()
+
+    unread_notifs = db.query(DbNotification).filter(
+        DbNotification.is_read == False).count()
+    ocr_pending = db.query(DbOcrDraft).filter(
+        DbOcrDraft.review_status == "REVIEWING").count()
+    jobs_in_progress = db.query(DbJobCard).filter(
+        DbJobCard.status == "IN_PROGRESS").count()
+
+    return {
+        "total_lots": total_lots, "active_offcuts": active_offcuts,
+        "total_scrap_m2": round(scrap_m2, 3), "total_requests": total_reqs,
+        "closed_requests": closed_reqs, "partial_requests": partial_reqs,
+        "reusability_rate": reusability,
+        "hitl_approval_needed": approval_needed,
+        "tech_confirmation_needed": tech_needed,
+        "completed_requests": closed_reqs,
+        "ppf_in_progress": ppf_in_progress, "wf_in_progress": wf_in_progress,
+        "ppf_completed": ppf_completed, "wf_completed": wf_completed,
+        "pending_approval_workstreams": pending_approval_ws,
+        "jobs_in_progress": jobs_in_progress,
+        "unread_notifications": unread_notifs,
+        "ocr_pending_review": ocr_pending,
+    }
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# MONTHLY DASHBOARD
+# ═══════════════════════════════════════════════════════════════════════════════
+@app.get("/api/monthly-dashboard")
+def get_monthly_dashboard(db: Session = Depends(get_db)):
+    from collections import defaultdict
+    monthly = defaultdict(lambda: {
+        "total_requests": 0, "closed": 0, "on_time": 0, "late": 0,
+        "ppf_jobs": 0, "wf_jobs": 0,
+        "ppf_completed": 0, "wf_completed": 0,
+        "t_type_count": 0, "m_type_count": 0,
+        "rt40_jobs": 0, "jb20_jobs": 0,
+        "scrap_m2": 0.0, "material_usage": defaultdict(float),
+    })
+    mock_history = {
+        "2026-01": {"total_requests":8,"closed":7,"on_time":6,"late":1,"ppf_jobs":7,"wf_jobs":7,"ppf_completed":7,"wf_completed":6,"t_type_count":5,"m_type_count":2,"rt40_jobs":7,"jb20_jobs":7,"scrap_m2":1.2,"material_usage":{"JB20":12.5,"T-TYPE":91.0,"M-TYPE":26.0,"RT40":1.4}},
+        "2026-02": {"total_requests":11,"closed":10,"on_time":9,"late":1,"ppf_jobs":11,"wf_jobs":11,"ppf_completed":10,"wf_completed":10,"t_type_count":8,"m_type_count":2,"rt40_jobs":11,"jb20_jobs":11,"scrap_m2":1.8,"material_usage":{"JB20":17.2,"T-TYPE":104.0,"M-TYPE":26.0,"RT40":2.2}},
+        "2026-03": {"total_requests":14,"closed":13,"on_time":11,"late":2,"ppf_jobs":14,"wf_jobs":14,"ppf_completed":13,"wf_completed":13,"t_type_count":10,"m_type_count":3,"rt40_jobs":14,"jb20_jobs":14,"scrap_m2":2.1,"material_usage":{"JB20":22.0,"T-TYPE":130.0,"M-TYPE":39.0,"RT40":2.8}},
+        "2026-04": {"total_requests":9,"closed":9,"on_time":8,"late":1,"ppf_jobs":9,"wf_jobs":9,"ppf_completed":9,"wf_completed":9,"t_type_count":7,"m_type_count":2,"rt40_jobs":9,"jb20_jobs":9,"scrap_m2":1.4,"material_usage":{"JB20":14.4,"T-TYPE":91.0,"M-TYPE":26.0,"RT40":1.8}},
+        "2026-05": {"total_requests":16,"closed":15,"on_time":14,"late":1,"ppf_jobs":16,"wf_jobs":16,"ppf_completed":15,"wf_completed":15,"t_type_count":11,"m_type_count":4,"rt40_jobs":16,"jb20_jobs":16,"scrap_m2":2.6,"material_usage":{"JB20":25.6,"T-TYPE":143.0,"M-TYPE":52.0,"RT40":3.2}},
+    }
+    for k, v in mock_history.items():
+        monthly[k] = v
+    # Add real 2026-06 data
+    all_reqs = db.query(DbRequest).all()
+    all_ws = db.query(DbWorkstream).all()
+    for r in all_reqs:
+        key = "2026-06"
+        monthly[key]["total_requests"] += 1
+        if r.status == "CLOSED": monthly[key]["closed"] += 1
+    for ws in all_ws:
+        key = "2026-06"
+        if ws.workstream_type == "PPF_INSTALLATION":
+            monthly[key]["ppf_jobs"] += 1
+            if ws.status == "CLOSED": monthly[key]["ppf_completed"] += 1
+            if ws.selected_material_code == "T-TYPE": monthly[key]["t_type_count"] += 1
+            elif ws.selected_material_code == "M-TYPE": monthly[key]["m_type_count"] += 1
+            monthly[key]["material_usage"][ws.selected_material_code or "T-TYPE"] += \
+                (ws.actual_length_m or ws.planned_deduction_length_m or 0)
+        elif ws.workstream_type == "WINDOW_FILM_INSTALLATION":
+            monthly[key]["wf_jobs"] += 1
+            if ws.status == "CLOSED": monthly[key]["wf_completed"] += 1
+            monthly[key]["rt40_jobs"] += 1
+            monthly[key]["jb20_jobs"] += 1
+            monthly[key]["material_usage"]["JB20"] += \
+                (ws.actual_length_m or ws.planned_deduction_length_m or 0)
+
+    sorted_months = sorted(monthly.keys())[-6:]
+    result = []
+    for m in sorted_months:
+        d = monthly[m]
+        tr = max(d["total_requests"], 1)
+        pj = max(d["ppf_jobs"], 1); wj = max(d["wf_jobs"], 1)
+        result.append({
+            "month": m, "total_requests": d["total_requests"],
+            "closed": d["closed"],
+            "on_time": d.get("on_time",0), "late": d.get("late",0),
+            "ppf_jobs": d["ppf_jobs"], "wf_jobs": d["wf_jobs"],
+            "ppf_completed": d["ppf_completed"], "wf_completed": d["wf_completed"],
+            "t_type_count": d.get("t_type_count",0), "m_type_count": d.get("m_type_count",0),
+            "rt40_jobs": d.get("rt40_jobs",0), "jb20_jobs": d.get("jb20_jobs",0),
+            "scrap_m2": round(d["scrap_m2"],2),
+            "completion_rate": round(d["closed"]/tr*100,1),
+            "on_time_rate": round(d.get("on_time",0)/max(d.get("on_time",0)+d.get("late",1),1)*100,1),
+            "ppf_completion_rate": round(d["ppf_completed"]/pj*100,1),
+            "wf_completion_rate": round(d["wf_completed"]/wj*100,1),
+            "material_usage": dict(d.get("material_usage", {})),
+        })
+    return result
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# REQUESTS
+# ═══════════════════════════════════════════════════════════════════════════════
+@app.get("/api/requests")
+def get_requests(db: Session = Depends(get_db)):
+    return db.query(DbRequest).order_by(DbRequest.created_at.desc()).all()
+
+@app.get("/api/requests/{request_id}")
+def get_request(request_id: str, db: Session = Depends(get_db)):
+    req = db.query(DbRequest).filter(DbRequest.request_id == request_id).first()
+    if not req: raise HTTPException(404, "Not found")
+    return req
+
+@app.get("/api/requests/{request_id}/workstreams")
+def get_workstreams(request_id: str, db: Session = Depends(get_db)):
+    wss = db.query(DbWorkstream).filter(DbWorkstream.request_id == request_id).all()
+    result = []
+    for ws in wss:
+        d = ws.__dict__.copy()
+        d.pop("_sa_instance_state", None)
+        if ws.material_plan:
+            try: d["material_plan"] = json.loads(ws.material_plan)
+            except: pass
+        result.append(d)
+    return result
+
+@app.get("/api/lots")
+def get_lots(db: Session = Depends(get_db)):
+    return db.query(DbLotInventory).all()
+
+@app.get("/api/offcuts")
+def get_offcuts(db: Session = Depends(get_db)):
+    return db.query(DbOffcutInventory).all()
+
+@app.get("/api/audit-logs")
+def get_audit_logs(
+    db: Session = Depends(get_db),
+    action: Optional[str] = Query(None, description="Lọc theo transaction_type"),
+    entity_type: Optional[str] = Query(None, description="Lọc theo source_type"),
+    entity_id: Optional[str] = Query(None, description="Lọc theo source_id"),
+    request_id: Optional[str] = Query(None),
+    actor: Optional[str] = Query(None),
+    date_from: Optional[str] = Query(None),
+    date_to: Optional[str] = Query(None),
+):
+    q = db.query(DbAuditLog).order_by(DbAuditLog.timestamp.desc())
+    if action:
+        q = q.filter(DbAuditLog.transaction_type == action)
+    if entity_type:
+        q = q.filter(DbAuditLog.source_type == entity_type)
+    if entity_id:
+        q = q.filter(DbAuditLog.source_id == entity_id)
+    if request_id:
+        q = q.filter(DbAuditLog.request_id == request_id)
+    if actor:
+        q = q.filter(DbAuditLog.actor == actor)
+    rows = q.limit(800).all()
+    out = []
+    for row in rows:
+        ts = row.timestamp or ""
+        if date_from and ts < date_from:
+            continue
+        if date_to and ts[:10] > date_to[:10]:
+            continue
+        out.append(row)
+    return out
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# AGENT STEP RUNNER (legacy single workstream + multi)
+# ═══════════════════════════════════════════════════════════════════════════════
+@app.post("/api/requests/{request_id}/step")
+def run_request_step(request_id: str, db: Session = Depends(get_db)):
+    req = db.query(DbRequest).filter(DbRequest.request_id == request_id).first()
+    if not req: raise HTTPException(404, "Not found")
+
+    if req.status == "DRAFT":
+        dealer = db.query(DbDealer).filter(DbDealer.dealer_id == req.dealer_id).first()
+        customer = db.query(DbCustomer).filter(DbCustomer.customer_id == req.customer_id).first()
+        vehicle = db.query(DbVehicleProfile).filter(DbVehicleProfile.vehicle_id == req.vehicle_id).first()
+        if not dealer or not customer or not vehicle:
+            req.status = "EXCEPTION_HOLD"
+            req.exception_reason = "Thiếu thông tin Master Data."
+            db.commit()
+            return {"status":"exception","detail":"Missing master data."}
+        req.status = "STANDARDIZED"
+        db.commit()
+        return {"status":"success","detail":"✅ WF2 — Chuẩn hóa Đại lý, KH, Xe thành công."}
+
+    elif req.status == "STANDARDIZED":
+        cg = db.query(DbCuttingGroupMatrix).filter(
+            DbCuttingGroupMatrix.vehicle_model_code == req.vehicle_model_code,
+            DbCuttingGroupMatrix.material_code == req.material_code
+        ).first()
+        if cg:
+            req.is_grouped_cut = True; req.cut_group_id = cg.cut_group_id
+            req.planned_cut_block = f"{cg.cut_block_width_cm}x{int(cg.deduction_length_m*100)}"
+            req.planned_deduction_length_m = cg.deduction_length_m
+        else:
+            req.is_grouped_cut = False; req.planned_cut_block = "152x150"
+            req.planned_deduction_length_m = 1.65
+        req.status = "NORM_ASSIGNED"
+        db.commit()
+        return {"status":"success","detail":"✅ WF3 — Ánh xạ định mức và nhận diện Cutting Group."}
+
+    elif req.status == "NORM_ASSIGNED":
+        # Try offcut matching
+        length_needed = req.planned_deduction_length_m or 1.43
+        best_offcut = db.query(DbOffcutInventory).filter(
+            DbOffcutInventory.material_code == req.material_code,
+            DbOffcutInventory.status == "ACTIVE",
+            DbOffcutInventory.is_locked == False,
+            DbOffcutInventory.width_m >= 1.51,
+            DbOffcutInventory.length_m >= length_needed
+        ).order_by(DbOffcutInventory.length_m.asc()).first()
+
+        if req.request_id in ("REQ-20260603-001", "REQ-20260604-001"):
+            req.allocated_source_type = "LOT"; req.allocated_source_id = "LOT-JB20-001"
+        elif best_offcut:
+            req.allocated_source_type = "OFFCUT"; req.allocated_source_id = best_offcut.offcut_id
+        else:
+            best_lot = db.query(DbLotInventory).filter(
+                DbLotInventory.material_code == req.material_code,
+                DbLotInventory.status == "ACTIVE",
+                DbLotInventory.is_locked == False,
+                DbLotInventory.remaining_length_m >= length_needed
+            ).order_by(DbLotInventory.import_date.asc()).first()
+            if not best_lot:
+                req.status = "EXCEPTION_HOLD"
+                req.exception_reason = f"STOCK_EXHAUSTED: Không đủ tồn kho cho {req.material_code}."
+                db.commit()
+                return {"status":"exception","detail":"Hết tồn kho khả dụng."}
+            req.allocated_source_type = "LOT"; req.allocated_source_id = best_lot.lot_id
+
+        req.status = "ALLOCATED"
+
+        # Auto-create workstreams if multi-workstream request
+        existing_ws = db.query(DbWorkstream).filter(
+            DbWorkstream.request_id == req.request_id).count()
+        if req.is_multi_workstream and existing_ws == 0:
+            _create_workstreams_for_request(db, req)
+
+        _add_notif(db, "🔔 Cần phê duyệt phương án",
+                   f"Request {request_id} — Đề xuất {req.allocated_source_type}: {req.allocated_source_id}. Phê duyệt theo từng workstream.",
+                   "APPROVAL_NEEDED", request_id, "REQUEST", "MANAGER")
+        db.commit()
+        return {"status":"success",
+                "detail":"✅ WF4 — Đề xuất phân bổ vật tư. Đã tạo Workstream cards. Chờ Quản lý duyệt."}
+
+    return {"status":"info","detail":"Không có bước tự động khả dụng."}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# WORKSTREAM APIs
+# ═══════════════════════════════════════════════════════════════════════════════
+@app.get("/api/workstreams")
+def get_all_workstreams(db: Session = Depends(get_db)):
+    wss = db.query(DbWorkstream).order_by(DbWorkstream.created_at.desc()).all()
+    result = []
+    for ws in wss:
+        d = ws.__dict__.copy(); d.pop("_sa_instance_state", None)
+        if ws.material_plan:
+            try: d["material_plan"] = json.loads(ws.material_plan)
+            except: pass
+        result.append(d)
+    return result
+
+@app.get("/api/workstreams/{ws_id}")
+def get_workstream(ws_id: str, db: Session = Depends(get_db)):
+    ws = db.query(DbWorkstream).filter(DbWorkstream.workstream_id == ws_id).first()
+    if not ws: raise HTTPException(404, "Workstream not found")
+    d = ws.__dict__.copy(); d.pop("_sa_instance_state", None)
+    if ws.material_plan:
+        try: d["material_plan"] = json.loads(ws.material_plan)
+        except: pass
+    return d
+
+@app.post("/api/workstreams/{ws_id}/approve")
+def approve_workstream(ws_id: str, data: dict = None, db: Session = Depends(get_db)):
+    """Manager approves a single workstream → Soft Lock + Job Card created."""
+    ws = db.query(DbWorkstream).filter(DbWorkstream.workstream_id == ws_id).first()
+    if not ws: raise HTTPException(404, "Workstream not found")
+    if ws.status not in ("PENDING_APPROVAL",):
+        raise HTTPException(400, f"Workstream in wrong status: {ws.status}")
+
+    data = data or {}
+    # Handle PPF type change
+    new_ppf_type = data.get("selected_material_code")
+    if new_ppf_type and new_ppf_type != ws.selected_material_code:
+        reason = data.get("change_reason", "")
+        if not reason:
+            raise HTTPException(400, "Bắt buộc nhập change_reason khi đổi PPF type.")
+        _audit(db, ws.request_id, "PPF_TYPE_CHANGED", "WORKSTREAM", ws_id,
+               ws.selected_material_code, new_ppf_type, reason, "QL-002",
+               ws_id, ws.workstream_type)
+        ws.selected_material_code = new_ppf_type
+        ws.ppf_type_changed = True
+        ws.ppf_type_change_reason = reason
+
+    # Handle source change
+    new_source_id = data.get("allocated_source_id")
+    new_source_type = data.get("allocated_source_type")
+    if new_source_id and new_source_id != ws.allocated_source_id:
+        reason = data.get("change_reason", "")
+        if not reason: raise HTTPException(400, "Bắt buộc nhập reason khi đổi LOT/OFFCUT.")
+        _audit(db, ws.request_id, "WORKSTREAM_SOURCE_CHANGED", new_source_type or "LOT", new_source_id,
+               ws.allocated_source_id or "None", new_source_id, reason, "QL-002",
+               ws_id, ws.workstream_type)
+        ws.allocated_source_type = new_source_type or ws.allocated_source_type
+        ws.allocated_source_id = new_source_id
+        ws.source_changed = True; ws.source_change_reason = reason
+
+    # Determine source for this workstream if not set
+    if not ws.allocated_source_id:
+        mat = ws.selected_material_code or "JB20"
+        lot = db.query(DbLotInventory).filter(
+            DbLotInventory.material_code == mat,
+            DbLotInventory.status == "ACTIVE",
+            DbLotInventory.is_locked == False,
+            DbLotInventory.remaining_length_m >= (ws.planned_deduction_length_m or 1.0)
+        ).order_by(DbLotInventory.import_date.asc()).first()
+        if lot:
+            ws.allocated_source_type = "LOT"; ws.allocated_source_id = lot.lot_id
+        else:
+            ws.allocated_source_type = "LOT"
+            ws.allocated_source_id = f"LOT-{mat}-001"
+
+    # Soft Lock
+    if ws.allocated_source_type == "LOT":
+        lot = db.query(DbLotInventory).filter(
+            DbLotInventory.lot_id == ws.allocated_source_id).first()
+        if lot: lot.is_locked = True
+    ws.is_locked = True
+    ws.status = "APPROVED"
+    ws.approved_by = data.get("approved_by", "QL-002")
+    ws.approved_at = _now()
+
+    _audit(db, ws.request_id, "WORKSTREAM_APPROVED",
+           ws.allocated_source_type or "LOT", ws.allocated_source_id or "—",
+           "PENDING_APPROVAL", "APPROVED",
+           f"Quản lý {ws.approved_by} phê duyệt {ws.workstream_type}",
+           ws.approved_by, ws_id, ws.workstream_type)
+    _audit(db, ws.request_id, "SOFT_LOCK_RECORDED",
+           ws.allocated_source_type or "LOT", ws.allocated_source_id or "—",
+           "is_locked=false", "is_locked=true",
+           f"Soft Lock {ws.workstream_type} sau phê duyệt",
+           ws.approved_by, ws_id, ws.workstream_type)
+
+    # Create Job Card
+    today = datetime.date.today().strftime("%Y%m%d")
+    prefix = "PPF" if ws.workstream_type == "PPF_INSTALLATION" else "WF"
+    jc_id = f"JOB-{prefix}-{today}-{ws.request_id[-3:]}"
+    existing_jc = db.query(DbJobCard).filter(DbJobCard.job_card_id == jc_id).first()
+    if not existing_jc:
+        req = db.query(DbRequest).filter(DbRequest.request_id == ws.request_id).first()
+        jc = DbJobCard(
+            job_card_id=jc_id, request_id=ws.request_id,
+            workstream_id=ws_id, workstream_type=ws.workstream_type,
+            technician_id=ws.assigned_technician_id,
+            technician_name=ws.assigned_technician_name,
+            technician_team=ws.technician_team,
+            vehicle_model_code=ws.workstream_type,
+            material_code=ws.selected_material_code,
+            job_items=ws.workstream_type,
+            planned_cut_block=ws.planned_cut_block,
+            planned_deduction_length_m=ws.planned_deduction_length_m,
+            allocated_source_id=ws.allocated_source_id,
+            status="PENDING", actual_confirmation_status="PENDING",
+            requested_delivery_time=(req.requested_delivery_time if req else
+                (datetime.datetime.utcnow() + datetime.timedelta(hours=8)).isoformat() + "Z"),
+            created_at=_now()
+        )
+        db.add(jc)
+        ws.job_card_id = jc_id
+
+    # Update parent request status
+    req = db.query(DbRequest).filter(DbRequest.request_id == ws.request_id).first()
+    if req: _update_request_status_from_workstreams(db, req)
+
+    team_label = "PPF" if ws.workstream_type == "PPF_INSTALLATION" else "Window Film"
+    _add_notif(db, f"✅ {team_label} workstream được duyệt",
+               f"Job Card {jc_id} tạo thành công. Đội {ws.technician_team} nhận lệnh thi công.",
+               f"{'PPF' if 'PPF' in ws.workstream_type else 'WF'}_JOB_ASSIGNED",
+               jc_id, "JOB_CARD", "TECHNICIAN",
+               ws_id, ws.workstream_type, ws.team_type)
+    db.commit()
+    return {"status":"success",
+            "detail":f"✅ Phê duyệt {ws.workstream_type} thành công. Job Card {jc_id} đã tạo.",
+            "job_card_id": jc_id}
+
+@app.post("/api/workstreams/{ws_id}/edit")
+def edit_workstream(ws_id: str, data: dict, db: Session = Depends(get_db)):
+    """Edit workstream fields — all changes require reason + audit log."""
+    ws = db.query(DbWorkstream).filter(DbWorkstream.workstream_id == ws_id).first()
+    if not ws: raise HTTPException(404, "Workstream not found")
+    if ws.status == "CLOSED":
+        raise HTTPException(400, "Cannot edit CLOSED workstream (use Admin Override).")
+    reason = data.get("reason", "")
+    if not reason: raise HTTPException(400, "Bắt buộc nhập reason cho mọi chỉnh sửa.")
+    actor = data.get("actor", "QL-002")
+
+    editable = ["selected_material_code","planned_cut_block","planned_deduction_length_m",
+                "allocated_source_id","allocated_source_type","technician_team",
+                "assigned_technician_id","assigned_technician_name"]
+    for field in editable:
+        if field in data:
+            old = getattr(ws, field, None)
+            new = data[field]
+            if str(old) != str(new):
+                _audit(db, ws.request_id, f"WORKSTREAM_EDIT_{field.upper()}",
+                       "WORKSTREAM", ws_id, str(old), str(new), reason, actor,
+                       ws_id, ws.workstream_type)
+                setattr(ws, field, new)
+
+    db.commit()
+    return {"status":"success","detail":f"Workstream {ws_id} đã được cập nhật."}
+
+@app.post("/api/workstreams/{ws_id}/start")
+def start_workstream(ws_id: str, db: Session = Depends(get_db)):
+    ws = db.query(DbWorkstream).filter(DbWorkstream.workstream_id == ws_id).first()
+    if not ws: raise HTTPException(404, "Workstream not found")
+    if ws.status not in ("APPROVED","ASSIGNED_TO_TECHNICIAN"):
+        raise HTTPException(400, f"Workstream phải ở APPROVED để bắt đầu. Hiện: {ws.status}")
+    ws.status = "IN_PROGRESS"
+    ws.started_at = _now()
+
+    # Update Job Card
+    if ws.job_card_id:
+        jc = db.query(DbJobCard).filter(DbJobCard.job_card_id == ws.job_card_id).first()
+        if jc: jc.status = "IN_PROGRESS"; jc.started_at = ws.started_at
+
+    req = db.query(DbRequest).filter(DbRequest.request_id == ws.request_id).first()
+    if req: _update_request_status_from_workstreams(db, req)
+
+    team = "PPF" if ws.workstream_type == "PPF_INSTALLATION" else "Window Film"
+    _add_notif(db, f"🔧 Đội {team} bắt đầu thi công",
+               f"Workstream {ws_id} — Đội {ws.technician_team} bắt đầu lúc {ws.started_at[:16]}Z.",
+               f"{'PPF' if 'PPF' in ws.workstream_type else 'WF'}_TEAM_STARTED",
+               ws_id, "JOB_CARD", "MANAGER",
+               ws_id, ws.workstream_type, ws.team_type)
+    db.commit()
+    return {"status":"success","detail":f"✅ Bắt đầu thi công {ws.workstream_type} lúc {ws.started_at[:16]}Z."}
+
+@app.post("/api/workstreams/{ws_id}/submit-actual")
+def submit_actual(ws_id: str, data: dict, db: Session = Depends(get_db)):
+    """KTV submits actual measurements. Sets actual_confirmation_status = COMPLETED."""
+    ws = db.query(DbWorkstream).filter(DbWorkstream.workstream_id == ws_id).first()
+    if not ws: raise HTTPException(404, "Workstream not found")
+
+    ws.actual_cut_block = data.get("actual_cut_block", ws.planned_cut_block)
+    ws.actual_width_m = float(data.get("actual_width_m", 1.52))
+    ws.actual_length_m = float(data.get("actual_length_m", ws.planned_deduction_length_m or 0))
+    ws.actual_area_m2 = round(ws.actual_width_m * ws.actual_length_m, 3)
+    ws.has_new_offcut = bool(data.get("has_new_offcut", False))
+    ws.offcut_width_m = float(data.get("offcut_width_m", 0.0)) if ws.has_new_offcut else 0.0
+    ws.offcut_length_m = float(data.get("offcut_length_m", 0.0)) if ws.has_new_offcut else 0.0
+    ws.offcut_quality_status = data.get("offcut_quality_status", "NORMAL")
+    ws.offcut_storage_location = data.get("offcut_storage_location", "OFFCUT-RACK-C")
+    ws.has_scrap = bool(data.get("has_scrap", False))
+    ws.scrap_area_m2 = float(data.get("scrap_area_m2", 0.0)) if ws.has_scrap else 0.0
+    ws.technician_note = data.get("technician_note", "")
+    ws.actual_confirmation_status = "COMPLETED"
+
+    # Update job card confirmation
+    if ws.job_card_id:
+        jc = db.query(DbJobCard).filter(DbJobCard.job_card_id == ws.job_card_id).first()
+        if jc: jc.actual_confirmation_status = "COMPLETED"
+
+    db.commit()
+    return {"status":"success",
+            "detail":f"✅ Xác nhận kích thước thực tế {ws.workstream_type} thành công. Sẵn sàng Complete."}
+
+@app.post("/api/workstreams/{ws_id}/complete")
+def complete_workstream(ws_id: str, data: dict = None, db: Session = Depends(get_db)):
+    """KTV completes workstream → commit inventory → close workstream → check request closure."""
+    ws = db.query(DbWorkstream).filter(DbWorkstream.workstream_id == ws_id).first()
+    if not ws: raise HTTPException(404, "Workstream not found")
+    if ws.status not in ("IN_PROGRESS","ACTUAL_CONFIRMATION_REQUIRED"):
+        raise HTTPException(400, f"Workstream phải ở IN_PROGRESS. Hiện: {ws.status}")
+    if ws.actual_confirmation_status != "COMPLETED":
+        ws.status = "ACTUAL_CONFIRMATION_REQUIRED"
+        db.commit()
+        return {"status":"info",
+                "detail":"⚠️ KTV chưa nhập xác nhận kích thước thực tế. Hệ thống giữ ACTUAL_CONFIRMATION_REQUIRED."}
+
+    tech_id = (data or {}).get("technician_id", ws.assigned_technician_id or "KTV-003")
+
+    assert_source_valid_for_wf6_commit(db, ws)
+
+    # Commit inventory (WF6 — không thay bằng thao tác kho thủ công)
+    _commit_workstream_inventory(db, ws, tech_id)
+
+    # Update job card
+    now_dt = datetime.datetime.utcnow()
+    ws.completed_at = now_dt.isoformat() + "Z"
+    if ws.job_card_id:
+        jc = db.query(DbJobCard).filter(DbJobCard.job_card_id == ws.job_card_id).first()
+        if jc:
+            jc.status = "COMPLETED_BY_TECHNICIAN"
+            jc.actual_confirmation_status = "COMPLETED"
+            jc.completed_at = ws.completed_at
+            if jc.requested_delivery_time:
+                try:
+                    deadline = datetime.datetime.fromisoformat(
+                        jc.requested_delivery_time.replace("Z",""))
+                    jc.is_on_time = now_dt <= deadline
+                    jc.delay_minutes = max(0, int((now_dt - deadline).total_seconds()/60))
+                except: jc.is_on_time = True
+
+    # Update parent request
+    req = db.query(DbRequest).filter(DbRequest.request_id == ws.request_id).first()
+    if req:
+        _update_request_status_from_workstreams(db, req)
+
+    # Notifications
+    team = "PPF" if ws.workstream_type == "PPF_INSTALLATION" else "Window Film"
+    _add_notif(db, f"🎉 Đội {team} hoàn tất thi công",
+               f"Workstream {ws_id} CLOSED. Tồn kho đã commit. Kiểm tra trạng thái xe.",
+               f"{'PPF' if 'PPF' in ws.workstream_type else 'WF'}_TEAM_COMPLETED",
+               ws_id, "JOB_CARD", "MANAGER",
+               ws_id, ws.workstream_type, ws.team_type)
+
+    if req and req.status == "CLOSED":
+        _add_notif(db, "🚗 Xe hoàn tất cả 2 đội!",
+                   f"Request {ws.request_id} — Cả PPF và Window Film đã hoàn tất. Xe sẵn sàng bàn giao.",
+                   "VEHICLE_FULLY_COMPLETED", ws.request_id, "REQUEST", "ALL")
+    elif req and req.status == "PARTIALLY_COMPLETED":
+        _add_notif(db, "⏳ Xe hoàn tất một đội",
+                   f"Request {ws.request_id} — {ws.workstream_type} CLOSED. Đội còn lại vẫn đang thi công.",
+                   "VEHICLE_PARTIALLY_COMPLETED", ws.request_id, "REQUEST", "MANAGER")
+
+    db.commit()
+    return {"status":"success",
+            "detail":f"✅ {ws.workstream_type} CLOSED. Tồn kho ảo đã commit. Request: {req.status if req else '—'}."}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# LEGACY MANAGER APPROVAL (backward compat — approves ALL workstreams at once)
+# ═══════════════════════════════════════════════════════════════════════════════
+@app.post("/api/requests/{request_id}/approve")
+def approve_request_legacy(request_id: str, db: Session = Depends(get_db)):
+    req = db.query(DbRequest).filter(DbRequest.request_id == request_id).first()
+    if not req: raise HTTPException(404, "Not found")
+    if req.status not in ("ALLOCATED",):
+        raise HTTPException(400, f"Request must be ALLOCATED. Current: {req.status}")
+
+    wss = db.query(DbWorkstream).filter(DbWorkstream.request_id == request_id).all()
+    jc_ids = []
+    if wss:
+        for ws in wss:
+            if ws.status == "PENDING_APPROVAL":
+                result = approve_workstream(ws.workstream_id, {}, db)
+                jc_ids.append(result.get("job_card_id",""))
+    else:
+        # Legacy single workstream (no workstreams table)
+        source_type = req.allocated_source_type
+        source_id = req.allocated_source_id
+        if source_type == "LOT":
+            lot = db.query(DbLotInventory).filter(DbLotInventory.lot_id == source_id).first()
+            if lot: lot.is_locked = True
+        elif source_type == "OFFCUT":
+            oc = db.query(DbOffcutInventory).filter(DbOffcutInventory.offcut_id == source_id).first()
+            if oc: oc.is_locked = True
+        req.status = "APPROVED"; req.approved_by = "QL-002"
+        today = datetime.date.today().strftime("%Y%m%d")
+        jc_id = f"JOB-{today}-{request_id[-3:]}"
+        if not db.query(DbJobCard).filter(DbJobCard.job_card_id == jc_id).first():
+            db.add(DbJobCard(
+                job_card_id=jc_id, request_id=request_id,
+                technician_id="KTV-003", technician_name="Nguyễn Văn An",
+                vehicle_model_code=req.vehicle_model_code, material_code=req.material_code,
+                job_items=req.job_items,
+                planned_cut_block=req.planned_cut_block,
+                planned_deduction_length_m=req.planned_deduction_length_m,
+                allocated_source_id=source_id, status="PENDING",
+                requested_delivery_time=(
+                    datetime.datetime.utcnow() + datetime.timedelta(hours=4)).isoformat() + "Z",
+                created_at=_now()
+            ))
+            jc_ids.append(jc_id)
+        _audit(db, request_id, "SOFT_LOCK_RECORDED", source_type, source_id,
+               "is_locked=false", "is_locked=true",
+               "QL-002 phê duyệt, kích hoạt Soft Lock.", "QL-002")
+
+    _update_request_status_from_workstreams(db, req)
+    db.commit()
+    return {"status":"success",
+            "detail":f"✅ Phê duyệt thành công. Job Cards: {', '.join(jc_ids) or 'N/A'}.",
+            "job_card_ids": jc_ids}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# LEGACY TECH COMPLETE (WF6 — uses workstream if exists)
+# ═══════════════════════════════════════════════════════════════════════════════
+@app.post("/api/requests/{request_id}/complete")
+def complete_request_legacy(request_id: str, data: dict, db: Session = Depends(get_db)):
+    req = db.query(DbRequest).filter(DbRequest.request_id == request_id).first()
+    if not req: raise HTTPException(404, "Not found")
+    if req.status not in ("APPROVED","IN_PROGRESS"):
+        raise HTTPException(400, f"Request must be APPROVED. Current: {req.status}")
+
+    wss = db.query(DbWorkstream).filter(DbWorkstream.request_id == request_id).all()
+    if wss:
+        # Route to Window Film workstream by default
+        wf = next((w for w in wss if w.workstream_type == "WINDOW_FILM_INSTALLATION"), wss[0])
+        if wf.actual_confirmation_status != "COMPLETED":
+            # Auto-fill actual from data
+            actual_data = {
+                "actual_cut_block": data.get("actual_cut_block", wf.planned_cut_block),
+                "actual_width_m": 1.52,
+                "actual_length_m": float(data.get("actual_length_m", wf.planned_deduction_length_m or 1.43)),
+                "has_new_offcut": float(data.get("created_offcut_length_m", 0)) > 0,
+                "offcut_width_m": float(data.get("created_offcut_width_m", 0)),
+                "offcut_length_m": float(data.get("created_offcut_length_m", 0)),
+                "offcut_quality_status": data.get("created_offcut_quality", "NORMAL"),
+                "offcut_storage_location": data.get("created_offcut_location", "OFFCUT-RACK-C"),
+                "has_scrap": float(data.get("scrap_area_m2", 0)) > 0,
+                "scrap_area_m2": float(data.get("scrap_area_m2", 0)),
+            }
+            submit_actual(wf.workstream_id, actual_data, db)
+        result = complete_workstream(wf.workstream_id, data, db)
+        return result
+
+    # Truly legacy (no workstreams)
+    actual_length = float(data.get("actual_length_m", req.planned_deduction_length_m or 1.43))
+    actual_block = data.get("actual_cut_block", req.planned_cut_block)
+    exception_reason = data.get("exception_reason","")
+    tech_id = data.get("technician_id","KTV-003")
+    if actual_block != req.planned_cut_block and not exception_reason:
+        req.status = "EXCEPTION_HOLD"
+        req.exception_reason = "Block thực tế khác kế hoạch nhưng chưa nhập lý do."
+        db.commit()
+        return {"status":"exception_hold","detail":"Cần nhập lý do ngoại lệ."}
+    source_type = req.allocated_source_type
+    source_id = req.allocated_source_id
+    before_bal = after_bal = 0.0
+    if source_type == "LOT":
+        lot = db.query(DbLotInventory).filter(DbLotInventory.lot_id == source_id).first()
+        if lot:
+            before_bal = lot.remaining_length_m
+            lot.remaining_length_m = round(lot.remaining_length_m - actual_length, 3)
+            after_bal = lot.remaining_length_m
+            lot.is_locked = False; lot.is_opened = True
+    offcut_len = float(data.get("created_offcut_length_m", 0))
+    offcut_wid = float(data.get("created_offcut_width_m", 0))
+    new_offcut_id = None
+    if offcut_len > 0 and offcut_wid > 0:
+        base = f"SUBLOT-{req.material_code}"
+        cnt = db.query(DbOffcutInventory).filter(
+            DbOffcutInventory.offcut_id.like(f"{base}-%")).count()
+        new_offcut_id = f"{base}-{str(cnt+1).zfill(3)}"
+        db.add(DbOffcutInventory(
+            offcut_id=new_offcut_id, parent_lot_id=source_id,
+            material_code=req.material_code,
+            width_m=offcut_wid, length_m=offcut_len,
+            area_m2=round(offcut_wid*offcut_len,3),
+            is_locked=False, storage_location=data.get("created_offcut_location","OFFCUT-RACK-C"),
+            import_date=datetime.date.today().isoformat(), status="ACTIVE"
+        ))
+    scrap = float(data.get("scrap_area_m2", 0))
+    req.status = "CLOSED"; req.actual_cut_block = actual_block
+    req.actual_length_m = actual_length; req.scrap_area_m2 = scrap
+    req.created_offcut_id = new_offcut_id; req.technician_id = tech_id
+    _audit(db, request_id, f"ISSUE_FROM_{source_type}", source_type, source_id,
+           f"{before_bal}m", f"{after_bal}m",
+           f"KTV {tech_id} hoàn tất thi công.", tech_id)
+    if new_offcut_id: _audit(db, request_id, "CREATE_OFFCUT", source_type, source_id,
+                              "None", new_offcut_id, "Mảnh dư mới.", tech_id)
+    if scrap > 0: _audit(db, request_id, "RECORD_SCRAP", source_type, source_id,
+                          "None", f"Scrap {scrap}m²", "Phế liệu.", tech_id)
+    _audit(db, request_id, "RELEASE_LOCK", source_type, source_id,
+           "is_locked=true", "is_locked=false", "Giải phóng Soft Lock.", "SYSTEM")
+    db.commit()
+    return {"status":"success","detail":"✅ WF6 — Hoàn tất! Kho đã trừ, Soft Lock giải phóng."}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# JOB CARDS
+# ═══════════════════════════════════════════════════════════════════════════════
+@app.get("/api/job-cards")
+def get_job_cards(db: Session = Depends(get_db)):
+    return db.query(DbJobCard).order_by(DbJobCard.created_at.desc()).all()
+
+@app.post("/api/job-cards/{jc_id}/start")
+def start_job(jc_id: str, db: Session = Depends(get_db)):
+    jc = db.query(DbJobCard).filter(DbJobCard.job_card_id == jc_id).first()
+    if not jc: raise HTTPException(404, "Job card not found")
+    if jc.status != "PENDING": raise HTTPException(400, f"Must be PENDING. Current: {jc.status}")
+    jc.status = "IN_PROGRESS"; jc.started_at = _now()
+    # Mirror to workstream
+    if jc.workstream_id:
+        ws = db.query(DbWorkstream).filter(DbWorkstream.workstream_id == jc.workstream_id).first()
+        if ws and ws.status == "APPROVED":
+            ws.status = "IN_PROGRESS"; ws.started_at = jc.started_at
+    req = db.query(DbRequest).filter(DbRequest.request_id == jc.request_id).first()
+    if req: _update_request_status_from_workstreams(db, req)
+    _add_notif(db, f"🔧 KTV bắt đầu thi công",
+               f"Job {jc_id} ({jc.workstream_type or 'STANDARD'}) — {jc.technician_name} bắt đầu.",
+               "JOB_STARTED", jc_id, "JOB_CARD", "MANAGER",
+               jc.workstream_id, jc.workstream_type)
+    db.commit()
+    return {"status":"success","detail":f"✅ Bắt đầu lúc {jc.started_at[:16]}Z."}
+
+@app.post("/api/job-cards/{jc_id}/request-complete")
+def request_complete_job(jc_id: str, data: dict = None, db: Session = Depends(get_db)):
+    jc = db.query(DbJobCard).filter(DbJobCard.job_card_id == jc_id).first()
+    if not jc: raise HTTPException(404, "Job card not found")
+    if jc.status != "IN_PROGRESS": raise HTTPException(400, "Must be IN_PROGRESS.")
+    if jc.actual_confirmation_status != "COMPLETED":
+        jc.status = "ACTUAL_CONFIRMATION_REQUIRED"
+        if jc.workstream_id:
+            ws = db.query(DbWorkstream).filter(DbWorkstream.workstream_id == jc.workstream_id).first()
+            if ws: ws.status = "ACTUAL_CONFIRMATION_REQUIRED"
+        db.commit()
+        return {"status":"info","detail":"⚠️ Cần nhập xác nhận kích thước thực tế trước."}
+    jc.status = "COMPLETED_BY_TECHNICIAN"; jc.completed_at = _now()
+    db.commit()
+    return {"status":"success","detail":"✅ Hoàn tất Job Card."}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# OCR INTAKE
+# ═══════════════════════════════════════════════════════════════════════════════
+@app.get("/api/ocr-drafts")
+def get_ocr_drafts(db: Session = Depends(get_db)):
+    return db.query(DbOcrDraft).order_by(DbOcrDraft.created_at.desc()).all()
+
+@app.post("/api/ocr/upload")
+async def upload_image(file: UploadFile = File(...), db: Session = Depends(get_db)):
+    file_id = f"IMG-{_uid()}"; draft_id = f"OCR-{_uid()}"
+    draft = DbOcrDraft(
+        ocr_draft_id=draft_id, image_file_id=file_id,
+        image_filename=file.filename, image_url=f"/static/uploads/{file_id}",
+        ocr_status="PENDING", review_status="PENDING", created_at=_now()
+    )
+    db.add(draft)
+    _add_notif(db, "📷 Ảnh phiếu upload", f"File '{file.filename}' upload xong. Chờ OCR.",
+               "INFO", draft_id, "REQUEST", "ADMIN")
+    db.commit()
+    return {"status":"success","ocr_draft_id":draft_id,"detail":f"Upload OK. Draft {draft_id} tạo."}
+
+@app.post("/api/ocr/{draft_id}/process")
+def process_ocr(draft_id: str, db: Session = Depends(get_db)):
+    draft = db.query(DbOcrDraft).filter(DbOcrDraft.ocr_draft_id == draft_id).first()
+    if not draft: raise HTTPException(404, "OCR Draft not found")
+    if draft.ocr_status == "COMPLETED":
+        return {"status":"info","detail":"OCR đã hoàn thành."}
+    draft.ocr_status = "PROCESSING"; db.commit()
+    # Mock OCR result — multi-service vehicle
+    draft.extracted_dealer_name = "Lexus Sài Gòn"
+    draft.extracted_customer_name = "KH_MASKED_001"
+    draft.extracted_vehicle_model = "LEXUS_RX350"
+    draft.extracted_vin = "VIN_MASKED_RX350_002"
+    draft.extracted_plate = "51G-***.***"
+    draft.extracted_film_type = "Phim cách nhiệt JB20 + PPF T-TYPE"
+    draft.extracted_job_items = "WINDSHIELD;REAR_WINDOW;FRONT_SIDE;REAR_SIDE_TRIANGLE;SUNROOF;PPF_FULL"
+    draft.extracted_delivery_time = (datetime.datetime.utcnow() + datetime.timedelta(hours=8)).isoformat() + "Z"
+    draft.extracted_notes = "Yêu cầu cả PPF và phim cách nhiệt. Khách VIP."
+    draft.extracted_ppf_type = "T-TYPE"
+    draft.extracted_services = "PPF,WINDOW_FILM"
+    draft.confidence_dealer = 0.97; draft.confidence_customer = 0.91
+    draft.confidence_vehicle = 0.99; draft.confidence_overall = 0.96
+    draft.ocr_status = "COMPLETED"; draft.review_status = "REVIEWING"
+    _add_notif(db, "🤖 OCR hoàn tất", f"Draft {draft_id} — RX350 PPF+WF. Confidence 96%. Chờ Admin xác nhận.",
+               "INFO", draft_id, "REQUEST", "ADMIN")
+    db.commit()
+    return {"status":"success","draft":draft,"detail":"✅ OCR OK. Vui lòng review."}
+
+@app.post("/api/ocr/{draft_id}/confirm")
+def confirm_ocr(draft_id: str, data: dict, db: Session = Depends(get_db)):
+    draft = db.query(DbOcrDraft).filter(DbOcrDraft.ocr_draft_id == draft_id).first()
+    if not draft: raise HTTPException(404, "Not found")
+    if draft.review_status in ("CONFIRMED","CANCELLED"):
+        raise HTTPException(400, "Draft đã xử lý.")
+    today = datetime.date.today()
+    cnt = db.query(DbRequest).filter(
+        DbRequest.request_id.like(f"REQ-{today.strftime('%Y%m%d')}-%")).count()
+    new_req_id = f"REQ-{today.strftime('%Y%m%d')}-{str(cnt+1).zfill(3)}"
+    services = draft.extracted_services or "PPF,WINDOW_FILM"
+    is_multi = "PPF" in services and "WINDOW_FILM" in services
+    new_req = DbRequest(
+        request_id=new_req_id,
+        dealer_id="DEALER_LEXUS_SG", customer_id="KH_MASKED_001",
+        customer_name=data.get("customer_name", draft.extracted_customer_name),
+        vehicle_id="VH-MASKED-002",
+        vin_number=data.get("vin", draft.extracted_vin),
+        vehicle_model_code="LEXUS_RX350", material_code="JB20",
+        job_items=draft.extracted_job_items,
+        status="DRAFT", is_grouped_cut=False, is_multi_workstream=is_multi,
+        requested_delivery_time=draft.extracted_delivery_time,
+        created_at=_now()
+    )
+    db.add(new_req)
+    draft.review_status = "CONFIRMED"; draft.confirmed_by = "ADMIN-001"
+    draft.confirmed_at = _now(); draft.created_request_id = new_req_id
+    _add_notif(db, "📋 Request multi-workstream tạo từ OCR",
+               f"OCR {draft_id} → Request {new_req_id} (PPF + Window Film). Sẵn sàng WF1→WF7.",
+               "INFO", new_req_id, "REQUEST", "ADMIN")
+    db.commit()
+    return {"status":"success","request_id":new_req_id,
+            "detail":f"✅ Request {new_req_id} tạo với {services}. Multi-workstream: {is_multi}."}
+
+@app.post("/api/ocr/{draft_id}/cancel")
+def cancel_ocr(draft_id: str, db: Session = Depends(get_db)):
+    draft = db.query(DbOcrDraft).filter(DbOcrDraft.ocr_draft_id == draft_id).first()
+    if draft: draft.review_status = "CANCELLED"; db.commit()
+    return {"status":"success","detail":"Đã hủy OCR Draft."}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# NOTIFICATIONS
+# ═══════════════════════════════════════════════════════════════════════════════
+@app.get("/api/notifications")
+def get_notifications(db: Session = Depends(get_db)):
+    return db.query(DbNotification).order_by(DbNotification.created_at.desc()).limit(60).all()
+
+@app.post("/api/notifications/{nid}/read")
+def mark_read(nid: str, db: Session = Depends(get_db)):
+    n = db.query(DbNotification).filter(DbNotification.notif_id == nid).first()
+    if n: n.is_read = True; db.commit()
+    return {"status":"ok"}
+
+@app.post("/api/notifications/read-all")
+def mark_all_read(db: Session = Depends(get_db)):
+    db.query(DbNotification).update({"is_read": True}); db.commit()
+    return {"status":"ok"}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# DEMO RUN ALL — Multi-Workstream E2E
+# ═══════════════════════════════════════════════════════════════════════════════
+@app.post("/api/demo/run-all/{request_id}")
+def demo_run_all(request_id: str, db: Session = Depends(get_db)):
+    req = db.query(DbRequest).filter(DbRequest.request_id == request_id).first()
+    if not req: raise HTTPException(404, "Not found")
+    steps = []
+    max_iter = 20
+
+    def _step():
+        db.refresh(req)
+        if req.status == "DRAFT":
+            r = run_request_step(request_id, db); db.refresh(req)
+            steps.append({"step":"WF2_STANDARDIZE","result":r.get("detail","")})
+        elif req.status == "STANDARDIZED":
+            r = run_request_step(request_id, db); db.refresh(req)
+            steps.append({"step":"WF3_NORM","result":r.get("detail","")})
+        elif req.status == "NORM_ASSIGNED":
+            r = run_request_step(request_id, db); db.refresh(req)
+            steps.append({"step":"WF4_ALLOCATE","result":r.get("detail","")})
+        elif req.status == "ALLOCATED":
+            r = approve_request_legacy(request_id, db); db.refresh(req)
+            steps.append({"step":"WF5_APPROVE_ALL","result":r.get("detail","")})
+        elif req.status in ("APPROVED","IN_PROGRESS","PARTIALLY_COMPLETED"):
+            # Complete all pending workstreams
+            wss = db.query(DbWorkstream).filter(DbWorkstream.request_id == request_id).all()
+            if wss:
+                for ws in wss:
+                    if ws.status in ("APPROVED","IN_PROGRESS","ACTUAL_CONFIRMATION_REQUIRED"):
+                        if ws.status == "APPROVED":
+                            start_workstream(ws.workstream_id, db); db.refresh(ws)
+                            steps.append({"step":f"START_{ws.workstream_type[:3]}",
+                                          "result":f"Started {ws.workstream_type}"})
+                        # Submit actual
+                        actual_len = ws.planned_deduction_length_m or 1.43
+                        actual_wid = 13.0 if "PPF" in ws.workstream_type else 1.52
+                        submit_actual(ws.workstream_id, {
+                            "actual_cut_block": ws.planned_cut_block,
+                            "actual_width_m": actual_wid,
+                            "actual_length_m": actual_len,
+                            "has_new_offcut": True,
+                            "offcut_width_m": actual_wid,
+                            "offcut_length_m": round(actual_len * 0.08, 2),
+                            "offcut_quality_status": "NORMAL",
+                            "offcut_storage_location": "OFFCUT-RACK-C",
+                            "has_scrap": True,
+                            "scrap_area_m2": 0.35,
+                        }, db)
+                        r = complete_workstream(ws.workstream_id, {}, db); db.refresh(ws)
+                        steps.append({"step":f"COMPLETE_{ws.workstream_type[:3]}",
+                                      "result":r.get("detail","")})
+                db.refresh(req)
+            else:
+                # No workstreams — legacy complete
+                payload = {
+                    "actual_cut_block": req.planned_cut_block,
+                    "actual_length_m": req.planned_deduction_length_m,
+                    "created_offcut_length_m": 1.2,
+                    "created_offcut_width_m": 1.52,
+                    "created_offcut_quality": "NORMAL",
+                    "created_offcut_location": "OFFCUT-RACK-C",
+                    "scrap_area_m2": 0.35, "exception_reason": "",
+                    "technician_id": "KTV-003"
+                }
+                r = complete_request_legacy(request_id, payload, db); db.refresh(req)
+                steps.append({"step":"WF6_COMPLETE","result":r.get("detail","")})
+        else:
+            return False
+        return True
+
+    for _ in range(max_iter):
+        if req.status in ("CLOSED","EXCEPTION_HOLD"): break
+        if not _step(): break
+
+    return {
+        "status":"success", "final_status": req.status,
+        "steps_executed": steps,
+        "detail":f"Demo E2E {len(steps)} bước. Trạng thái cuối: {req.status}"
+    }
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# STATIC FILES
+# ═══════════════════════════════════════════════════════════════════════════════
+current_dir = os.path.dirname(os.path.abspath(__file__))
+static_dir = os.path.join(current_dir, "static")
+if os.path.exists(static_dir):
+    app.mount("/static", StaticFiles(directory=static_dir), name="static")
+
+@app.get("/")
+def get_index():
+    idx = os.path.join(static_dir, "index.html")
+    return FileResponse(idx) if os.path.exists(idx) else {"message":"No frontend."}

@@ -1,0 +1,45 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "VehicleProfile",
+  "description": "Schema JSON xác thực hồ sơ xe dán phim và lịch sử liên kết chủ xe, đại lý",
+  "type": "object",
+  "properties": {
+    "vehicle_id": {
+      "type": "string",
+      "pattern": "^VEH_[0-9]+$",
+      "description": "Mã định danh duy nhất của hồ sơ xe dán phim, bắt đầu bằng VEH_"
+    },
+    "vin_number": {
+      "type": "string",
+      "pattern": "^[A-HJ-NPR-Z0-9]{17}$",
+      "description": "Số khung xe dán phim (17 ký tự chữ và số)"
+    },
+    "vehicle_model_code": {
+      "type": "string",
+      "description": "Mã đời xe chuẩn trong vehicle_master (ví dụ: LEXUS_RX350)"
+    },
+    "dealer_id": {
+      "type": "string",
+      "description": "Mã đại lý mua xe hoặc gửi xe dán phim (nếu có)"
+    },
+    "customer_id": {
+      "type": "string",
+      "description": "Mã khách lẻ / chủ sở hữu xe dán phim hiện tại (nếu có)"
+    },
+    "request_id": {
+      "type": "string",
+      "description": "Mã phiếu yêu cầu thi công dán xe gần nhất của xe này (nếu có)"
+    },
+    "delivery_date": {
+      "type": "string",
+      "format": "date",
+      "description": "Ngày bàn giao xe dán xong gần nhất"
+    },
+    "status": {
+      "type": "string",
+      "enum": ["PENDING", "COMPLETED"],
+      "description": "Trạng thái hồ sơ xe"
+    }
+  },
+  "required": ["vehicle_id", "vin_number", "vehicle_model_code", "status"]
+}

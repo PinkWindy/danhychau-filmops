@@ -1,0 +1,67 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "OffcutRecommendation",
+  "description": "Schema JSON xác thực đề xuất sử dụng mảnh dư tối ưu dán xe",
+  "type": "object",
+  "properties": {
+    "recommendation_id": {
+      "type": "string",
+      "description": "Mã định danh đề xuất"
+    },
+    "request_id": {
+      "type": "string",
+      "description": "Mã phiếu yêu cầu thi công dán xe"
+    },
+    "cut_group_id": {
+      "type": "string",
+      "description": "Mã nhóm cắt liên kết (nếu dán nhóm, để trống nếu cắt lẻ)"
+    },
+    "material_code": {
+      "type": "string",
+      "description": "Mã vật tư dán"
+    },
+    "planned_width_cm": {
+      "type": "integer",
+      "description": "Chiều rộng khối dán yêu cầu (nếu có cut_group_id, đây là cut_block_width_cm; nếu cắt lẻ, đây là piece_width_cm)"
+    },
+    "planned_length_cm": {
+      "type": "integer",
+      "description": "Chiều dài khối dán yêu cầu (nếu có cut_group_id, đây là cut_block_length_cm; nếu cắt lẻ, đây là piece_length_cm)"
+    },
+    "offcut_id": {
+      "type": "string",
+      "description": "Mã mảnh dư (Sub-LOT) được đề xuất sử dụng trong offcut_inventory"
+    },
+    "offcut_width_m": {
+      "type": "number",
+      "description": "Chiều rộng thực tế của mảnh dư (mét)"
+    },
+    "offcut_length_m": {
+      "type": "number",
+      "description": "Chiều dài thực tế của mảnh dư (mét)"
+    },
+    "match_score": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 100.0,
+      "description": "Điểm số tương thích diện tích (%)"
+    },
+    "recommendation_status": {
+      "type": "string",
+      "enum": ["PRIORITIZED", "CONSIDER", "PARTIAL_MATCH", "REJECT_OFFCUT"],
+      "description": "Phân cấp khuyến nghị sử dụng (Match Score >=80 -> PRIORITIZED; 60-79 -> CONSIDER; Mảnh dư chỉ vừa 1 miếng nhỏ -> PARTIAL_MATCH; <60 -> REJECT_OFFCUT)"
+    },
+    "rotation_applied": {
+      "type": "boolean",
+      "description": "Đánh dấu xem có thực hiện xoay chiều mảnh phim khi ghép sơ đồ hay không"
+    },
+    "storage_location": {
+      "type": "string",
+      "description": "Vị trí lưu kho kệ vật lý để lấy mảnh dư"
+    }
+  },
+  "required": [
+    "recommendation_id", "request_id", "material_code", "planned_width_cm", "planned_length_cm",
+    "offcut_id", "offcut_width_m", "offcut_length_m", "match_score", "recommendation_status", "rotation_applied"
+  ]
+}

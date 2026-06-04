@@ -1,0 +1,9 @@
+location_code,location_name,zone,description
+SHELF-A1,Ke cuon PPF so A1,PPF_ZONE,Ke chuyen dung de cuon PPF lon
+SHELF-B1,Ke cuon phim so B1,FILM_ZONE,Ke chuyen dung de cuon phim cach nuoc
+OFFCUT-RACK-A,Ke offcut PPF A,OFFCUT_ZONE,Gia treo cac manh du PPF co lon
+OFFCUT-RACK-B,Ke offcut PPF B,OFFCUT_ZONE,Gia treo cac manh du PPF co trung va nho
+OFFCUT-RACK-C,Ke offcut Phim A,OFFCUT_ZONE,Gia treo manh du phim cach nhiet Class A
+OFFCUT-RACK-D,Ke offcut Phim B,OFFCUT_ZONE,Gia treo manh du phim cach nhiet Class B
+OFFCUT-RACK-E,Ke offcut Phim C,OFFCUT_ZONE,Gia treo manh du phim cach nhiet Class C
+SCRAP-BIN,Thung phế lieu,WASTE_ZONE,Khu vuc chua scrap cho thanh ly hoac huy bo

@@ -1,0 +1,36 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "DealerAccount",
+  "description": "Schema JSON xác thực hồ sơ đối tác đại lý doanh nghiệp",
+  "type": "object",
+  "properties": {
+    "dealer_id": {
+      "type": "string",
+      "pattern": "^DEALER_[A-Z0-9_]+$",
+      "description": "Mã định danh duy nhất của đại lý, bắt đầu bằng DEALER_"
+    },
+    "dealer_name": {
+      "type": "string",
+      "description": "Tên pháp nhân đầy đủ của đại lý"
+    },
+    "contact_phone": {
+      "type": "string",
+      "description": "Số điện thoại liên hệ đại lý"
+    },
+    "contact_email": {
+      "type": "string",
+      "format": "email",
+      "description": "Địa chỉ email nhận thông tin đặt hàng"
+    },
+    "address": {
+      "type": "string",
+      "description": "Địa chỉ vật lý của showroom đại lý"
+    },
+    "status": {
+      "type": "string",
+      "enum": ["ACTIVE", "INACTIVE"],
+      "description": "Trạng thái hợp tác của đại lý"
+    }
+  },
+  "required": ["dealer_id", "dealer_name", "contact_phone", "status"]
+}

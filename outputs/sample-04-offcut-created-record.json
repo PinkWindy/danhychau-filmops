@@ -1,0 +1,13 @@
+{
+  "offcut_id": "SUBLOT-JB20-003",
+  "parent_lot_id": "LOT-JB20-001",
+  "material_code": "JB20",
+  "width_m": 1.52,
+  "length_m": 1.20,
+  "area_m2": 1.824,
+  "quality_status": "EXCELLENT",
+  "storage_location": "OFFCUT-RACK-C",
+  "created_from_request_id": "REQ-20260603-001",
+  "status": "ACTIVE",
+  "import_date": "2026-06-03"
+}

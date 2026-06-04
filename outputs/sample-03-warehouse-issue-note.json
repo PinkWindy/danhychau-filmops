@@ -1,0 +1,31 @@
+{
+  "issue_note_id": "EXP-20260603-001",
+  "request_id": "REQ-20260603-001",
+  "vehicle_info": {
+    "vin_number": "VIN_MASKED_RX350_001",
+    "vehicle_model_code": "LEXUS_RX350"
+  },
+  "issue_date": "2026-06-03T17:15:30Z",
+  "recipient_id": "KTV-003",
+  "issuer_id": "ADMIN-001",
+  "allocated_materials": [
+    {
+      "material_code": "JB20",
+      "source_type": "LOT",
+      "source_id": "LOT-JB20-001",
+      "width_m": 1.52,
+      "length_m": 1.43,
+      "storage_location": "A-RACK-03",
+      "cut_group_id": "CG_RX350_SIDE_REAR"
+    },
+    {
+      "material_code": "RT40",
+      "source_type": "OFFCUT",
+      "source_id": "SUBLOT-3MCRY-001",
+      "width_m": 1.52,
+      "length_m": 1.60,
+      "storage_location": "OFFCUT-RACK-E"
+    }
+  ],
+  "status": "ISSUED"
+}

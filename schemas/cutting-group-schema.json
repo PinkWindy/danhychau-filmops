@@ -1,0 +1,87 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "CuttingGroupConfig",
+  "description": "Schema JSON xác thực cấu trúc dữ liệu cấu hình nhóm cắt gom (Cutting Group/Cut Block) tối ưu hóa khổ phim",
+  "type": "object",
+  "properties": {
+    "cut_group_id": {
+      "type": "string",
+      "description": "Mã định danh duy nhất của nhóm cắt (ví dụ: CG_RX350_SIDE_REAR)"
+    },
+    "vehicle_model_code": {
+      "type": "string",
+      "description": "Mã đời xe chuẩn áp dụng dán nhóm"
+    },
+    "model_year": {
+      "type": "integer",
+      "minimum": 2000,
+      "maximum": 2100,
+      "description": "Năm model xe áp dụng cutting group"
+    },
+    "film_type": {
+      "type": "string",
+      "enum": ["PPF", "WINDOW_FILM"],
+      "description": "Phân loại vật tư phim dán"
+    },
+    "material_code": {
+      "type": "string",
+      "description": "Mã phim thi công dán nhóm (ví dụ: JB20, RS20)"
+    },
+    "job_items": {
+      "type": "string",
+      "description": "Danh sách các mã job_item_id trong group dán, phân tách bằng dấu chấm phẩy (ví dụ: JOB_FILM_SIDE;JOB_FILM_REAR)"
+    },
+    "piece_sizes": {
+      "type": "string",
+      "description": "Kích thước các mảnh nhỏ dán lẻ tương ứng, định dạng RộngxDài phân tách bằng chấm phẩy (ví dụ: 92x130;60x130)"
+    },
+    "roll_width_cm": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Chiều rộng cuộn phim vật lý chuẩn (thường là 152cm)"
+    },
+    "cut_block_width_cm": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Chiều rộng của khối cắt thực tế sau khi ghép gom các mảnh (thường là 152cm)"
+    },
+    "cut_block_length_cm": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Chiều dài của khối cắt thực tế trước khi dán xe (cm) (ví dụ: 130cm)"
+    },
+    "deduction_length_m": {
+      "type": "number",
+      "minimum": 0.1,
+      "description": "Chiều dài yêu cầu trừ tồn kho thực tế dán nhóm, đã quy đổi sang mét và cộng margin (ví dụ: 1.430m)"
+    },
+    "deduction_area_m2": {
+      "type": "number",
+      "minimum": 0.01,
+      "description": "Diện tích yêu cầu trừ tồn kho thực tế dán nhóm (mét vuông) (ví dụ: 2.174m2)"
+    },
+    "grouping_rule": {
+      "type": "string",
+      "enum": ["SUM_WIDTH_EQUALS_ROLL_WIDTH", "SUM_LENGTH_EQUALS_ROLL_WIDTH", "CUSTOM_NESTING"],
+      "description": "Quy tắc gom ghép mảnh cắt (ví dụ: Tổng chiều rộng các mảnh bằng đúng khổ cuộn phim)"
+    },
+    "rotation_allowed": {
+      "type": "boolean",
+      "description": "Cờ cho phép xoay chiều mảnh nhỏ khi xếp sơ đồ cắt"
+    },
+    "status": {
+      "type": "string",
+      "enum": ["ACTIVE", "INACTIVE"],
+      "description": "Trạng thái hoạt động của nhóm cắt"
+    },
+    "note": {
+      "type": "string",
+      "description": "Ghi chú thêm về nhóm cắt"
+    }
+  },
+  "required": [
+    "cut_group_id", "vehicle_model_code", "film_type", "material_code", "job_items",
+    "piece_sizes", "roll_width_cm", "cut_block_width_cm", "cut_block_length_cm",
+    "deduction_length_m", "deduction_area_m2", "grouping_rule", "rotation_allowed", "status"
+  ]
+}

@@ -1,0 +1,44 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AuditLogRecord",
+  "description": "Schema JSON xác thực cấu trúc bất biến của bản ghi nhật ký hệ thống kiểm toán dữ liệu kho phim",
+  "type": "object",
+  "properties": {
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Mốc thời gian ghi nhận hành động (ISO 8601)"
+    },
+    "actor": {
+      "type": "string",
+      "description": "Mã tài khoản thực hiện hành động (Con người hoặc Agent ID)"
+    },
+    "action_type": {
+      "type": "string",
+      "enum": ["CREATE", "UPDATE", "DELETE", "LOCK", "UNLOCK", "DEDUCT", "OVERRIDE"],
+      "description": "Loại hành động thực hiện"
+    },
+    "target_entity": {
+      "type": "string",
+      "description": "Đối tượng chịu tác động (ví dụ: LOT-PPF-001, CUST_001, REQ-001)"
+    },
+    "before_value": {
+      "type": ["object", "array", "string", "number", "null"],
+      "description": "Giá trị hoặc trạng thái cũ trước khi thay đổi"
+    },
+    "after_value": {
+      "type": ["object", "array", "string", "number", "null"],
+      "description": "Giá trị hoặc trạng thái mới sau khi thay đổi"
+    },
+    "reason": {
+      "type": "string",
+      "minLength": 10,
+      "description": "Lý do thực hiện chỉnh sửa dữ liệu hoặc thay đổi (bắt buộc dài tối thiểu 10 ký tự)"
+    },
+    "request_id": {
+      "type": "string",
+      "description": "Mã yêu cầu dán xe liên quan để đối soát chéo (nếu có)"
+    }
+  },
+  "required": ["timestamp", "actor", "action_type", "target_entity", "before_value", "after_value", "reason"]
+}

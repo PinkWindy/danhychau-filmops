@@ -1,0 +1,60 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "WarehouseIssueNote",
+  "description": "Schema JSON xác thực dữ liệu của Phiếu xuất kho vật tư dán xe chính thức",
+  "type": "object",
+  "properties": {
+    "issue_note_id": {
+      "type": "string",
+      "description": "Mã số phiếu xuất kho (ví dụ: EXP-20260601-001)"
+    },
+    "request_id": {
+      "type": "string",
+      "description": "Mã phiếu yêu cầu thi công dán xe liên quan"
+    },
+    "vehicle_info": {
+      "type": "object",
+      "properties": {
+        "vin_number": { "type": "string" },
+        "vehicle_model_code": { "type": "string" }
+      },
+      "required": ["vin_number", "vehicle_model_code"],
+      "description": "Thông tin xe dán phim"
+    },
+    "issue_date": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Ngày giờ lập phiếu xuất"
+    },
+    "recipient_id": {
+      "type": "string",
+      "description": "Mã Kỹ thuật viên nhận phim"
+    },
+    "issuer_id": {
+      "type": "string",
+      "description": "Mã Admin kho lập phiếu xuất"
+    },
+    "allocated_materials": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "material_code": { "type": "string" },
+          "source_type": { "type": "string", "enum": ["LOT", "OFFCUT"] },
+          "source_id": { "type": "string" },
+          "width_m": { "type": "number" },
+          "length_m": { "type": "number" },
+          "storage_location": { "type": "string" }
+        },
+        "required": ["material_code", "source_type", "source_id", "width_m", "length_m"]
+      },
+      "description": "Danh sách vật tư xuất kho"
+    },
+    "status": {
+      "type": "string",
+      "enum": ["ISSUED", "CANCELLED"],
+      "description": "Trạng thái phiếu xuất"
+    }
+  },
+  "required": ["issue_note_id", "request_id", "vehicle_info", "issue_date", "recipient_id", "issuer_id", "allocated_materials", "status"]
+}

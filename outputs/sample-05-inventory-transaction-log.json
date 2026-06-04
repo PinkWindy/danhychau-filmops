@@ -1,0 +1,129 @@
+[
+  {
+    "transaction_id": "TXN-20260603-001",
+    "request_id": "REQ-20260603-001",
+    "cut_group_id": "CG_RX350_SIDE_REAR",
+    "transaction_type": "ISSUE_FROM_LOT",
+    "transaction_status": "CONFIRMED",
+    "source_type": "LOT",
+    "source_id": "LOT-JB20-001",
+    "material_code": "JB20",
+    "planned_size": {
+      "width_m": 1.52,
+      "length_m": 1.43,
+      "area_m2": 2.174
+    },
+    "planned_cut_block": "152x143",
+    "actual_size": {
+      "width_m": 1.52,
+      "length_m": 1.43,
+      "area_m2": 2.174
+    },
+    "actual_cut_block": "152x143",
+    "before_balance": 12.5,
+    "after_balance": 11.07,
+    "balance_unit": "METER",
+    "lock_released": true,
+    "technician_id": "KTV-003",
+    "approved_by": "QL-002",
+    "performed_at": "2026-06-03T17:15:30Z"
+  },
+  {
+    "transaction_id": "TXN-20260603-002",
+    "request_id": "REQ-20260603-001",
+    "transaction_type": "ISSUE_FROM_OFFCUT",
+    "transaction_status": "CONFIRMED",
+    "source_type": "OFFCUT",
+    "source_id": "SUBLOT-3MCRY-001",
+    "material_code": "RT40",
+    "planned_size": {
+      "width_m": 1.52,
+      "length_m": 1.60,
+      "area_m2": 2.432
+    },
+    "actual_size": {
+      "width_m": 1.52,
+      "length_m": 1.60,
+      "area_m2": 2.432
+    },
+    "before_balance": 1.6,
+    "after_balance": 0.0,
+    "balance_unit": "METER",
+    "lock_released": true,
+    "technician_id": "KTV-003",
+    "approved_by": "QL-002",
+    "performed_at": "2026-06-03T17:15:35Z"
+  },
+  {
+    "transaction_id": "TXN-20260603-003",
+    "request_id": "REQ-20260603-001",
+    "transaction_type": "CREATE_OFFCUT",
+    "transaction_status": "CONFIRMED",
+    "source_type": "LOT",
+    "source_id": "LOT-JB20-001",
+    "material_code": "JB20",
+    "planned_size": {
+      "width_m": 1.52,
+      "length_m": 0.0,
+      "area_m2": 0.0
+    },
+    "actual_size": {
+      "width_m": 1.52,
+      "length_m": 1.20,
+      "area_m2": 1.824
+    },
+    "balance_unit": "METER",
+    "created_offcut_id": "SUBLOT-JB20-003",
+    "technician_id": "KTV-003",
+    "approved_by": "QL-002",
+    "performed_at": "2026-06-03T17:15:40Z"
+  },
+  {
+    "transaction_id": "TXN-20260603-004",
+    "request_id": "REQ-20260603-001",
+    "transaction_type": "RECORD_SCRAP",
+    "transaction_status": "CONFIRMED",
+    "source_type": "LOT",
+    "source_id": "LOT-JB20-001",
+    "material_code": "JB20",
+    "planned_size": {
+      "width_m": 1.52,
+      "length_m": 0.0,
+      "area_m2": 0.0
+    },
+    "actual_size": {
+      "width_m": 1.52,
+      "length_m": 0.23,
+      "area_m2": 0.35
+    },
+    "balance_unit": "METER",
+    "scrap_area_m2": 0.35,
+    "technician_id": "KTV-003",
+    "approved_by": "QL-002",
+    "performed_at": "2026-06-03T17:15:45Z"
+  },
+  {
+    "transaction_id": "TXN-20260603-005",
+    "request_id": "REQ-20260603-002",
+    "transaction_type": "RELEASE_LOCK",
+    "transaction_status": "CONFIRMED",
+    "source_type": "LOT",
+    "source_id": "LOT-JB20-002",
+    "material_code": "JB20",
+    "planned_size": {
+      "width_m": 1.52,
+      "length_m": 0.0,
+      "area_m2": 0.0
+    },
+    "actual_size": {
+      "width_m": 1.52,
+      "length_m": 0.0,
+      "area_m2": 0.0
+    },
+    "balance_unit": "METER",
+    "lock_released": true,
+    "technician_id": "KTV-003",
+    "approved_by": "QL-002",
+    "performed_at": "2026-06-03T17:16:00Z"
+  }
+]

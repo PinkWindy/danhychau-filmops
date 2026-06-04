@@ -1,0 +1,54 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ManagerApproval",
+  "description": "Schema JSON xác thực kết quả phê duyệt phương án dán phim của Quản lý. LƯU Ý QUAN TRỌNG: Trạng thái Approved chỉ kích hoạt Soft Lock / Reserved ảo để giữ chỗ vật tư, tuyệt đối KHÔNG thực hiện trừ kho ở bước này.",
+  "type": "object",
+  "properties": {
+    "approval_id": {
+      "type": "string",
+      "description": "Mã định danh phê duyệt duy nhất"
+    },
+    "request_id": {
+      "type": "string",
+      "description": "Mã phiếu yêu cầu thi công dán xe"
+    },
+    "approved_by": {
+      "type": "string",
+      "description": "Mã tài khoản quản lý thực hiện phê duyệt"
+    },
+    "approval_date": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Mốc thời gian phê duyệt (ISO 8601)"
+    },
+    "approval_status": {
+      "type": "string",
+      "enum": ["APPROVED", "REJECTED", "PENDING"],
+      "description": "Trạng thái phê duyệt"
+    },
+    "allocation_source_type": {
+      "type": "string",
+      "enum": ["LOT", "OFFCUT", "MIXED"],
+      "description": "Nguồn vật tư được chọn dán xe"
+    },
+    "allocated_item_id": {
+      "type": "string",
+      "description": "ID cuộn LOT gốc hoặc mảnh dư Sub-LOT được phê duyệt giữ chỗ"
+    },
+    "is_adjusted": {
+      "type": "boolean",
+      "description": "Đánh dấu Quản lý có chỉnh sửa kích thước hoặc vật tư so với đề xuất tự động hay không"
+    },
+    "adjustment_reason": {
+      "type": "string",
+      "minLength": 10,
+      "description": "Lý do điều chỉnh (bắt buộc nhập dài ít nhất 10 ký tự nếu is_adjusted = true)"
+    },
+    "virtual_status": {
+      "type": "string",
+      "enum": ["SOFT_LOCKED_RESERVED"],
+      "description": "Mô tả trạng thái tồn kho ảo sau duyệt: chỉ Reserved/Soft Lock, không trừ tồn kho vật lý"
+    }
+  },
+  "required": ["approval_id", "request_id", "approved_by", "approval_date", "approval_status", "allocated_item_id", "is_adjusted"]
+}

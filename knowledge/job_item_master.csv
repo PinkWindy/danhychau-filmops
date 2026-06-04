@@ -1,0 +1,8 @@
+job_item_id,job_name,description
+JOB_PPF_FULL,Dan PPF toan bo than xe,Thi cong dan PPF bao ve son cho toan bo xe
+JOB_PPF_CAPO,Dan PPF nap Capo,Dan PPF nap capo truoc de chong da vang va tray xuoc
+JOB_PPF_BUMPER_F,Dan PPF can truoc,Dan PPF bao ve can truoc xe khoi va quet nhe
+JOB_FILM_FULL,Dan phim cach nhiet toan bo xe,Dan phim cach nhiet cho tat ca cac kinh (lai, suon, lung)
+JOB_FILM_WINDSHIELD,Dan phim cach nhiet kinh lai,Dan phim cach nhiet chuyen dung cho kinh lai truoc chong choi
+JOB_FILM_SIDE,Dan phim cach nhiet kinh suon,Dan phim cach nhiet cho cac kinh suon ben trai va ben phai
+JOB_FILM_REAR,Dan phim cach nhiet kinh hau,Dan phim cach nhiet cho kinh lung phia sau xe

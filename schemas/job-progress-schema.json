@@ -1,0 +1,167 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "JobProgressSchema",
+  "description": "Schema xác thực thông tin tiến độ thi công và đối soát SLA giao xe",
+  "type": "object",
+  "required": [
+    "job_progress_id",
+    "request_id",
+    "job_card_id",
+    "technician_id",
+    "requested_delivery_at",
+    "job_status",
+    "delivery_sla_status"
+  ],
+  "properties": {
+    "job_progress_id": {
+      "type": "string",
+      "pattern": "^JPL-\\d{3,}$",
+      "description": "Mã định danh bản ghi tiến độ thi công"
+    },
+    "request_id": {
+      "type": "string",
+      "pattern": "^REQ-\\d{8}-\\d{3,}$",
+      "description": "Mã yêu cầu dán xe liên quan"
+    },
+    "job_card_id": {
+      "type": "string",
+      "pattern": "^JOB-\\d{8}-\\d{3,}$",
+      "description": "Mã lệnh thi công liên quan"
+    },
+    "technician_id": {
+      "type": "string",
+      "pattern": "^KTV-\\d{3}$",
+      "description": "Mã kỹ thuật viên phụ trách"
+    },
+    "requested_delivery_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Thời hạn giao xe cam kết từ đại lý"
+    },
+    "assigned_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Thời điểm giao lệnh cho KTV"
+    },
+    "started_at": {
+      "type": ["string", "null"],
+      "format": "date-time",
+      "description": "Thời điểm KTV bấm bắt đầu thi công"
+    },
+    "completed_at": {
+      "type": ["string", "null"],
+      "format": "date-time",
+      "description": "Thời điểm KTV hoàn tất thi công dán xe"
+    },
+    "job_status": {
+      "type": "string",
+      "enum": [
+        "ASSIGNED_TO_TECHNICIAN",
+        "READY_TO_START",
+        "IN_PROGRESS",
+        "PAUSED",
+        "ACTUAL_CONFIRMATION_REQUIRED",
+        "COMPLETED_BY_TECHNICIAN",
+        "CLOSED",
+        "DELAYED",
+        "CANCELLED",
+        "EXCEPTION_HOLD"
+      ],
+      "description": "Trạng thái thi công thực tế tại xưởng di động"
+    },
+    "delivery_sla_status": {
+      "type": "string",
+      "enum": [
+        "NOT_DUE",
+        "AT_RISK",
+        "DELIVERED_ON_TIME",
+        "DELIVERED_LATE",
+        "OVERDUE",
+        "NOT_APPLICABLE"
+      ],
+      "description": "Trạng thái SLA giao xe so với deadline"
+    },
+    "delay_minutes": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Số phút trễ hạn (nếu có)"
+    },
+    "manager_notified_start": {
+      "type": "boolean",
+      "description": "Cờ thông báo bắt đầu đã gửi cho Quản lý"
+    },
+    "manager_notified_complete": {
+      "type": "boolean",
+      "description": "Cờ thông báo hoàn thành đã gửi cho Quản lý"
+    },
+    "actual_confirmation_status": {
+      "type": "string",
+      "enum": ["PENDING", "COMPLETED", "FAILED"],
+      "description": "Trạng thái điền form actual của KTV"
+    },
+    "inventory_commit_status": {
+      "type": "string",
+      "enum": ["PENDING", "COMMITTED", "FAILED"],
+      "description": "Trạng thái trừ kho ảo ở WF6"
+    },
+    "note": {
+      "type": "string",
+      "description": "Ghi chú điều phối hoặc ngoại lệ"
+    }
+  },
+  "dependencies": {
+    "job_status": {
+      "oneOf": [
+        {
+          "properties": {
+            "job_status": { "not": { "enum": ["IN_PROGRESS"] } }
+          }
+        },
+        {
+          "properties": {
+            "job_status": { "enum": ["IN_PROGRESS"] },
+            "started_at": { "type": "string", "format": "date-time" }
+          },
+          "required": ["started_at"]
+        }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "job_status": { "const": "COMPLETED_BY_TECHNICIAN" } }
+      },
+      "then": {
+        "required": ["completed_at"],
+        "properties": {
+          "completed_at": { "type": "string", "format": "date-time" }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "delivery_sla_status": { "enum": ["DELIVERED_LATE", "OVERDUE"] }
+        }
+      },
+      "then": {
+        "properties": {
+          "delay_minutes": { "type": "integer", "minimum": 1 }
+        },
+        "required": ["delay_minutes"]
+      }
+    },
+    {
+      "if": {
+        "properties": { "job_status": { "const": "CLOSED" } }
+      },
+      "then": {
+        "properties": {
+          "inventory_commit_status": { "const": "COMMITTED" }
+        },
+        "required": ["inventory_commit_status"]
+      }
+    }
+  ]
+}

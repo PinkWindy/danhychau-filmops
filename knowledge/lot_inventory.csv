@@ -1,0 +1,11 @@
+lot_id,material_code,original_width_m,original_length_m,remaining_length_m,is_opened,is_locked,import_date,status
+LOT-PPF-X-001,T-TYPE,1.52,15.0,7.2,true,false,2026-05-01,ACTIVE
+LOT-PPF-X-002,T-TYPE,1.52,15.0,15.0,false,false,2026-05-15,ACTIVE
+LOT-PPF-Y-001,T-TYPE,1.52,15.0,4.5,true,false,2026-05-02,ACTIVE
+LOT-PPF-Y-002,T-TYPE,1.52,15.0,15.0,false,true,2026-05-20,ACTIVE
+LOT-FILMA-001,JB20,1.52,30.0,12.5,true,false,2026-04-10,ACTIVE
+LOT-FILMA-002,JB20,1.52,30.0,30.0,false,false,2026-05-10,ACTIVE
+LOT-FILMB-001,JB20,1.52,30.0,8.0,true,false,2026-04-12,ACTIVE
+LOT-FILMC-001,RS20,1.52,30.0,22.0,true,false,2026-04-20,ACTIVE
+LOT-3MCRY-001,RT40,1.52,30.0,18.5,true,false,2026-05-05,ACTIVE
+LOT-PPFM-001,M-TYPE,1.52,15.0,15.0,false,false,2026-05-25,ACTIVE

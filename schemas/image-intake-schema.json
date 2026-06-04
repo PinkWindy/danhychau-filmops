@@ -1,0 +1,173 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ImageIntakeSchema",
+  "description": "Schema xác thực thông tin upload ảnh và tiến trình OCR trích xuất dữ liệu phiếu đại lý",
+  "type": "object",
+  "required": [
+    "image_file_id",
+    "original_file_name",
+    "file_type",
+    "uploaded_by",
+    "uploaded_at",
+    "ocr_status",
+    "review_status"
+  ],
+  "properties": {
+    "image_file_id": {
+      "type": "string",
+      "pattern": "^IMG-\\d{8}-\\d{3,}$",
+      "description": "Mã định danh file ảnh duy nhất"
+    },
+    "original_file_name": {
+      "type": "string",
+      "description": "Tên file gốc do người dùng upload"
+    },
+    "file_type": {
+      "type": "string",
+      "enum": ["JPG", "JPEG", "PNG", "PDF"],
+      "description": "Định dạng file tài liệu"
+    },
+    "file_size_mb": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 10.0,
+      "description": "Dung lượng file tải lên tính bằng MB, giới hạn tối đa 10MB"
+    },
+    "uploaded_by": {
+      "type": "string",
+      "pattern": "^AD-\\d{3}$",
+      "description": "Mã Admin kho thực hiện upload"
+    },
+    "uploaded_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Thời điểm tải file lên hệ thống"
+    },
+    "source_channel": {
+      "type": "string",
+      "enum": ["PWA", "MOBILE"],
+      "description": "Kênh thực hiện upload"
+    },
+    "dealer_hint": {
+      "type": "string",
+      "description": "Mã gợi ý đại lý do Admin nhập trước"
+    },
+    "image_quality_status": {
+      "type": "string",
+      "enum": [
+        "GOOD",
+        "BLURRY",
+        "MISSING_CORNER",
+        "LOW_LIGHT",
+        "INVALID_FORMAT",
+        "FAILED"
+      ],
+      "description": "Đánh giá chất lượng ảnh chụp"
+    },
+    "ocr_status": {
+      "type": "string",
+      "enum": ["NOT_STARTED", "PROCESSING", "COMPLETED", "FAILED"],
+      "description": "Trạng thái của tiến trình OCR"
+    },
+    "ocr_draft_id": {
+      "type": "string",
+      "pattern": "^ODR-\\d{8}-\\d{3,}$",
+      "description": "Mã định danh bản nháp dữ liệu OCR"
+    },
+    "extracted_fields": {
+      "type": "object",
+      "description": "Object chứa dữ liệu thô trích xuất từ OCR",
+      "properties": {
+        "dealer_name": { "type": "string" },
+        "dealer_legal_name": { "type": "string" },
+        "request_no": { "type": "string" },
+        "request_date": { "type": "string" },
+        "requested_delivery_at": { "type": "string", "format": "date-time" },
+        "contract_no": { "type": "string" },
+        "end_customer_name": { "type": "string" },
+        "end_customer_address": { "type": "string" },
+        "vehicle_model": { "type": "string" },
+        "vin_number": { "type": "string" },
+        "job_items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["item_code"],
+            "properties": {
+              "item_code": { "type": "string" },
+              "item_description": { "type": "string" }
+            }
+          }
+        },
+        "note": { "type": "string" }
+      }
+    },
+    "field_confidence": {
+      "type": "object",
+      "description": "Điểm tin cậy của từng trường thông tin trích xuất",
+      "additionalProperties": {
+        "type": "number",
+        "minimum": 0.0,
+        "maximum": 1.0
+      }
+    },
+    "missing_fields": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Danh sách các trường bắt buộc bị thiếu thông tin"
+    },
+    "created_request_id": {
+      "type": "string",
+      "pattern": "^REQ-\\d{8}-\\d{3,}$",
+      "description": "Mã phiếu yêu cầu chính thức được tạo"
+    },
+    "review_status": {
+      "type": "string",
+      "enum": ["DRAFT", "NEEDS_REVIEW", "CONFIRMED", "REJECTED", "CANCELLED"],
+      "description": "Trạng thái đối soát của Admin"
+    },
+    "reviewed_by": {
+      "type": "string",
+      "pattern": "^(AD|QL)-\\d{3}$",
+      "description": "Người thực hiện review và xác nhận"
+    },
+    "reviewed_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Thời điểm hoàn tất review"
+    },
+    "note": {
+      "type": "string",
+      "description": "Ghi chú điều phối hoặc lý do lỗi"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "ocr_status": { "const": "COMPLETED" } }
+      },
+      "then": {
+        "required": ["ocr_draft_id"]
+      }
+    },
+    {
+      "if": {
+        "properties": { "review_status": { "const": "CONFIRMED" } }
+      },
+      "then": {
+        "required": ["reviewed_by", "reviewed_at", "created_request_id"]
+      }
+    },
+    {
+      "if": {
+        "properties": { "review_status": { "const": "NEEDS_REVIEW" } }
+      },
+      "then": {
+        "anyOf": [
+          { "required": ["missing_fields"] },
+          { "required": ["field_confidence"] }
+        ]
+      }
+    }
+  ]
+}

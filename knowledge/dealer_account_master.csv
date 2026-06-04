@@ -1,0 +1,6 @@
+dealer_id,dealer_name,contact_phone,contact_email,address,status
+DEALER_LEXUS_SG,Lexus Trung Tam Sai Gon,0283821xxxx,contact@lexussaigon.vn,"264 Tran Hung Dao, Quan 1, TP. HCM",ACTIVE
+DEALER_TOYOTA_BENTHANH,Toyota Ben Thanh,0283822xxxx,info@toyotabenthanh.com.vn,"262 Tran Hung Dao, Quan 1, TP. HCM",ACTIVE
+DEALER_MERCEDES_HAXECO,Mercedes-Benz Haxeco Vo Van Kiet,0283512xxxx,support@haxeco.com.vn,"2008 Vo Van Kiet, Binh Tan, TP. HCM",ACTIVE
+DEALER_BMW_PHUMYHUNG,BMW Phu My Hung,0285411xxxx,sales@bmwphumyhung.com.vn,"808 Nguyen Van Linh, Quan 7, TP. HCM",ACTIVE
+DEALER_AUDI_Q1,Audi District 1,0283724xxxx,contact@audi.vn,"19 Ton Duc Thang, Quan 1, TP. HCM",ACTIVE

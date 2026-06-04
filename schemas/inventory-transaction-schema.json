@@ -1,0 +1,202 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "InventoryTransaction",
+  "description": "Schema JSON ghi nhận giao dịch xuất/nhập/điều chỉnh kho ảo thực tế sau dán xe",
+  "type": "object",
+  "properties": {
+    "transaction_id": {
+      "type": "string",
+      "description": "Mã định danh giao dịch kho ảo duy nhất (ví dụ: TXN-0001)"
+    },
+    "request_id": {
+      "type": "string",
+      "description": "Mã phiếu yêu cầu dán xe liên quan"
+    },
+    "cut_group_id": {
+      "type": "string",
+      "description": "Mã Cutting Group áp dụng cho giao dịch (nếu có, để trống nếu cắt lẻ)"
+    },
+    "transaction_type": {
+      "type": "string",
+      "enum": [
+        "ISSUE_FROM_LOT",
+        "ISSUE_FROM_OFFCUT",
+        "CREATE_OFFCUT",
+        "RECORD_SCRAP",
+        "ADJUSTMENT",
+        "RELEASE_LOCK"
+      ],
+      "description": "Phân loại loại giao dịch kho ảo"
+    },
+    "transaction_status": {
+      "type": "string",
+      "enum": [
+        "DRAFT",
+        "CONFIRMED",
+        "ROLLED_BACK",
+        "EXCEPTION_HOLD"
+      ],
+      "description": "Trạng thái của giao dịch kho ảo"
+    },
+    "source_type": {
+      "type": "string",
+      "enum": ["LOT", "OFFCUT", "MANUAL_ADJUSTMENT"],
+      "description": "Nguồn phân loại tác động trừ tồn kho"
+    },
+    "source_id": {
+      "type": "string",
+      "description": "Mã cuộn gốc LOT hoặc mảnh dư Sub-LOT chịu tác động trừ tồn"
+    },
+    "material_code": {
+      "type": "string",
+      "description": "Mã vật tư phim dán"
+    },
+    "planned_size": {
+      "type": "object",
+      "properties": {
+        "width_m": { "type": "number" },
+        "length_m": { "type": "number" },
+        "area_m2": { "type": "number" }
+      },
+      "required": ["width_m", "length_m", "area_m2"],
+      "description": "Kích thước dự kiến dán xe theo phương án định mức lý thuyết được duyệt ban đầu"
+    },
+    "planned_cut_block": {
+      "type": "string",
+      "description": "Khối cắt gom dự kiến theo kế hoạch được duyệt (ví dụ: 152x130)"
+    },
+    "actual_size": {
+      "type": "object",
+      "properties": {
+        "width_m": { "type": "number" },
+        "length_m": { "type": "number" },
+        "area_m2": { "type": "number" }
+      },
+      "required": ["width_m", "length_m", "area_m2"],
+      "description": "Kích thước dán cắt thực tế do KTV xác nhận. Trừ tồn kho phải tính toán và thực thi dựa trên kích thước actual_size này, không tự động trừ theo planned_size nếu có chênh lệch."
+    },
+    "actual_cut_block": {
+      "type": "string",
+      "description": "Khối cắt gom thực tế do KTV thực hiện cắt và xác nhận (ví dụ: 152x130). Trừ tồn kho phải tính toán và thực thi dựa trên actual_cut_block này."
+    },
+    "before_balance": {
+      "type": "number",
+      "description": "Chiều dài cuộn gốc / mảnh dư trước khi trừ kho"
+    },
+    "after_balance": {
+      "type": "number",
+      "description": "Chiều dài cuộn gốc / mảnh dư sau khi trừ kho"
+    },
+    "balance_unit": {
+      "type": "string",
+      "enum": ["METER", "SQUARE_METER", "PIECE"],
+      "description": "Đơn vị tính dùng trong giao dịch kho"
+    },
+    "lock_released": {
+      "type": "boolean",
+      "description": "Cho biết Reserved/Soft Lock đã được giải phóng sau giao dịch thành công hay chưa"
+    },
+    "created_offcut_id": {
+      "type": "string",
+      "description": "ID mảnh dư (Sub-LOT) mới được tạo ra từ phần thừa của giao dịch này (nếu có)"
+    },
+    "scrap_area_m2": {
+      "type": "number",
+      "description": "Diện tích phế liệu ghi nhận hỏng hoặc vụn bỏ đi (nếu có)"
+    },
+    "technician_id": {
+      "type": "string",
+      "description": "Mã Kỹ thuật viên thi công chính"
+    },
+    "approved_by": {
+      "type": "string",
+      "description": "Mã Quản lý phê duyệt phương án"
+    },
+    "performed_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Mốc thời gian ghi nhận giao dịch kho"
+    },
+    "exception_reason": {
+      "type": "string",
+      "description": "Lý do chênh lệch/ngoại lệ nếu KTV cắt khác Cutting Group hoặc phương án được duyệt"
+    }
+  },
+  "required": [
+    "transaction_id",
+    "request_id",
+    "transaction_type",
+    "transaction_status",
+    "source_type",
+    "source_id",
+    "material_code",
+    "planned_size",
+    "actual_size",
+    "balance_unit",
+    "technician_id",
+    "approved_by",
+    "performed_at"
+  ],
+  "allOf": [
+    {
+      "comment": "Nếu cut_group_id khác rỗng thì planned_cut_block và actual_cut_block phải có",
+      "if": {
+        "properties": {
+          "cut_group_id": { "type": "string", "minLength": 1 }
+        },
+        "required": ["cut_group_id"]
+      },
+      "then": {
+        "required": ["planned_cut_block", "actual_cut_block"]
+      }
+    },
+    {
+      "comment": "Nếu transaction_type = RECORD_SCRAP thì scrap_area_m2 phải có",
+      "if": {
+        "properties": {
+          "transaction_type": { "const": "RECORD_SCRAP" }
+        },
+        "required": ["transaction_type"]
+      },
+      "then": {
+        "required": ["scrap_area_m2"]
+      }
+    },
+    {
+      "comment": "Nếu transaction_type = CREATE_OFFCUT thì created_offcut_id phải có",
+      "if": {
+        "properties": {
+          "transaction_type": { "const": "CREATE_OFFCUT" }
+        },
+        "required": ["transaction_type"]
+      },
+      "then": {
+        "required": ["created_offcut_id"]
+      }
+    },
+    {
+      "comment": "Nếu transaction_status = EXCEPTION_HOLD thì exception_reason phải có",
+      "if": {
+        "properties": {
+          "transaction_status": { "const": "EXCEPTION_HOLD" }
+        },
+        "required": ["transaction_status"]
+      },
+      "then": {
+        "required": ["exception_reason"]
+      }
+    },
+    {
+      "comment": "Nếu transaction_type = ISSUE_FROM_LOT hoặc ISSUE_FROM_OFFCUT thì before_balance và after_balance phải có",
+      "if": {
+        "properties": {
+          "transaction_type": { "enum": ["ISSUE_FROM_LOT", "ISSUE_FROM_OFFCUT"] }
+        },
+        "required": ["transaction_type"]
+      },
+      "then": {
+        "required": ["before_balance", "after_balance"]
+      }
+    }
+  ]
+}

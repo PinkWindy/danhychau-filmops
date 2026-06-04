@@ -1,0 +1,57 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "LotAllocation",
+  "description": "Schema JSON xác thực đề xuất phân bổ cắt mới từ cuộn gốc LOT",
+  "type": "object",
+  "properties": {
+    "allocation_id": {
+      "type": "string",
+      "description": "Mã định danh đề xuất phân bổ"
+    },
+    "request_id": {
+      "type": "string",
+      "description": "Mã phiếu yêu cầu thi công dán xe"
+    },
+    "cut_group_id": {
+      "type": "string",
+      "description": "Mã nhóm cắt liên kết (nếu dán nhóm, để trống nếu cắt lẻ)"
+    },
+    "material_code": {
+      "type": "string",
+      "description": "Mã phim thi công dán xe"
+    },
+    "lot_id": {
+      "type": "string",
+      "description": "ID cuộn gốc được chỉ định cắt (trong lot_inventory)"
+    },
+    "original_width_m": {
+      "type": "number",
+      "description": "Chiều rộng cuộn gốc"
+    },
+    "remaining_length_before_m": {
+      "type": "number",
+      "description": "Chiều dài cuộn gốc trước khi trừ kho"
+    },
+    "allocation_length_m": {
+      "type": "number",
+      "description": "Chiều dài yêu cầu cắt (nếu có cut_group_id, đây chính là deduction_length_m của nhóm; nếu cắt lẻ, đây là required_length_m)"
+    },
+    "remaining_length_after_m": {
+      "type": "number",
+      "description": "Chiều dài cuộn gốc dự kiến còn lại sau khi cắt dán"
+    },
+    "allocation_priority": {
+      "type": "integer",
+      "enum": [1, 2],
+      "description": "Độ ưu tiên phân bổ cuộn gốc (1: Cuộn dở dang is_opened = true; 2: Cuộn nguyên theo FIFO)"
+    },
+    "is_locked": {
+      "type": "boolean",
+      "description": "Trạng thái khóa tạm thời ảo (Soft Lock) để giữ chỗ đơn hàng"
+    }
+  },
+  "required": [
+    "allocation_id", "request_id", "material_code", "lot_id", "original_width_m",
+    "remaining_length_before_m", "allocation_length_m", "remaining_length_after_m", "allocation_priority", "is_locked"
+  ]
+}

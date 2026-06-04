@@ -1,0 +1,50 @@
+{
+  "dealer_account": {
+    "dealer_id": "DEALER-001",
+    "dealer_name": "Lexus Trung Đông",
+    "address": "Số 1 Trần Duy Hưng, Cầu Giấy, Hà Nội",
+    "contact_phone": "0243.999.xxxx",
+    "email": "contact@lexustrungdong.com.vn",
+    "status": "ACTIVE",
+    "notes": "Đại lý Lexus chính hãng B2B VIP"
+  },
+  "end_customer": {
+    "customer_id": "CUST-20260603-098",
+    "customer_name": "Ngu*** Th* H**",
+    "phone": "0987.654.xxx",
+    "email": "nth***@gmail.com",
+    "source_dealer_id": "DEALER-001",
+    "created_from_request_id": "REQ-20260603-001",
+    "status": "ACTIVE"
+  },
+  "vehicle_profile": {
+    "vehicle_id": "VEH-20260603-777",
+    "vin_number": "JTJBF14Z6G2******",
+    "plate_number": "30K-999.xx",
+    "vehicle_model_code": "LEXUS_RX350",
+    "model_year": 2026,
+    "color": "Màu Trắng ngọc trai",
+    "customer_id": "CUST-20260603-098",
+    "dealer_id": "DEALER-001",
+    "created_from_request_id": "REQ-20260603-001",
+    "installation_history": [
+      {
+        "request_id": "REQ-20260603-001",
+        "job_item_id": "JOB_FILM_SIDE",
+        "material_code": "JB20",
+        "installed_date": "2026-06-03",
+        "technician_id": "KTV-003",
+        "status": "COMPLETED"
+      },
+      {
+        "request_id": "REQ-20260603-001",
+        "job_item_id": "JOB_FILM_REAR",
+        "material_code": "JB20",
+        "installed_date": "2026-06-03",
+        "technician_id": "KTV-003",
+        "status": "COMPLETED"
+      }
+    ],
+    "status": "ACTIVE"
+  }
+}

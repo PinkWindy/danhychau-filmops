@@ -1,0 +1,74 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "TechnicianConfirmation",
+  "description": "Schema JSON ghi nhận số liệu thực tế sử dụng và đo đạc phần dư của Kỹ thuật viên sau thi công",
+  "type": "object",
+  "properties": {
+    "confirmation_id": {
+      "type": "string",
+      "description": "Mã xác nhận hoàn thành thi công"
+    },
+    "request_id": {
+      "type": "string",
+      "description": "Mã phiếu yêu cầu thi công dán xe"
+    },
+    "technician_id": {
+      "type": "string",
+      "description": "Mã định danh Kỹ thuật viên thi công chính"
+    },
+    "completed_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Thời gian xác nhận hoàn thành dán xe"
+    },
+    "source_type": {
+      "type": "string",
+      "enum": ["LOT", "OFFCUT"],
+      "description": "Nguồn vật tư thực tế KTV đã lấy dán"
+    },
+    "source_id": {
+      "type": "string",
+      "description": "Mã LOT hoặc mã mảnh dư thực tế đã lấy sử dụng"
+    },
+    "actual_width_cm": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Chiều rộng khối dán cắt thực tế (cm)"
+    },
+    "actual_length_cm": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Chiều dài khối dán cắt thực tế (cm)"
+    },
+    "residual_width_cm": {
+      "type": "integer",
+      "description": "Chiều rộng phần phim thừa rơi ra sau khi cắt dán (cm)"
+    },
+    "residual_length_cm": {
+      "type": "integer",
+      "description": "Chiều dài phần phim thừa rơi ra sau khi cắt dán (cm)"
+    },
+    "residual_quality_status": {
+      "type": "string",
+      "enum": ["ACTIVE", "SCRAP", "DAMAGED"],
+      "description": "Trạng thái đánh giá chất lượng phần thừa của KTV (đạt để tái sử dụng làm offcut hay là scrap phế liệu)"
+    },
+    "residual_storage_location": {
+      "type": "string",
+      "description": "Kệ vị trí KTV đã cất mảnh dư mới (bắt buộc nhập nếu chất lượng đạt offcut)"
+    },
+    "is_adjusted_from_plan": {
+      "type": "boolean",
+      "description": "Đánh dấu xem KTV thực tế dán có cắt lệch/tách nhóm so với phương án đã duyệt ban đầu hay không"
+    },
+    "exception_reason": {
+      "type": "string",
+      "description": "Lý do KTV thay đổi cắt lệch/tách nhóm (bắt buộc nhập nếu is_adjusted_from_plan = true)"
+    }
+  },
+  "required": [
+    "confirmation_id", "request_id", "technician_id", "completed_at", "source_type",
+    "source_id", "actual_width_cm", "actual_length_cm", "residual_width_cm",
+    "residual_length_cm", "residual_quality_status", "is_adjusted_from_plan"
+  ]
+}

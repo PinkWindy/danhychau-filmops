@@ -1,0 +1,41 @@
+{
+  "image_file_id": "IMG-20260604-001",
+  "original_file_name": "phieu_lexus_rx350.jpg",
+  "file_type": "JPG",
+  "uploaded_by": "AD-001",
+  "uploaded_at": "2026-06-04T08:00:00Z",
+  "ocr_status": "COMPLETED",
+  "ocr_draft_id": "ODR-20260604-001",
+  "review_status": "NEEDS_REVIEW",
+  "extracted_fields": {
+    "dealer_name": "Lexus Trung Tâm Sài Gòn",
+    "dealer_legal_name": "Công Ty TNHH Ôtô Toyotsu Samco",
+    "request_no": "REQ-LEX-99120",
+    "request_date": "2026-06-04",
+    "requested_delivery_at": "2026-06-04T17:30:00+07:00",
+    "contract_no": "HD-LEX-8871",
+    "end_customer_name": "KH_MASKED_001",
+    "end_customer_address": "ADDRESS_MASKED_001",
+    "vehicle_model": "Lexus RX350",
+    "vin_number": "VIN_MASKED_RX350_001",
+    "job_items": [
+      {
+        "item_code": "JB20",
+        "item_description": "Dán phim cách nhiệt sườn trước và kính hậu"
+      }
+    ],
+    "note": "Kính sườn yêu cầu thi công thẩm mỹ cao, không bong bóng, không bong tróc."
+  },
+  "field_confidence": {
+    "dealer_name": 0.98,
+    "request_no": 0.96,
+    "request_date": 0.95,
+    "requested_delivery_at": 0.91,
+    "end_customer_name": 0.72,
+    "vehicle_model": 0.99,
+    "vin_number": 0.65,
+    "job_items": 0.92
+  },
+  "missing_fields": [],
+  "suggested_next_action": "ADMIN_REVIEW_REQUIRED_LOW_CONFIDENCE_FIELDS"
+}

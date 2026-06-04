@@ -1,0 +1,6 @@
+candidate_id,name_a,phone_a,name_b,phone_b,similarity_score,is_resolved,action_taken
+DEDUP_001,Nguyen Van An,0903123xxx,Nguyen Van Anh,0903123xxx,95,true,MERGED
+DEDUP_002,Tran Thi Binh,0909456xxx,Tran Thi Binh,0909999xxx,85,false,PENDING_REVIEW
+DEDUP_003,Le Hoang Nam,0913789xxx,Le H. Nam,0913789xxx,90,true,MERGED
+DEDUP_004,Dang Anh Tuan,0912112xxx,Dang Tuan,0912112xxx,88,true,MERGED
+DEDUP_005,Trinh Ngoc Mai,0933334xxx,Trinh Ngoc Mai,0933334yyy,90,false,PENDING_REVIEW

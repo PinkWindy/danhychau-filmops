@@ -1,0 +1,9 @@
+material_code,material_name,film_type,manufacturer,description,applicable_job_items,status
+T-TYPE,Phim PPF,PPF,Climax,PPF Trong,PPF_CLEAR_BODY,ACTIVE
+M-TYPE,Phim PPF,PPF,Climax,PPF Mờ,PPF_MATTE_BODY,ACTIVE
+PET-TYPE,Phim PPF,PPF,Climax,Cường lực kính lái,WINDSHIELD_PROTECTION,ACTIVE
+TPU-TYPE,Phim PPF,PPF,Climax,Cường lực kính lái,WINDSHIELD_PROTECTION,ACTIVE
+S-TYPE,Phim PPF,PPF,Climax,Sunroof,SUNROOF,ACTIVE
+RT40,Phim cách nhiệt,WINDOW_FILM,Konica,Kính lái,WINDSHIELD,ACTIVE
+JB20,Phim cách nhiệt,WINDOW_FILM,Konica,Kính hậu; Sườn trước; Sườn sau và tam giác; Sunroof,SIDE_REAR_SUNROOF,ACTIVE
+RS20,Phim cách nhiệt,WINDOW_FILM,Konica,Kính hậu; Sườn trước; Sườn sau và tam giác; Sunroof,SIDE_REAR_SUNROOF,ACTIVE

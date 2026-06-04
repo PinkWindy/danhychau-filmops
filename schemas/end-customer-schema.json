@@ -1,0 +1,42 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "EndCustomer",
+  "description": "Schema JSON xác thực hồ sơ khách lẻ / chủ xe dán phim",
+  "type": "object",
+  "properties": {
+    "customer_id": {
+      "type": "string",
+      "pattern": "^CUST_[0-9]+$",
+      "description": "Mã định danh duy nhất của chủ xe, bắt đầu bằng CUST_"
+    },
+    "customer_name": {
+      "type": "string",
+      "description": "Họ và tên khách hàng dán xe"
+    },
+    "phone": {
+      "type": "string",
+      "description": "Số điện thoại chủ xe dán"
+    },
+    "email": {
+      "type": "string",
+      "description": "Địa chỉ email khách hàng (có thể trống)"
+    },
+    "address": {
+      "type": "string",
+      "description": "Địa chỉ liên hệ khách hàng dán"
+    },
+    "source_dealer_id": {
+      "type": "string",
+      "description": "Mã đại lý giới thiệu khách hàng này (nếu có)"
+    },
+    "created_from_request_id": {
+      "type": "string",
+      "description": "Mã phiếu yêu cầu đầu tiên sinh ra hồ sơ khách hàng này"
+    },
+    "is_temp": {
+      "type": "boolean",
+      "description": "Cờ đánh dấu tài khoản tạm thời để phục vụ rà soát khử trùng lặp"
+    }
+  },
+  "required": ["customer_id", "customer_name", "phone", "is_temp"]
+}
