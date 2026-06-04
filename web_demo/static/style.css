@@ -671,6 +671,69 @@ body { font-family: var(--font); background: var(--bg-base); color: var(--text-p
   text-overflow: ellipsis;
 }
 
+/* Nút đóng modal — dễ bấm hơn */
+.btn.dyc-modal-x {
+  min-width: 40px;
+  min-height: 40px;
+  font-size: 18px;
+  border-radius: 10px;
+}
+
+/* Modal nhập lý do (Active/Inactive) */
+.dyc-reason-modal .dyc-reason-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+.dyc-reason-textarea {
+  width: 100%;
+  padding: 10px 12px;
+  font-size: 13px;
+  font-family: var(--font);
+  color: var(--text-primary);
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  resize: vertical;
+  min-height: 88px;
+}
+.dyc-reason-chk {
+  font-size: 12px;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  cursor: pointer;
+}
+.dyc-inline-row {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+}
+.dyc-inline-row > input.dyc-grow {
+  flex: 1;
+  min-width: 0;
+}
+.dyc-field .dyc-inline-row input.dyc-grow {
+  width: 100%;
+  min-width: 0;
+  padding: 10px 12px;
+  font-size: 13px;
+  font-family: var(--font);
+  color: var(--text-primary);
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  transition: var(--transition);
+}
+.dyc-field .dyc-inline-row input.dyc-grow:focus {
+  outline: none;
+  border-color: rgba(229, 57, 53, 0.45);
+  box-shadow: 0 0 0 2px rgba(229, 57, 53, 0.12);
+}
+
 /* ══════════════════════════════════════════════════
    FORM CHỈNH SỬA LUỒNG (WS EDIT FORM)
 ══════════════════════════════════════════════════ */

@@ -17,12 +17,32 @@ def build_full_address(
     ward: Optional[str],
     city: Optional[str],
 ) -> str:
-    parts = []
-    for p in (address_no, street, ward, city):
-        s = (p or "").strip()
-        if s:
-            parts.append(s)
-    return ", ".join(parts)
+    """
+    Nối địa chỉ đầy đủ (demo): thêm tiền tố Đường/Phường khi cần, tránh trùng từ khóa.
+    Dùng chung backend + gợi ý đồng bộ với static/app.js (buildFullAddress).
+    """
+    chunks: List[str] = []
+    an = (address_no or "").strip()
+    if an:
+        chunks.append(an)
+    st = (street or "").strip()
+    if st:
+        sl = st.lower()
+        if "đường" in sl:
+            chunks.append(st)
+        else:
+            chunks.append(f"Đường {st}")
+    w = (ward or "").strip()
+    if w:
+        wl = w.lower()
+        if any(k in wl for k in ("phường", "xã", "quận", "thị trấn")):
+            chunks.append(w)
+        else:
+            chunks.append(f"Phường {w}")
+    c = (city or "").strip()
+    if c:
+        chunks.append(c)
+    return ", ".join(chunks)
 
 
 def parse_size_wxl(s: Optional[str]) -> Tuple[Optional[float], Optional[float]]:

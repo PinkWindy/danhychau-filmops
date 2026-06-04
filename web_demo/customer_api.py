@@ -409,6 +409,8 @@ def register_customer_routes(app, get_db):
             d.full_address = str(data["full_address"]).strip()
         elif any(k in data for k in ("address_no", "street", "ward", "city")):
             d.full_address = build_full_address(d.address_no, d.street, d.ward, d.city) or d.full_address
+        if not (str(getattr(d, "full_address", None) or "").strip()):
+            d.full_address = build_full_address(d.address_no, d.street, d.ward, d.city) or ""
         d.updated_at = _now()
         after = {
             "dealer_name": d.dealer_name,
@@ -584,6 +586,8 @@ def register_customer_routes(app, get_db):
                 setattr(c, field, data[field])
         if any(k in data for k in ("address_no", "street", "ward", "city")) and not data.get("full_address"):
             c.full_address = build_full_address(c.address_no, c.street, c.ward, c.city) or c.full_address
+        if not (str(getattr(c, "full_address", None) or "").strip()):
+            c.full_address = build_full_address(c.address_no, c.street, c.ward, c.city) or ""
         c.updated_at = _now()
         after = {k: getattr(c, k, None) for k in before}
         _audit(

@@ -25,6 +25,175 @@ function _normSizeDisplay(n, sizeKey, wKey, lKey) {
   return '—';
 }
 
+/** Gợi ý địa bàn demo (không validate cứng). */
+const LOCATION_MASTER = {
+  'Thành phố Hồ Chí Minh': [
+    'Cầu Ông Lãnh', 'An Phú', 'Bến Nghé', 'Bến Thành', 'Tân Định', 'Thảo Điền', 'Bình Trưng',
+    'Phú Mỹ', 'Tân Phong', 'Linh Trung', 'Hiệp Bình', 'Bình Thọ', 'Quận 1', 'Quận 3', 'Quận 7',
+  ],
+  'TP. HCM': [
+    'Cầu Ông Lãnh', 'An Phú', 'Quận 1', 'Quận 3',
+  ],
+  'Hà Nội': [
+    'Hoàn Kiếm', 'Cửa Nam', 'Ba Đình', 'Giảng Võ', 'Đống Đa', 'Cầu Giấy',
+  ],
+};
+
+/** Đồng bộ logic với vehicle_norm_logic.build_full_address (Python). */
+function buildFullAddress(parts) {
+  const addressNo = String(parts.addressNo ?? '').trim();
+  const street = String(parts.street ?? '').trim();
+  const ward = String(parts.ward ?? '').trim();
+  const city = String(parts.city ?? '').trim();
+  const chunks = [];
+  if (addressNo) chunks.push(addressNo);
+  if (street) {
+    if (street.toLowerCase().includes('đường')) chunks.push(street);
+    else chunks.push(`Đường ${street}`);
+  }
+  if (ward) {
+    const wl = ward.toLowerCase();
+    if (['phường', 'xã', 'quận', 'thị trấn'].some((k) => wl.includes(k))) chunks.push(ward);
+    else chunks.push(`Phường ${ward}`);
+  }
+  if (city) chunks.push(city);
+  return chunks.join(', ');
+}
+
+function _ensureLocationDatalists() {
+  let dlCity = document.getElementById('dyc-city-datalist');
+  if (!dlCity) {
+    dlCity = document.createElement('datalist');
+    dlCity.id = 'dyc-city-datalist';
+    document.body.appendChild(dlCity);
+  }
+  dlCity.innerHTML = Object.keys(LOCATION_MASTER)
+    .map((c) => `<option value="${String(c).replace(/&/g, '&amp;').replace(/"/g, '&quot;')}"></option>`)
+    .join('');
+  let dlWard = document.getElementById('dyc-ward-datalist');
+  if (!dlWard) {
+    dlWard = document.createElement('datalist');
+    dlWard.id = 'dyc-ward-datalist';
+    document.body.appendChild(dlWard);
+  }
+  return { dlCity, dlWard };
+}
+
+function _fillWardDatalistForCity(cityVal) {
+  const { dlWard } = _ensureLocationDatalists();
+  const key = Object.keys(LOCATION_MASTER).find((k) => k.toLowerCase() === String(cityVal || '').trim().toLowerCase());
+  const wards = key ? LOCATION_MASTER[key] : [];
+  dlWard.innerHTML = wards
+    .map((w) => `<option value="${String(w).replace(/&/g, '&amp;').replace(/"/g, '&quot;')}"></option>`)
+    .join('');
+}
+
+/**
+ * Gắn gợi ý TP + Phường và auto full_address cho modal đại lý / KH.
+ * @param {string} prefix ví dụ 'ed-d' hoặc 'ed-c' → #prefix-ano, #prefix-st, ...
+ */
+function setupEditorAddress(prefix) {
+  _ensureLocationDatalists();
+  const ano = document.getElementById(`${prefix}-ano`);
+  const street = document.getElementById(`${prefix}-st`);
+  const ward = document.getElementById(`${prefix}-ward`);
+  const city = document.getElementById(`${prefix}-city`);
+  const full = document.getElementById(`${prefix}-full`);
+  const rebuild = document.getElementById(`${prefix}-rebuild-full`);
+  if (!ano || !full) return;
+  const state = { manual: false };
+  const recompute = () => {
+    if (state.manual) return;
+    full.value = buildFullAddress({
+      addressNo: ano.value,
+      street: street ? street.value : '',
+      ward: ward ? ward.value : '',
+      city: city ? city.value : '',
+    });
+  };
+  const onPart = () => {
+    state.manual = false;
+    recompute();
+  };
+  [ano, street, ward, city].forEach((el) => {
+    if (!el) return;
+    el.addEventListener('input', () => {
+      if (el === city) _fillWardDatalistForCity(el.value);
+      onPart();
+    });
+  });
+  full.addEventListener('input', () => {
+    state.manual = true;
+  });
+  rebuild?.addEventListener('click', () => {
+    state.manual = false;
+    recompute();
+  });
+  if (city) city.setAttribute('list', 'dyc-city-datalist');
+  if (ward) ward.setAttribute('list', 'dyc-ward-datalist');
+  _fillWardDatalistForCity(city ? city.value : '');
+}
+
+window._quickFormDirty = false;
+const _QUICK_DIRTY_MODES = ['edit-norm', 'create-norm', 'edit-customer', 'edit-dealer'];
+
+function _markQuickDirty() {
+  window._quickFormDirty = true;
+}
+
+function _tryCloseQuickModal() {
+  const ov = document.getElementById('modal-quick-overlay');
+  if (ov.style.display !== 'flex') return;
+  if (window._quickFormDirty && _QUICK_DIRTY_MODES.includes(window._mcQuickMode)) {
+    if (!window.confirm('Bạn có thay đổi chưa lưu. Đóng cửa sổ?')) return;
+  }
+  _closeQuickModal();
+}
+
+let _reasonDialogResolve = null;
+
+/** @returns {Promise<{reason:string,admin_override?:boolean}|null>} */
+function openReasonModal(title, opts) {
+  opts = opts || {};
+  return new Promise((resolve) => {
+    _reasonDialogResolve = resolve;
+    const rov = document.getElementById('modal-reason-overlay');
+    document.getElementById('modal-reason-title').textContent = title || 'Nhập lý do';
+    const ta = document.getElementById('modal-reason-input');
+    ta.value = '';
+    document.getElementById('modal-reason-admin-wrap').style.display = opts.showAdminOverride ? 'block' : 'none';
+    document.getElementById('modal-reason-admin-ov').checked = false;
+    rov.style.display = 'flex';
+    rov.setAttribute('aria-hidden', 'false');
+    setTimeout(() => ta.focus(), 80);
+  });
+}
+
+function _finishReasonModal(payload) {
+  const rov = document.getElementById('modal-reason-overlay');
+  rov.style.display = 'none';
+  rov.setAttribute('aria-hidden', 'true');
+  const fn = _reasonDialogResolve;
+  _reasonDialogResolve = null;
+  if (fn) fn(payload);
+}
+
+function _wireReasonModalOnce() {
+  if (window._reasonModalWired) return;
+  window._reasonModalWired = true;
+  document.getElementById('modal-reason-ok')?.addEventListener('click', () => {
+    const reason = (document.getElementById('modal-reason-input').value || '').trim();
+    if (!reason) {
+      toast('warning', 'Thiếu lý do', 'Vui lòng nhập lý do trước khi xác nhận.');
+      return;
+    }
+    const admin_override = document.getElementById('modal-reason-admin-ov')?.checked || false;
+    _finishReasonModal({ reason, admin_override });
+  });
+  document.getElementById('modal-reason-cancel')?.addEventListener('click', () => _finishReasonModal(null));
+  document.getElementById('btn-x-modal-reason')?.addEventListener('click', () => _finishReasonModal(null));
+}
+
 // ─── DANH MỤC THI CÔNG ────────────────────────────────────────────────────────
 const HANG_MUC_PPF = [
   { id: 'HOOD',          label: 'Nắp ca-pô' },
@@ -397,10 +566,10 @@ async function taiKhachHang() {
             <td>${_normSizeDisplay(n, 'triangle_size', 'triangle_width_cm', 'triangle_length_cm')}</td>
             <td>${_esc(n.status)}</td>
             <td style="white-space:nowrap">
-              <button type="button" class="btn btn-outline btn-sm" onclick="moFormNorm(${JSON.stringify(n.norm_id)})">Sửa</button>
+              <button type="button" class="btn btn-outline btn-sm btn-norm-edit" data-norm-id="${_esc(n.norm_id)}">Sửa</button>
               ${n.status === 'ACTIVE'
-                ? `<button type="button" class="btn btn-outline btn-sm" onclick="moToggleNorm(${JSON.stringify(n.norm_id)},'deactivate')">Off</button>`
-                : `<button type="button" class="btn btn-outline btn-sm" onclick="moToggleNorm(${JSON.stringify(n.norm_id)},'activate')">On</button>`}
+                ? `<button type="button" class="btn btn-outline btn-sm btn-norm-toggle" data-norm-id="${_esc(n.norm_id)}" data-norm-act="deactivate">Inactive</button>`
+                : `<button type="button" class="btn btn-outline btn-sm btn-norm-toggle" data-norm-id="${_esc(n.norm_id)}" data-norm-act="activate">Active</button>`}
             </td></tr>`).join('')}
           </tbody></table></div>
         </div>`;
@@ -437,6 +606,18 @@ window.moDrawerVehicle = async function(id) {
 window._custVehSub = window._custVehSub || 'list';
 
 document.getElementById('tab-customers')?.addEventListener('click', (ev) => {
+  const edit = ev.target.closest('.btn-norm-edit');
+  if (edit && ev.target.closest('#cust-pane-vehicles')) {
+    ev.preventDefault();
+    window.moFormNorm(edit.getAttribute('data-norm-id') || '');
+    return;
+  }
+  const tg = ev.target.closest('.btn-norm-toggle');
+  if (tg && ev.target.closest('#cust-pane-vehicles')) {
+    ev.preventDefault();
+    window.moToggleNorm(tg.getAttribute('data-norm-id') || '', tg.getAttribute('data-norm-act') || 'deactivate');
+    return;
+  }
   const b = ev.target.closest('.veh-sub');
   if (!b) return;
   window._custVehSub = b.dataset.vehsub || 'list';
@@ -445,9 +626,24 @@ document.getElementById('tab-customers')?.addEventListener('click', (ev) => {
 
 function _closeQuickModal() {
   document.getElementById('modal-quick-overlay').style.display = 'none';
+  window._quickFormDirty = false;
   _mcQuickMode = null;
 }
-document.getElementById('btn-x-modal-quick')?.addEventListener('click', _closeQuickModal);
+document.getElementById('btn-x-modal-quick')?.addEventListener('click', () => _tryCloseQuickModal());
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  const rov = document.getElementById('modal-reason-overlay');
+  if (rov && rov.style.display === 'flex') {
+    e.preventDefault();
+    _finishReasonModal(null);
+    return;
+  }
+  const qov = document.getElementById('modal-quick-overlay');
+  if (qov && qov.style.display === 'flex') {
+    e.preventDefault();
+    _tryCloseQuickModal();
+  }
+});
 document.getElementById('btn-x-drawer')?.addEventListener('click', () => {
   document.getElementById('modal-drawer-overlay').style.display = 'none';
 });
@@ -459,63 +655,92 @@ document.getElementById('btn-x-ws-edit')?.addEventListener('click', () => {
 });
 
 window.moToggleDealer = async function(id, act) {
-  const reason = prompt('Lý do (bắt buộc):');
-  if (!reason || !reason.trim()) { toast('warning', 'Thiếu lý do', ''); return; }
+  _wireReasonModalOnce();
+  const title = act === 'activate' ? 'Kích hoạt đại lý' : 'Vô hiệu hóa đại lý';
+  const res = await openReasonModal(`${title} — ${id}`, { showAdminOverride: true });
+  if (!res || !String(res.reason || '').trim()) return;
   const path = act === 'activate' ? 'activate' : 'deactivate';
-  const ov = prompt('Có đơn mở chưa đóng? Nhập YES nếu cần admin_override:') === 'YES';
-  const r = await fetch(`/api/dealers/${encodeURIComponent(id)}/${path}`, {
+  const url = `/api/dealers/${encodeURIComponent(id)}/${path}`;
+  const r = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ reason: reason.trim(), admin_override: ov, updated_by: 'WEB' }),
+    body: JSON.stringify({ reason: res.reason.trim(), admin_override: !!res.admin_override, updated_by: 'WEB' }),
   });
   const data = await r.json().catch(() => ({}));
-  if (!r.ok) { toast('error', 'Lỗi', data.detail || JSON.stringify(data)); return; }
-  toast('success', 'Đại lý', 'Đã cập nhật');
+  if (!r.ok) {
+    console.error('[moToggleDealer]', url, r.status, data);
+    toast('error', 'Lỗi cập nhật đại lý', data.detail || JSON.stringify(data));
+    return;
+  }
+  toast('success', 'Đại lý', 'Đã cập nhật trạng thái');
   taiKhachHang();
 };
 window.moToggleCustomer = async function(id, act) {
-  const reason = prompt('Lý do (bắt buộc):');
-  if (!reason || !reason.trim()) { toast('warning', 'Thiếu lý do', ''); return; }
-  const ov = prompt('admin_override? YES nếu bắt buộc:') === 'YES';
+  _wireReasonModalOnce();
+  const title = act === 'activate' ? 'Kích hoạt khách hàng' : 'Vô hiệu hóa khách hàng';
+  const res = await openReasonModal(`${title} — ${id}`, { showAdminOverride: true });
+  if (!res || !String(res.reason || '').trim()) return;
   const path = act === 'activate' ? 'activate' : 'deactivate';
-  const r = await fetch(`/api/end-customers/${encodeURIComponent(id)}/${path}`, {
+  const url = `/api/end-customers/${encodeURIComponent(id)}/${path}`;
+  const r = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ reason: reason.trim(), admin_override: ov, updated_by: 'WEB' }),
+    body: JSON.stringify({ reason: res.reason.trim(), admin_override: !!res.admin_override, updated_by: 'WEB' }),
   });
   const data = await r.json().catch(() => ({}));
-  if (!r.ok) { toast('error', 'Lỗi', data.detail || JSON.stringify(data)); return; }
-  toast('success', 'Khách hàng', 'Đã cập nhật');
+  if (!r.ok) {
+    console.error('[moToggleCustomer]', url, r.status, data);
+    toast('error', 'Lỗi cập nhật KH', data.detail || JSON.stringify(data));
+    return;
+  }
+  toast('success', 'Khách hàng', 'Đã cập nhật trạng thái');
   taiKhachHang();
 };
 window.moToggleVehicle = async function(id, act) {
-  const reason = prompt('Lý do (bắt buộc):');
-  if (!reason || !reason.trim()) return;
+  _wireReasonModalOnce();
+  const title = act === 'activate' ? 'Kích hoạt xe' : 'Vô hiệu hóa xe';
+  const res = await openReasonModal(`${title} — ${id}`, { showAdminOverride: false });
+  if (!res || !String(res.reason || '').trim()) return;
   const path = act === 'activate' ? 'activate' : 'deactivate';
-  const r = await fetch(`/api/vehicles/${encodeURIComponent(id)}/${path}`, {
+  const url = `/api/vehicles/${encodeURIComponent(id)}/${path}`;
+  const r = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ reason: reason.trim(), updated_by: 'WEB' }),
+    body: JSON.stringify({ reason: res.reason.trim(), updated_by: 'WEB' }),
   });
-  if (!r.ok) { toast('error', 'Lỗi', await r.text()); return; }
+  const txt = await r.text();
+  if (!r.ok) {
+    console.error('[moToggleVehicle]', url, r.status, txt);
+    toast('error', 'Lỗi xe', txt);
+    return;
+  }
   toast('success', 'Xe', 'Đã cập nhật');
   taiKhachHang();
 };
 window.moToggleNorm = async function(normId, act) {
-  const reason = prompt('Lý do (bắt buộc):');
-  if (!reason || !reason.trim()) return;
+  _wireReasonModalOnce();
+  const title = act === 'activate' ? 'Kích hoạt định mức' : 'Vô hiệu hóa định mức';
+  const res = await openReasonModal(`${title} — ${normId}`, { showAdminOverride: false });
+  if (!res || !String(res.reason || '').trim()) return;
   const path = act === 'activate' ? 'activate' : 'deactivate';
-  const r = await fetch(`/api/vehicle-norms/${encodeURIComponent(normId)}/${path}`, {
+  const url = `/api/vehicle-norms/${encodeURIComponent(normId)}/${path}`;
+  const r = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ reason: reason.trim(), updated_by: 'WEB' }),
+    body: JSON.stringify({ reason: res.reason.trim(), updated_by: 'WEB' }),
   });
-  if (!r.ok) { toast('error', 'Lỗi', await r.text()); return; }
-  toast('success', 'Định mức', 'Đã cập nhật');
+  const txt = await r.text();
+  if (!r.ok) {
+    console.error('[moToggleNorm]', url, r.status, txt);
+    toast('error', 'Lỗi định mức', txt);
+    return;
+  }
+  toast('success', 'Định mức', 'Đã cập nhật trạng thái');
   taiKhachHang();
 };
 
 window.moFormDealer = async function(id) {
+  _wireReasonModalOnce();
   const rows = await fetch('/api/dealers').then(r => r.json());
   const d = rows.find(x => x.dealer_id === id) || {};
   const reasonBox = id
@@ -532,22 +757,29 @@ window.moFormDealer = async function(id) {
     <div class="dyc-field"><label>SĐT</label><input id="ed-d-phone" value="${_esc(d.phone || '')}" /></div>
   </div>
   <div class="dyc-form-row-2">
-    <div class="dyc-field"><label>Địa chỉ (số nhà)</label><input id="ed-d-ano" value="${_esc(d.address_no || '')}" /></div>
+    <div class="dyc-field"><label>Số nhà / địa chỉ ngắn</label><input id="ed-d-ano" value="${_esc(d.address_no || '')}" /></div>
     <div class="dyc-field"><label>Đường</label><input id="ed-d-st" value="${_esc(d.street || '')}" /></div>
   </div>
   <div class="dyc-form-row-2">
-    <div class="dyc-field"><label>Phường</label><input id="ed-d-ward" value="${_esc(d.ward || '')}" /></div>
-    <div class="dyc-field"><label>Thành phố</label><input id="ed-d-city" value="${_esc(d.city || '')}" /></div>
+    <div class="dyc-field"><label>Phường / xã</label><input id="ed-d-ward" value="${_esc(d.ward || '')}" autocomplete="off" /></div>
+    <div class="dyc-field"><label>Tỉnh / thành phố</label><input id="ed-d-city" value="${_esc(d.city || '')}" autocomplete="off" /></div>
   </div>
-  <div class="dyc-field"><label>Địa chỉ đầy đủ</label><input id="ed-d-full" value="${_esc(d.full_address || '')}" /></div>
+  <div class="dyc-field"><label>Địa chỉ đầy đủ</label>
+    <div class="dyc-inline-row">
+      <input id="ed-d-full" class="dyc-grow" value="${_esc(d.full_address || '')}" />
+      <button type="button" class="btn btn-outline btn-sm" id="ed-d-rebuild-full" style="white-space:nowrap">Tự tạo lại</button>
+    </div>
+  </div>
   <div class="dyc-field"><label>Mã AMIS</label><input id="ed-d-amis" value="${_esc(d.amis_customer_code || '')}" /></div>
 </div>`,
     { wide: true },
   );
+  setupEditorAddress('ed-d');
   window._editDealerId = id;
   _mcQuickMode = 'edit-dealer';
 };
 window.moFormCustomer = async function(id) {
+  _wireReasonModalOnce();
   const rows = await fetch('/api/end-customers').then(r => r.json());
   const c = rows.find(x => x.customer_id === id) || {};
   _openQuick(
@@ -565,14 +797,20 @@ window.moFormCustomer = async function(id) {
     <div class="dyc-field"><label>Đường</label><input id="ed-c-st" value="${_esc(c.street || '')}" /></div>
   </div>
   <div class="dyc-form-row-2">
-    <div class="dyc-field"><label>Phường / xã</label><input id="ed-c-ward" value="${_esc(c.ward || '')}" /></div>
-    <div class="dyc-field"><label>Tỉnh / thành phố</label><input id="ed-c-city" value="${_esc(c.city || '')}" /></div>
+    <div class="dyc-field"><label>Phường / xã</label><input id="ed-c-ward" value="${_esc(c.ward || '')}" autocomplete="off" /></div>
+    <div class="dyc-field"><label>Tỉnh / thành phố</label><input id="ed-c-city" value="${_esc(c.city || '')}" autocomplete="off" /></div>
   </div>
-  <div class="dyc-field"><label>Địa chỉ đầy đủ</label><input id="ed-c-full" value="${_esc(c.full_address || '')}" /></div>
+  <div class="dyc-field"><label>Địa chỉ đầy đủ</label>
+    <div class="dyc-inline-row">
+      <input id="ed-c-full" class="dyc-grow" value="${_esc(c.full_address || '')}" />
+      <button type="button" class="btn btn-outline btn-sm" id="ed-c-rebuild-full" style="white-space:nowrap">Tự tạo lại</button>
+    </div>
+  </div>
   <div class="dyc-field"><label>Mã AMIS</label><input id="ed-c-amis" value="${_esc(c.amis_customer_code || '')}" /></div>
 </div>`,
     { wide: true },
   );
+  setupEditorAddress('ed-c');
   window._editCustomerId = id;
   _mcQuickMode = 'edit-customer';
 };
@@ -582,7 +820,7 @@ window.moFormNorm = function(normId) {
     ? ''
     : `<div class="dyc-field"><label>Lý do sửa<span class="req">*</span></label><input id="ed-n-reason" placeholder="Bắt buộc khi sửa định mức" autocomplete="off" /></div>`;
   _openQuick(
-    isNew ? 'Thêm định mức' : 'Sửa định mức',
+    isNew ? 'Thêm định mức phim' : 'Sửa định mức phim',
     `
 <div class="dyc-modal-form">
   ${reasonBlock}
@@ -607,26 +845,43 @@ window.moFormNorm = function(normId) {
     <div class="dyc-field"><label>Sườn sau (riêng)</label><input id="ed-n-rside" placeholder="WxL nếu tách khỏi SST" /></div>
   </div>
   <div class="dyc-field"><label>Tam giác (riêng)</label><input id="ed-n-tri" placeholder="WxL nếu tách" /></div>
+  <div class="dyc-form-row-2">
+    <div class="dyc-field"><label>Trạng thái</label><select id="ed-n-status"><option value="ACTIVE">ACTIVE</option><option value="INACTIVE">INACTIVE</option></select></div>
+    <div class="dyc-field"><label>Ghi chú</label><input id="ed-n-note" placeholder="Tùy chọn" /></div>
+  </div>
 </div>`,
     { wide: true },
   );
   window._editNormId = normId;
   _mcQuickMode = isNew ? 'create-norm' : 'edit-norm';
   if (!isNew) {
-    fetch('/api/vehicle-norms').then(r => r.json()).then(list => {
-      const n = list.find(x => x.norm_id === normId);
-      if (!n) return;
-      document.getElementById('ed-n-ft').value = n.film_type || '';
-      document.getElementById('ed-n-vc').value = n.vehicle_model_code || '';
-      document.getElementById('ed-n-myr').value = n.model_year_range || '';
-      document.getElementById('ed-n-ws').value = n.windshield_size || '';
-      document.getElementById('ed-n-rs').value = n.rear_window_size || '';
-      document.getElementById('ed-n-fs').value = n.front_side_size || '';
-      document.getElementById('ed-n-sst').value = n.rear_side_triangle_size || '';
-      document.getElementById('ed-n-sun').value = n.sunroof_size || '';
-      document.getElementById('ed-n-rside').value = n.rear_side_size || '';
-      document.getElementById('ed-n-tri').value = n.triangle_size || '';
-    });
+    fetch('/api/vehicle-norms')
+      .then((r) => r.json())
+      .then((list) => {
+        const n = list.find((x) => x.norm_id === normId);
+        if (!n) {
+          toast('warning', 'Định mức', 'Không tìm thấy norm_id trong danh sách.');
+          return;
+        }
+        document.getElementById('ed-n-ft').value = n.film_type || '';
+        document.getElementById('ed-n-vc').value = n.vehicle_model_code || '';
+        document.getElementById('ed-n-myr').value = n.model_year_range || '';
+        document.getElementById('ed-n-ws').value = n.windshield_size || '';
+        document.getElementById('ed-n-rs').value = n.rear_window_size || '';
+        document.getElementById('ed-n-fs').value = n.front_side_size || '';
+        document.getElementById('ed-n-sst').value = n.rear_side_triangle_size || '';
+        document.getElementById('ed-n-sun').value = n.sunroof_size || '';
+        document.getElementById('ed-n-rside').value = n.rear_side_size || '';
+        document.getElementById('ed-n-tri').value = n.triangle_size || '';
+        const st = document.getElementById('ed-n-status');
+        if (st) st.value = n.status === 'INACTIVE' ? 'INACTIVE' : 'ACTIVE';
+        const nt = document.getElementById('ed-n-note');
+        if (nt) nt.value = n.note || '';
+      })
+      .catch((err) => {
+        console.error('[moFormNorm] GET /api/vehicle-norms', err);
+        toast('error', 'Định mức', 'Không tải được dữ liệu.');
+      });
   }
 };
 
@@ -635,14 +890,17 @@ function _openQuick(title, html, opts) {
   const shell = document.getElementById('modal-quick-shell');
   if (shell) shell.classList.toggle('dyc-modal-wide', !!opts.wide);
   document.getElementById('modal-quick-title').textContent = title;
-  document.getElementById('modal-quick-body').innerHTML = html;
+  const body = document.getElementById('modal-quick-body');
+  body.innerHTML = html;
+  window._quickFormDirty = false;
+  body.querySelectorAll('input, textarea, select').forEach((el) => {
+    el.addEventListener('input', _markQuickDirty);
+    el.addEventListener('change', _markQuickDirty);
+  });
   document.getElementById('modal-quick-overlay').style.display = 'flex';
 }
 
-document.getElementById('modal-quick-cancel')?.addEventListener('click', () => {
-  document.getElementById('modal-quick-overlay').style.display = 'none';
-  _mcQuickMode = null;
-});
+document.getElementById('modal-quick-cancel')?.addEventListener('click', () => _tryCloseQuickModal());
 document.getElementById('drawer-close')?.addEventListener('click', () => {
   document.getElementById('modal-drawer-overlay').style.display = 'none';
 });
@@ -668,7 +926,11 @@ document.getElementById('modal-quick-ok')?.addEventListener('click', async () =>
         updated_by: actor,
       };
       const r = await fetch(`/api/dealers/${encodeURIComponent(id)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-      if (!r.ok) throw new Error(await r.text());
+      const dtxt = await r.text();
+      if (!r.ok) {
+        console.error('[edit-dealer] PUT /api/dealers/', id, r.status, dtxt);
+        throw new Error(dtxt);
+      }
       toast('success', 'Đại lý', 'Đã lưu');
     } else if (_mcQuickMode === 'edit-customer') {
       const id = window._editCustomerId;
@@ -688,7 +950,11 @@ document.getElementById('modal-quick-ok')?.addEventListener('click', async () =>
         updated_by: actor,
       };
       const r = await fetch(`/api/end-customers/${encodeURIComponent(id)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-      if (!r.ok) throw new Error(await r.text());
+      const ctxt = await r.text();
+      if (!r.ok) {
+        console.error('[edit-customer] PUT /api/end-customers/', id, r.status, ctxt);
+        throw new Error(ctxt);
+      }
       toast('success', 'KH', 'Đã lưu');
     } else if (_mcQuickMode === 'create-norm') {
       const body = {
@@ -703,10 +969,17 @@ document.getElementById('modal-quick-ok')?.addEventListener('click', async () =>
         sunroof_size: document.getElementById('ed-n-sun').value.trim(),
         rear_side_size: document.getElementById('ed-n-rside').value.trim(),
         triangle_size: document.getElementById('ed-n-tri').value.trim(),
+        status: (document.getElementById('ed-n-status')?.value || 'ACTIVE').trim(),
+        note: document.getElementById('ed-n-note')?.value.trim() || null,
         created_by: actor,
       };
-      const r = await fetch('/api/vehicle-norms', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-      if (!r.ok) throw new Error(await r.text());
+      const url = '/api/vehicle-norms';
+      const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const txt = await r.text();
+      if (!r.ok) {
+        console.error('[create-norm]', url, r.status, txt);
+        throw new Error(txt);
+      }
       toast('success', 'Định mức', 'Đã tạo');
     } else if (_mcQuickMode === 'edit-norm') {
       const nid = document.getElementById('ed-n-id').value.trim();
@@ -723,11 +996,18 @@ document.getElementById('modal-quick-ok')?.addEventListener('click', async () =>
         sunroof_size: document.getElementById('ed-n-sun').value.trim(),
         rear_side_size: document.getElementById('ed-n-rside').value.trim(),
         triangle_size: document.getElementById('ed-n-tri').value.trim(),
+        status: (document.getElementById('ed-n-status')?.value || 'ACTIVE').trim(),
+        note: document.getElementById('ed-n-note')?.value.trim() || null,
         reason,
         updated_by: actor,
       };
-      const r = await fetch(`/api/vehicle-norms/${encodeURIComponent(nid)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-      if (!r.ok) throw new Error(await r.text());
+      const url = `/api/vehicle-norms/${encodeURIComponent(nid)}`;
+      const r = await fetch(url, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const txt = await r.text();
+      if (!r.ok) {
+        console.error('[edit-norm]', url, r.status, txt);
+        throw new Error(txt);
+      }
       toast('success', 'Định mức', 'Đã lưu');
     } else if (_mcQuickMode === 'dealer') {
       const body = {
@@ -777,11 +1057,13 @@ document.getElementById('modal-quick-ok')?.addEventListener('click', async () =>
       document.getElementById('mc-veh-select').value = body.vehicle_id;
     }
     const doneMode = _mcQuickMode;
-    document.getElementById('modal-quick-overlay').style.display = 'none';
-    _mcQuickMode = null;
+    _closeQuickModal();
     if (['edit-dealer', 'edit-customer', 'create-norm', 'edit-norm'].includes(doneMode)) taiKhachHang();
     else taiTaoDonTay();
-  } catch (e) { toast('error', 'Lỗi lưu', e.message); }
+  } catch (e) {
+    console.error('[modal-quick-ok]', e);
+    toast('error', 'Lỗi lưu', e.message || String(e));
+  }
 });
 
 document.getElementById('mc-btn-quick-dealer')?.addEventListener('click', () => {
@@ -2681,4 +2963,5 @@ document.addEventListener('DOMContentLoaded', () => {
   taiTongQuan();
   taiThongBao();
   setInterval(taiThongBao, 30000);
+  _wireReasonModalOnce();
 });

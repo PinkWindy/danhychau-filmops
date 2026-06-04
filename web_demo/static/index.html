@@ -856,12 +856,35 @@
       <i class="fa-solid fa-bolt"></i>
       <div><h3 id="modal-quick-title">Tạo nhanh</h3><p class="muted" style="font-size:12px" id="modal-quick-sub"></p></div>
       </div>
-      <button type="button" class="btn btn-icon btn-sm" id="btn-x-modal-quick" title="Đóng" aria-label="Đóng"><i class="fa-solid fa-xmark"></i></button>
+      <button type="button" class="btn btn-icon btn-sm dyc-modal-x" id="btn-x-modal-quick" title="Đóng" aria-label="Đóng"><i class="fa-solid fa-xmark"></i></button>
     </div>
     <div id="modal-quick-body" class="dyc-modal-body"></div>
     <div class="demo-modal-footer">
       <button type="button" class="btn btn-outline" id="modal-quick-cancel">Hủy</button>
       <button type="button" class="btn btn-primary" id="modal-quick-ok">Lưu</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-reason-overlay" style="display:none" aria-hidden="true">
+  <div class="demo-modal dyc-reason-modal" style="max-width:440px">
+    <div class="demo-modal-header" style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
+      <div style="flex:1;min-width:0">
+        <h3 id="modal-reason-title" style="font-size:16px">Nhập lý do</h3>
+        <p class="muted" style="font-size:11px;margin-top:4px">Bắt buộc cho thao tác kiểm toán / trạng thái.</p>
+      </div>
+      <button type="button" class="btn btn-icon btn-sm dyc-modal-x" id="btn-x-modal-reason" title="Đóng" aria-label="Đóng"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    <div style="padding:0 22px 16px">
+      <label class="dyc-reason-label" for="modal-reason-input">Lý do</label>
+      <textarea id="modal-reason-input" class="dyc-reason-textarea" rows="4" placeholder="Nhập lý do..."></textarea>
+      <div id="modal-reason-admin-wrap" style="display:none;margin-top:10px">
+        <label class="dyc-reason-chk"><input type="checkbox" id="modal-reason-admin-ov" /> Có đơn mở chưa đóng — bật admin override (chỉ khi thật sự cần)</label>
+      </div>
+    </div>
+    <div class="demo-modal-footer">
+      <button type="button" class="btn btn-outline" id="modal-reason-cancel">Hủy</button>
+      <button type="button" class="btn btn-primary" id="modal-reason-ok">Xác nhận</button>
     </div>
   </div>
 </div>
