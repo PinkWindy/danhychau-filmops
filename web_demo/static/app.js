@@ -726,6 +726,17 @@ function _wfJobLabelVi(ji) {
   return m[ji] || ji || '—';
 }
 
+/** Màn hình 1 — duyệt mã phim: đủ hạng mục + checkbox (mặc định tick theo nghiệp vụ). */
+const WF_MATERIAL_APPROVE_SCREEN1_JOBS = [
+  { job_item: 'WINDSHIELD', label: 'Kính lái', defaultOn: true },
+  { job_item: 'REAR_WINDOW', label: 'Kính hậu', defaultOn: true },
+  { job_item: 'FRONT_SIDE', label: 'Sườn trước', defaultOn: true },
+  { job_item: 'REAR_SIDE_TRIANGLE', label: 'Sườn sau và Tam giác', defaultOn: true },
+  { job_item: 'SUNROOF', label: 'Kính trời', defaultOn: true },
+  { job_item: 'REAR_SIDE', label: 'Sườn sau', defaultOn: false },
+  { job_item: 'TRIANGLE', label: 'Tam giác', defaultOn: false },
+];
+
 /** HTML tổng hợp gộp khổ (roll_cut_summary) từ API wf_allocation */
 function wfRollCutSummaryHtml(wfa) {
   if (!wfa || !wfa.roll_cut_summary) return '';
@@ -3088,36 +3099,47 @@ window.moModalDuyetMaPhimWF = async function (wsId) {
     }
   }
   if (!Array.isArray(plan)) plan = [];
+  const planBy = {};
+  for (const p of plan) {
+    if (p && p.job_item) planBy[p.job_item] = { ...p };
+  }
   document.getElementById('wf-material-approve-modal')?.remove();
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
   overlay.id = 'wf-material-approve-modal';
   overlay.style.display = 'flex';
-  const rows = plan
-    .map((p, i) => {
-      const ji = p.job_item || '';
-      const mc = (p.material_code || 'JB20').trim();
-      const opts = LOAI_PHIM_WF.map(
-        (o) => `<option value="${o.id}" ${o.id === mc ? 'selected' : ''}>${_esc(o.label)}</option>`,
-      ).join('');
-      return `<tr><td>${_esc(_wfJobLabelVi(ji))}</td><td><code>${_esc(ji)}</code></td><td><select class="field-input" id="wf-appr-mc-${i}" style="min-width:200px">${opts}</select></td></tr>`;
-    })
-    .join('');
+  const rows = WF_MATERIAL_APPROVE_SCREEN1_JOBS.map((opt) => {
+    const ji = opt.job_item;
+    const p = planBy[ji] || {};
+    const mc = (p.material_code || 'JB20').trim();
+    const chk = opt.defaultOn ? ' checked' : '';
+    const selDis = opt.defaultOn ? '' : ' disabled';
+    const opts = LOAI_PHIM_WF.map(
+      (o) => `<option value="${o.id}" ${o.id === mc ? 'selected' : ''}>${_esc(o.label)}</option>`,
+    ).join('');
+    return `<tr>
+      <td style="text-align:center;vertical-align:middle"><input type="checkbox" class="wf-appr-chk" id="wf-appr-chk-${ji}" data-ji="${ji}"${chk}></td>
+      <td>${_esc(opt.label)}</td>
+      <td><code>${_esc(ji)}</code></td>
+      <td><select class="field-input wf-appr-mc-sel" id="wf-appr-mc-${ji}" style="min-width:200px"${selDis}>${opts}</select></td>
+    </tr>`;
+  }).join('');
   overlay.innerHTML = `
-    <div class="demo-modal" style="max-width:580px">
+    <div class="demo-modal" style="max-width:640px">
       <div class="demo-modal-header">
         <i class="fa-solid fa-film" style="color:var(--blue-light)"></i>
         <div>
           <h3>Duyệt mã phim theo hạng mục</h3>
-          <p style="font-size:12px;color:var(--text-secondary);margin-top:4px">Xác nhận loại phim cho từng kính. Sau khi lưu, hệ thống hiển thị chi tiết SL, LOT gợi ý, kích thước và gộp khổ — KTV chỉnh LOT rồi bấm Chốt phân bổ.</p>
+          <p style="font-size:12px;color:var(--text-secondary);margin-top:4px">Tick chọn các kính/sườn cần thi công phim, chọn mã phim từng hạng mục. Sau khi lưu, hệ thống hiển thị chi tiết SL, LOT gợi ý, kích thước và gộp khổ — KTV chỉnh LOT rồi bấm Chốt phân bổ.</p>
         </div>
       </div>
       <div style="padding:16px 20px">
-        ${
-          plan.length
-            ? `<table class="data-table" style="font-size:12px"><thead><tr><th>Hạng mục</th><th>Mã</th><th>Mã phim thi công</th></tr></thead><tbody>${rows}</tbody></table>`
-            : '<p class="muted">Chưa có kế hoạch vật tư (material_plan). Không thể duyệt — kiểm tra lại đơn / định mức.</p>'
-        }
+        <table class="data-table" style="font-size:12px">
+          <thead>
+            <tr><th style="width:44px">Chọn</th><th>Hạng mục</th><th>Mã</th><th>Mã phim thi công</th></tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
         <div class="field-group" style="margin-top:14px">
           <label>Lý do / xác nhận <span style="color:var(--red-light)">*</span></label>
           <textarea id="wf-appr-reason" class="field-input" rows="2" placeholder="VD: Đồng ý RT40 kính lái, JB20 các kính còn lại theo đề xuất…"></textarea>
@@ -3125,10 +3147,17 @@ window.moModalDuyetMaPhimWF = async function (wsId) {
       </div>
       <div class="demo-modal-footer" style="display:flex;gap:8px">
         <button type="button" class="btn btn-outline" onclick="document.getElementById('wf-material-approve-modal')?.remove()">Hủy</button>
-        <button type="button" class="btn btn-green" id="wf-appr-submit" ${plan.length ? '' : 'disabled'}><i class="fa-solid fa-check"></i> Xác nhận duyệt mã phim</button>
+        <button type="button" class="btn btn-green" id="wf-appr-submit"><i class="fa-solid fa-check"></i> Xác nhận duyệt mã phim</button>
       </div>
     </div>`;
   document.body.appendChild(overlay);
+  overlay.querySelectorAll('.wf-appr-chk').forEach((cb) => {
+    cb.addEventListener('change', () => {
+      const ji = cb.getAttribute('data-ji');
+      const sel = document.getElementById(`wf-appr-mc-${ji}`);
+      if (sel) sel.disabled = !cb.checked;
+    });
+  });
   const btn = document.getElementById('wf-appr-submit');
   if (!btn) return;
   btn.onclick = async () => {
@@ -3137,11 +3166,20 @@ window.moModalDuyetMaPhimWF = async function (wsId) {
       toast('warning', 'Thiếu lý do', 'Vui lòng nhập lý do xác nhận.');
       return;
     }
-    const outPlan = plan.map((p, i) => {
-      const sel = document.getElementById(`wf-appr-mc-${i}`);
-      const mc = (sel && sel.value) || p.material_code;
-      return { ...p, material_code: mc };
-    });
+    const outPlan = [];
+    for (const opt of WF_MATERIAL_APPROVE_SCREEN1_JOBS) {
+      const ji = opt.job_item;
+      const cb = document.getElementById(`wf-appr-chk-${ji}`);
+      if (!cb || !cb.checked) continue;
+      const sel = document.getElementById(`wf-appr-mc-${ji}`);
+      const mc = (sel && sel.value) || 'JB20';
+      const base = planBy[ji] ? { ...planBy[ji] } : { job_item: ji, material_code: mc };
+      outPlan.push({ ...base, material_code: mc });
+    }
+    if (!outPlan.length) {
+      toast('warning', 'Chưa chọn hạng mục', 'Vui lòng tick ít nhất một hạng mục cần thi công phim.');
+      return;
+    }
     btn.disabled = true;
     try {
       await fetchJSON(`/api/workstreams/${encodeURIComponent(wsId)}/approve-wf-materials`, {
