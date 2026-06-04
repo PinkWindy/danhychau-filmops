@@ -27,6 +27,121 @@ WINDOW_FILM_JOB_TEMPLATE: List[Dict[str, str]] = [
     {"job_item": "SUNROOF", "item_name": "Kính trời"},
 ]
 
+# Cạnh lớn ~ khổ cuộn (152cm) → mét trừ LOT theo cạnh nhỏ (tận khổ)
+ROLL_WIDTH_FULL_CM = 150.0
+
+
+def _mc_norm(it: Dict[str, Any]) -> str:
+    return (it.get("material_code") or "").strip().upper()
+
+
+def _roll_strip_m_windshield(w_cm: float, l_cm: float) -> float:
+    """Kính lái: mét chạy khổ theo cạnh dài (vd 90×152 → 1,52m)."""
+    return max(float(w_cm or 0), float(l_cm or 0)) / 100.0
+
+
+def _roll_strip_m_non_windshield(w_cm: float, l_cm: float) -> float:
+    """Hạng mục khác: nếu một cạnh ≥ khổ cuộn thì mét trừ = cạnh nhỏ/100 (vd 50×152 → 0,5m)."""
+    w, l = float(w_cm or 0), float(l_cm or 0)
+    if w <= 0 or l <= 0:
+        return 0.0
+    lo, hi = (w, l) if w <= l else (l, w)
+    if hi >= ROLL_WIDTH_FULL_CM:
+        return lo / 100.0
+    return hi / 100.0
+
+
+def compute_wf_roll_cut_summary(alloc: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Tổng hợp khổ cắt gộp (phim cách nhiệt) theo mã vật tư — dùng hiển thị và kiểm tra tổng mét trừ LOT.
+
+    Quy tắc nghiệp vụ:
+    - Kính hậu + Sườn trước cùng material_code và cùng chiều dài (cm, lệch ≤1cm):
+      một khối L×(W1+W2), mét khổ = L/100 (vd 60×130 + 92×130 → 130×152 → 1,3m).
+    - Kính lái: mét khổ = max(W,L)/100.
+    - Các hạng mục khác: cạnh lớn ≥ ~152cm thì mét = cạnh nhỏ/100, không thì mét = cạnh lớn/100.
+    """
+    items = [x for x in (alloc.get("items") or []) if isinstance(x, dict)]
+    by_code = {str(x.get("item_code")): x for x in items if x.get("item_code")}
+    blocks: List[Dict[str, Any]] = []
+    consumed: set[str] = set()
+
+    r = by_code.get("REAR_WINDOW")
+    f = by_code.get("FRONT_SIDE")
+    if r and f and r.get("is_selected") and f.get("is_selected"):
+        mc_r, mc_f = _mc_norm(r), _mc_norm(f)
+        if mc_r and mc_r == mc_f:
+            rw, rl = float(r.get("required_width_cm") or 0), float(r.get("required_length_cm") or 0)
+            fw, fl = float(f.get("required_width_cm") or 0), float(f.get("required_length_cm") or 0)
+            if rw > 0 and rl > 0 and fw > 0 and fl > 0 and abs(rl - fl) <= 1.0:
+                common_l = rl
+                wsum = rw + fw
+                strip_m = common_l / 100.0
+                blocks.append(
+                    {
+                        "kind": "MERGED_REAR_FRONT",
+                        "material_code": mc_r,
+                        "label": "Kính hậu + Sườn trước (gộp khổ)",
+                        "block_cm": f"{int(round(common_l))}×{int(round(wsum))}",
+                        "roll_strip_m": strip_m,
+                        "item_codes": ["REAR_WINDOW", "FRONT_SIDE"],
+                    }
+                )
+                consumed.update({"REAR_WINDOW", "FRONT_SIDE"})
+
+    tmpl_by_ji = {t["job_item"]: t["item_name"] for t in WINDOW_FILM_JOB_TEMPLATE}
+    for tmpl in WINDOW_FILM_JOB_TEMPLATE:
+        ji = tmpl["job_item"]
+        if ji in consumed:
+            continue
+        it = by_code.get(ji)
+        if not it or not it.get("is_selected"):
+            continue
+        mc = _mc_norm(it)
+        if not mc:
+            continue
+        w_cm = float(it.get("required_width_cm") or 0)
+        l_cm = float(it.get("required_length_cm") or 0)
+        if w_cm <= 0 or l_cm <= 0:
+            continue
+        if ji == "WINDSHIELD":
+            strip_m = _roll_strip_m_windshield(w_cm, l_cm)
+        else:
+            strip_m = _roll_strip_m_non_windshield(w_cm, l_cm)
+        blocks.append(
+            {
+                "kind": "SINGLE",
+                "material_code": mc,
+                "label": tmpl_by_ji.get(ji, ji),
+                "block_cm": f"{int(round(w_cm))}×{int(round(l_cm))}",
+                "roll_strip_m": strip_m,
+                "item_codes": [ji],
+            }
+        )
+
+    by_material: Dict[str, Dict[str, Any]] = {}
+    for b in blocks:
+        mc = b["material_code"]
+        if mc not in by_material:
+            by_material[mc] = {"material_code": mc, "blocks": [], "total_roll_strip_m": 0.0}
+        by_material[mc]["blocks"].append({k: v for k, v in b.items() if k != "material_code"})
+        by_material[mc]["total_roll_strip_m"] += float(b.get("roll_strip_m") or 0)
+
+    lines_vi: List[str] = []
+    for mc in sorted(by_material.keys()):
+        row = by_material[mc]
+        parts = [f"{x.get('block_cm', '')} cm — {x.get('label', '')}" for x in row["blocks"]]
+        tot = float(row["total_roll_strip_m"] or 0)
+        lines_vi.append(f"{mc}: " + "; ".join(parts) + f" → tổng mét trừ LOT (gộp khổ): <strong>{tot:.2f} m</strong>")
+
+    return {
+        "version": 1,
+        "blocks": blocks,
+        "by_material": by_material,
+        "lines_html": "<br>".join(lines_vi),
+        "note": "Kiểm tra phân bổ: tổng mét đã nhập theo từng mã vật tư phải ≥ tổng mét gộp khổ ở trên.",
+    }
+
 
 def _err(code: str, message: str) -> HTTPException:
     return HTTPException(status_code=400, detail={"error": code, "message": message})
@@ -177,10 +292,20 @@ def build_default_wf_allocation(db: Session, ws: DbWorkstream) -> Dict[str, Any]
         "workstream_type": "WINDOW_FILM_INSTALLATION",
         "items": items,
         "change_reason": "",
+        "roll_cut_summary": compute_wf_roll_cut_summary(
+            {
+                "workstream_id": ws.workstream_id,
+                "workstream_type": "WINDOW_FILM_INSTALLATION",
+                "items": items,
+                "change_reason": "",
+            }
+        ),
     }
 
 
 def _normalize_wf_body(body: Dict[str, Any], ws: DbWorkstream) -> Dict[str, Any]:
+    body = dict(body or {})
+    body.pop("roll_cut_summary", None)
     items_in = body.get("items")
     if not isinstance(items_in, list):
         raise _err("WF_INVALID_ITEM_QUANTITY", "items phải là mảng.")
@@ -244,12 +369,14 @@ def _normalize_wf_body(body: Dict[str, Any], ws: DbWorkstream) -> Dict[str, Any]
                 "sources": norm_src if is_sel else [],
             }
         )
-    return {
+    out = {
         "workstream_id": ws.workstream_id,
         "workstream_type": "WINDOW_FILM_INSTALLATION",
         "items": out_items,
         "change_reason": (body.get("change_reason") or "").strip(),
     }
+    out["roll_cut_summary"] = compute_wf_roll_cut_summary(out)
+    return out
 
 
 def _validate_wf_source_line(
@@ -303,27 +430,48 @@ def _validate_wf_source_line(
 def validate_wf_allocation(db: Session, ws: DbWorkstream, alloc: Dict[str, Any], admin_override: bool = False) -> None:
     if ws.workstream_type != "WINDOW_FILM_INSTALLATION":
         raise _err("WF_INVALID_ITEM_QUANTITY", "Chỉ áp dụng cho WINDOW_FILM_INSTALLATION.")
+    summary = alloc.get("roll_cut_summary") or compute_wf_roll_cut_summary(alloc)
     for it in alloc.get("items") or []:
         if not it.get("is_selected"):
             continue
         mc = (it.get("material_code") or "").strip()
-        req_m = float(it.get("required_length_m") or 0)
         w_cm = float(it.get("required_width_cm") or 0)
         l_cm = float(it.get("required_length_cm") or 0)
         min_w_m = (w_cm / 100.0) if w_cm > 0 else 0.0
         min_l_m = (l_cm / 100.0) if l_cm > 0 else 0.0
         srcs = it.get("sources") or []
-        tot = sum(float(s.get("allocated_length_m") or 0) for s in srcs)
-        if req_m > 0 and tot + 1e-6 < req_m:
-            raise _err(
-                "WF_ALLOCATION_INSUFFICIENT_LENGTH",
-                f"{it.get('item_code')}: tổng nguồn {tot}m < yêu cầu {req_m}m.",
-            )
         for s in srcs:
             _validate_wf_source_line(db, mc, s, ws.request_id, admin_override, min_w_m, min_l_m)
 
+    for mc, info in (summary.get("by_material") or {}).items():
+        need = float(info.get("total_roll_strip_m") or 0)
+        if need <= 1e-9:
+            continue
+        got = 0.0
+        for it in alloc.get("items") or []:
+            if not it.get("is_selected"):
+                continue
+            if _mc_norm(it) != str(mc).strip().upper():
+                continue
+            for s in it.get("sources") or []:
+                got += float(s.get("allocated_length_m") or 0)
+        if got + 1e-6 < need:
+            blocks = info.get("blocks") or []
+            hint = ", ".join(f"{b.get('block_cm')} ({b.get('label')})" for b in blocks if isinstance(b, dict))
+            raise _err(
+                "WF_ALLOCATION_INSUFFICIENT_NESTED_ROLL",
+                f"{mc}: tổng mét đã phân {got:.2f}m < tổng mét gộp khổ cần trừ LOT {need:.2f}m. ({hint})",
+            )
+
 
 def _wf_snapshot_differs(prev: Dict[str, Any], new: Dict[str, Any]) -> bool:
+    def _strip_roll(d: Dict[str, Any]) -> Dict[str, Any]:
+        x = dict(d)
+        x.pop("roll_cut_summary", None)
+        return x
+
+    prev = _strip_roll(prev) if isinstance(prev, dict) else prev
+    new = _strip_roll(new) if isinstance(new, dict) else new
     old_items = {x["item_code"]: x for x in (prev.get("items") or [])}
     for it in new.get("items") or []:
         code = it.get("item_code")

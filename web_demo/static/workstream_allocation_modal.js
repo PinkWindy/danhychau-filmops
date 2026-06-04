@@ -424,6 +424,105 @@
       ${teamBlock(ws)}`;
   }
 
+  function computeWfRollCutSummary(alloc) {
+    const items = (alloc.items || []).filter((x) => x && x.item_code);
+    const byCode = {};
+    items.forEach((x) => {
+      byCode[x.item_code] = x;
+    });
+    const blocks = [];
+    const consumed = new Set();
+    const mcn = (it) => String(it.material_code || '').trim().toUpperCase();
+    const r = byCode.REAR_WINDOW;
+    const f = byCode.FRONT_SIDE;
+    if (r && f && r.is_selected && f.is_selected) {
+      const mcR = mcn(r);
+      const mcF = mcn(f);
+      if (mcR && mcR === mcF) {
+        const rw = parseFloat(r.required_width_cm) || 0;
+        const rl = parseFloat(r.required_length_cm) || 0;
+        const fw = parseFloat(f.required_width_cm) || 0;
+        const fl = parseFloat(f.required_length_cm) || 0;
+        if (rw > 0 && rl > 0 && fw > 0 && fl > 0 && Math.abs(rl - fl) <= 1) {
+          const commonL = rl;
+          const wsum = rw + fw;
+          blocks.push({
+            kind: 'MERGED_REAR_FRONT',
+            material_code: mcR,
+            label: 'Kính hậu + Sườn trước (gộp khổ)',
+            block_cm: `${Math.round(commonL)}×${Math.round(wsum)}`,
+            roll_strip_m: commonL / 100,
+            item_codes: ['REAR_WINDOW', 'FRONT_SIDE'],
+          });
+          consumed.add('REAR_WINDOW');
+          consumed.add('FRONT_SIDE');
+        }
+      }
+    }
+    const names = {
+      WINDSHIELD: 'Kính lái',
+      REAR_WINDOW: 'Kính hậu',
+      FRONT_SIDE: 'Sườn trước',
+      REAR_SIDE_TRIANGLE: 'Sườn sau + tam giác',
+      TRIANGLE: 'Tam giác',
+      REAR_SIDE: 'Sườn sau',
+      SUNROOF: 'Kính trời',
+    };
+    const ORDER = ['WINDSHIELD', 'REAR_WINDOW', 'FRONT_SIDE', 'REAR_SIDE_TRIANGLE', 'TRIANGLE', 'REAR_SIDE', 'SUNROOF'];
+    for (let i = 0; i < ORDER.length; i += 1) {
+      const ji = ORDER[i];
+      if (consumed.has(ji)) continue;
+      const it = byCode[ji];
+      if (!it || !it.is_selected) continue;
+      const mc = mcn(it);
+      if (!mc) continue;
+      const w_cm = parseFloat(it.required_width_cm) || 0;
+      const l_cm = parseFloat(it.required_length_cm) || 0;
+      if (w_cm <= 0 || l_cm <= 0) continue;
+      let strip;
+      if (ji === 'WINDSHIELD') strip = Math.max(w_cm, l_cm) / 100;
+      else {
+        const hi = Math.max(w_cm, l_cm);
+        const lo = Math.min(w_cm, l_cm);
+        strip = hi >= 150 ? lo / 100 : hi / 100;
+      }
+      blocks.push({
+        kind: 'SINGLE',
+        material_code: mc,
+        label: names[ji] || ji,
+        block_cm: `${Math.round(w_cm)}×${Math.round(l_cm)}`,
+        roll_strip_m: strip,
+        item_codes: [ji],
+      });
+    }
+    const byMaterial = {};
+    blocks.forEach((b) => {
+      const mc = b.material_code;
+      if (!byMaterial[mc]) {
+        byMaterial[mc] = { material_code: mc, blocks: [], total_roll_strip_m: 0 };
+      }
+      byMaterial[mc].blocks.push({
+        kind: b.kind,
+        label: b.label,
+        block_cm: b.block_cm,
+        roll_strip_m: b.roll_strip_m,
+        item_codes: b.item_codes,
+      });
+      byMaterial[mc].total_roll_strip_m += b.roll_strip_m;
+    });
+    const linesParts = [];
+    Object.keys(byMaterial)
+      .sort()
+      .forEach((mc) => {
+        const row = byMaterial[mc];
+        const parts = row.blocks.map((x) => `${esc(x.block_cm)} cm — ${esc(x.label)}`);
+        linesParts.push(
+          `${esc(mc)}: ${parts.join('; ')} → tổng mét trừ LOT (gộp khổ): <strong>${row.total_roll_strip_m.toFixed(2)} m</strong>`
+        );
+      });
+    return { version: 1, blocks, by_material: byMaterial, lines_html: linesParts.join('<br>') };
+  }
+
   function renderReasonBlock() {
     return `<div class="edit-section" style="border-color:rgba(229,57,53,0.3);background:rgba(229,57,53,0.04)">
       <div class="edit-section-title" style="color:var(--red-light)"><i class="fa-solid fa-pen-to-square"></i> Lý do chỉnh sửa <span style="color:var(--red)">*</span> (khi đổi nguồn / chia nguồn / vật tư)</div>
@@ -449,17 +548,33 @@
         w.textContent = ok ? '' : `PPF Full xe cần ${req}m — nguồn chưa đủ.`;
       }
     } else {
-      for (const it of a.items || []) {
-        if (!it.is_selected) continue;
-        const req = parseFloat(it.required_length_m) || 0;
-        const tot = (it.sources || []).reduce((s, x) => s + (parseFloat(x.allocated_length_m) || 0), 0);
-        const ok = req <= 0 || tot + 1e-6 >= req;
-        if (!ok) anyBad = true;
-        html += `${esc(it.item_name)}: yêu cầu <strong>${req}m</strong>, phân bổ <strong>${tot.toFixed(2)}m</strong> — <span style="color:${ok ? 'var(--teal-light)' : 'var(--amber)'}">${ok ? 'Đủ' : 'Thiếu'}</span><br>`;
-      }
+      const sum = computeWfRollCutSummary(a);
+      let matBad = false;
+      html +=
+        '<div style="margin-bottom:10px;padding:10px;background:rgba(0,60,120,0.22);border-radius:8px;font-size:12px;line-height:1.45"><div style="font-weight:700;margin-bottom:6px">Gộp khổ → tổng mét trừ LOT (theo mã vật tư)</div>' +
+        (sum.lines_html || '') +
+        '<div class="edit-hint" style="margin-top:6px">Tổng mét nhập theo từng hạng mục cùng mã vật tư phải ≥ tổng mét gộp khổ ở trên.</div></div>';
+      const by = sum.by_material || {};
+      Object.keys(by)
+        .sort()
+        .forEach((mc) => {
+          const need = parseFloat(by[mc].total_roll_strip_m) || 0;
+          let got = 0;
+          (a.items || []).forEach((it) => {
+            if (!it.is_selected || String(it.material_code || '').trim().toUpperCase() !== mc) return;
+            (it.sources || []).forEach((s) => {
+              got += parseFloat(s.allocated_length_m) || 0;
+            });
+          });
+          const ok = need <= 1e-9 || got + 1e-6 >= need;
+          if (!ok) matBad = true;
+          const label = need <= 1e-9 ? '—' : ok ? 'Đủ' : 'Thiếu';
+          const col = need <= 1e-9 ? 'var(--text-secondary)' : ok ? 'var(--teal-light)' : 'var(--amber)';
+          html += `${esc(mc)}: gộp khổ cần <strong>${need.toFixed(2)}m</strong> — đã phân <strong>${got.toFixed(2)}m</strong> — <span style="color:${col}">${label}</span><br>`;
+        });
       if (w) {
-        w.style.display = anyBad ? 'block' : 'none';
-        w.textContent = anyBad ? 'Một hoặc nhiều hạng mục chưa đủ mét từ nguồn.' : '';
+        w.style.display = matBad ? 'block' : 'none';
+        w.textContent = matBad ? 'Tổng mét theo mã vật tư chưa đạt mức gộp khổ cần trừ LOT.' : '';
       }
     }
     el.innerHTML = html;
@@ -679,12 +794,20 @@
         return;
       }
     } else {
-      for (const it of payload.items || []) {
-        if (!it.is_selected) continue;
-        const req = parseFloat(it.required_length_m) || 0;
-        const tot = (it.sources || []).reduce((s, x) => s + (parseFloat(x.allocated_length_m) || 0), 0);
-        if (req > 0 && tot + 1e-6 < req) {
-          if (typeof toast === 'function') toast('warning', 'WF', `${it.item_code}: chưa đủ mét.`);
+      const sum = computeWfRollCutSummary(payload);
+      const by = sum.by_material || {};
+      for (const mc of Object.keys(by).sort()) {
+        const need = parseFloat(by[mc].total_roll_strip_m) || 0;
+        if (need <= 1e-9) continue;
+        let got = 0;
+        (payload.items || []).forEach((it) => {
+          if (!it.is_selected || String(it.material_code || '').trim().toUpperCase() !== mc) return;
+          (it.sources || []).forEach((s) => {
+            got += parseFloat(s.allocated_length_m) || 0;
+          });
+        });
+        if (got + 1e-6 < need) {
+          if (typeof toast === 'function') toast('warning', 'WF', `${mc}: tổng mét nguồn ${got.toFixed(2)}m < gộp khổ cần ${need.toFixed(2)}m.`);
           return;
         }
       }

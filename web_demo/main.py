@@ -862,15 +862,18 @@ def _serialize_workstream(ws: DbWorkstream, db: Optional[Session] = None) -> dic
         else:
             d["ppf_allocation"] = build_default_ppf_allocation(ws)
     if ws.workstream_type == "WINDOW_FILM_INSTALLATION":
-        from wf_allocation_service import build_default_wf_allocation
+        from wf_allocation_service import build_default_wf_allocation, compute_wf_roll_cut_summary
 
         if getattr(ws, "wf_allocation_json", None):
             try:
-                d["wf_allocation"] = json.loads(ws.wf_allocation_json)
+                wf_alloc = json.loads(ws.wf_allocation_json)
             except json.JSONDecodeError:
-                d["wf_allocation"] = build_default_wf_allocation(db, ws) if db else {"items": [], "workstream_id": ws.workstream_id}
+                wf_alloc = build_default_wf_allocation(db, ws) if db else {"items": [], "workstream_id": ws.workstream_id}
         else:
-            d["wf_allocation"] = build_default_wf_allocation(db, ws) if db else {"items": [], "workstream_id": ws.workstream_id}
+            wf_alloc = build_default_wf_allocation(db, ws) if db else {"items": [], "workstream_id": ws.workstream_id}
+        if isinstance(wf_alloc, dict) and not wf_alloc.get("roll_cut_summary"):
+            wf_alloc["roll_cut_summary"] = compute_wf_roll_cut_summary(wf_alloc)
+        d["wf_allocation"] = wf_alloc
     d.pop("ppf_allocation_json", None)
     d.pop("wf_allocation_json", None)
     return d
