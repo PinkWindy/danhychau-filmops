@@ -69,13 +69,17 @@ def _lexus_payload(draft_id: str) -> dict:
             "request_no": "01.2600115",
             "request_date": "2026-04-23",
             "contract_no": "0020/HDKT/2026/RX350H PRE",
-            "customer_masked": "KH_MASKED_LEXUS_115",
-            "address_masked": "ADDRESS_MASKED_LEXUS_115",
-            "sales_consultant": "TVBH_MASKED_115",
+            "customer_name": "Trần Thị Mai Lan",
+            "customer_masked": "Trần Thị Mai Lan",
+            "customer_phone": "0903123456",
+            "customer_address": "45 Nguyễn Huệ, Phường Bến Nghé, Quận 1, TP.HCM",
+            "address_masked": "45 Nguyễn Huệ, Phường Bến Nghé, Quận 1, TP.HCM",
+            "sales_consultant": "Nguyễn Thị Thu Hà",
             "vehicle_model_code": "RX350",
             "model_name": "RX350H PREMIUM CE",
-            "vin_masked": "VIN_MASKED_RX350H_115",
-            "frame_no_masked": "VIN_MASKED_RX350H_115",
+            "vin_number": "JTJBARBZ5N2012345",
+            "vin_masked": "JTJBARBZ5N2012345",
+            "frame_no_masked": "JTJBARBZ5N2012345",
             "requested_delivery_at": "2026-06-05T15:30:00+07:00",
             "item_code": "ACCRX00001PK",
             "item_description": "Phim cách nhiệt Konica xe Lexus RX",
@@ -96,7 +100,7 @@ def _lexus_payload(draft_id: str) -> dict:
             "review_status": "NEEDS_REVIEW",
             "ocr_status": "COMPLETED",
             "confidence_score": 0.92,
-            "note": "Phiếu test OCR từ ảnh Lexus 115. Dữ liệu khách hàng đã masked.",
+            "note": "Phiếu test OCR Lexus 115 — dữ liệu demo đầy đủ (không che).",
         }
     if draft_id == "OCR-DRAFT-LEXUS-117-NEW":
         return {
@@ -108,13 +112,17 @@ def _lexus_payload(draft_id: str) -> dict:
             "request_no": "01.2600117",
             "request_date": "2026-04-24",
             "contract_no": "0350/HDKT/2026/RX350H PRE",
-            "customer_masked": "KH_MASKED_LEXUS_117",
-            "address_masked": "ADDRESS_MASKED_LEXUS_117",
-            "sales_consultant": "TVBH_MASKED_117",
+            "customer_name": "Lê Hoàng Nam",
+            "customer_masked": "Lê Hoàng Nam",
+            "customer_phone": "0918765432",
+            "customer_address": "120 Pasteur, Phường Bến Nghé, Quận 1, TP.HCM",
+            "address_masked": "120 Pasteur, Phường Bến Nghé, Quận 1, TP.HCM",
+            "sales_consultant": "Trần Văn Minh",
             "vehicle_model_code": "RX350",
             "model_name": "RX350H PREMIUM CE",
-            "vin_masked": "VIN_MASKED_RX350H_117",
-            "frame_no_masked": "VIN_MASKED_RX350H_117",
+            "vin_number": "JTJBARBZ6N2012346",
+            "vin_masked": "JTJBARBZ6N2012346",
+            "frame_no_masked": "JTJBARBZ6N2012346",
             "requested_delivery_at": "2026-06-06T10:00:00+07:00",
             "item_code": "ACCRX00001PK",
             "item_description": "Phim cách nhiệt Konica xe Lexus RX",
@@ -135,7 +143,7 @@ def _lexus_payload(draft_id: str) -> dict:
             "review_status": "NEEDS_REVIEW",
             "ocr_status": "COMPLETED",
             "confidence_score": 0.90,
-            "note": "Phiếu test OCR từ ảnh Lexus 117. Dữ liệu khách hàng đã masked.",
+            "note": "Phiếu test OCR Lexus 117 — dữ liệu demo đầy đủ (không che).",
         }
     raise ValueError("unknown lexus draft")
 
@@ -148,9 +156,9 @@ def _apply_payload_to_draft_row(draft: DbOcrDraft, payload: dict) -> None:
     draft.ocr_status = payload.get("ocr_status") or "COMPLETED"
     draft.review_status = payload.get("review_status") or "NEEDS_REVIEW"
     draft.extracted_dealer_name = payload.get("dealer_name")
-    draft.extracted_customer_name = payload.get("customer_masked")
+    draft.extracted_customer_name = payload.get("customer_name") or payload.get("customer_masked")
     draft.extracted_vehicle_model = payload.get("model_name") or payload.get("vehicle_model_code")
-    draft.extracted_vin = payload.get("vin_masked")
+    draft.extracted_vin = payload.get("vin_number") or payload.get("vin_masked")
     draft.extracted_plate = ""
     draft.extracted_film_type = payload.get("item_description") or "Phim cách nhiệt"
     draft.extracted_job_items = job_items_str
@@ -203,8 +211,8 @@ def _ensure_dealer_lexus_sg(db: Session, actor: str, request_id_for_audit: str) 
             dealer_name="Lexus Trung Tâm Sài Gòn",
             legal_name=name,
             dealer_group="LEXUS",
-            address="ADDRESS_MASKED_DEALER_LEXUS_SG",
-            contact_phone="",
+            address="Số 264, Đường Trần Hưng Đạo, Phường Cầu Ông Lãnh, TP.HCM",
+            contact_phone="02837271555",
             status="ACTIVE",
             created_at=_now(),
         )
@@ -251,8 +259,11 @@ def confirm_lexus_test_ocr(
 
     dealer_id = (payload.get("dealer_id") or "DEALER_LEXUS_SG").strip()
     dealer_name_disp = "Lexus Trung Tâm Sài Gòn"
-    cust_masked = (data.get("customer_name") or payload.get("customer_masked") or "").strip()
-    vin_m = (data.get("vin") or payload.get("vin_masked") or "").strip()
+    cust_masked = (
+        (data.get("customer_name") or payload.get("customer_name") or payload.get("customer_masked") or "")
+        .strip()
+    )
+    vin_m = (data.get("vin") or payload.get("vin_number") or payload.get("vin_masked") or "").strip()
     vehicle_model = (data.get("vehicle_model") or payload.get("vehicle_model_code") or "RX350").strip()
     model_year = 2026
     try:
@@ -276,9 +287,16 @@ def confirm_lexus_test_ocr(
         db.add(
             DbCustomer(
                 customer_id=customer_id,
-                customer_name=cust_masked,
-                customer_masked=cust_masked,
-                address_masked=payload.get("address_masked"),
+                customer_name=cust_masked or customer_id,
+                customer_masked=cust_masked or customer_id,
+                phone=(payload.get("customer_phone") or "").strip() or None,
+                phone_masked=(payload.get("customer_phone") or "").strip() or None,
+                address=(payload.get("customer_address") or payload.get("address_masked") or "").strip()
+                or None,
+                address_masked=(payload.get("customer_address") or payload.get("address_masked") or "").strip()
+                or None,
+                full_address=(payload.get("customer_address") or payload.get("address_masked") or "").strip()
+                or None,
                 source_dealer_id=dealer_id,
                 customer_type="END_CUSTOMER",
                 source_channel="OCR",
@@ -304,8 +322,8 @@ def confirm_lexus_test_ocr(
         db.add(
             DbVehicleProfile(
                 vehicle_id=vehicle_id,
-                vin_number=f"VIN-INTERNAL-{vehicle_id}",
-                vin_masked=vin_m or f"VIN_MASKED_{sfx}",
+                vin_number=vin_m or f"JTJBARBZ9N{sfx}00000"[:17],
+                vin_masked=vin_m or f"JTJBARBZ9N{sfx}00000"[:17],
                 vehicle_model_code=vehicle_model,
                 model_name=payload.get("model_name") or vehicle_model,
                 model_year=model_year,
@@ -436,8 +454,8 @@ def confirm_lexus_test_ocr(
         customer_id=customer_id,
         customer_name=cust_masked,
         vehicle_id=vehicle_id,
-        vin_number=None,
-        vin_masked=vin_m,
+        vin_number=vin_m or None,
+        vin_masked=vin_m or None,
         vehicle_model_code=vehicle_model,
         material_code=primary_wf_mc or None,
         job_items=job_items_str,

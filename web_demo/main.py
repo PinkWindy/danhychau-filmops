@@ -625,6 +625,24 @@ def get_request(request_id: str, db: Session = Depends(get_db)):
         raise HTTPException(404, "Not found")
     d = req.__dict__.copy()
     d.pop("_sa_instance_state", None)
+    try:
+        cust = db.query(DbCustomer).filter(DbCustomer.customer_id == req.customer_id).first()
+        if cust:
+            d["customer_phone"] = (cust.phone or cust.phone_masked or "").strip() or None
+            d["customer_address"] = (
+                (cust.address or cust.full_address or cust.address_masked or "") or ""
+            ).strip() or None
+        veh = db.query(DbVehicleProfile).filter(DbVehicleProfile.vehicle_id == req.vehicle_id).first()
+        if veh:
+            if not (d.get("vin_number") or "").strip():
+                d["vin_number"] = (veh.vin_number or "").strip() or None
+            if not (d.get("vin_masked") or "").strip():
+                d["vin_masked"] = (veh.vin_masked or veh.vin_number or "").strip() or None
+        deal = db.query(DbDealer).filter(DbDealer.dealer_id == req.dealer_id).first()
+        if deal and not (d.get("dealer_name") or "").strip():
+            d["dealer_name"] = (deal.dealer_name or "").strip() or None
+    except Exception:
+        pass
     if req.service_selection_json:
         try:
             d["service_selection"] = json.loads(req.service_selection_json)
@@ -1657,10 +1675,10 @@ def process_ocr(draft_id: str, db: Session = Depends(get_db)):
     draft.ocr_status = "PROCESSING"; db.commit()
     # Mock OCR result — multi-service vehicle
     draft.extracted_dealer_name = "Lexus Sài Gòn"
-    draft.extracted_customer_name = "KH_MASKED_001"
+    draft.extracted_customer_name = "Phạm Minh Tuấn (demo OCR upload)"
     draft.extracted_vehicle_model = "LEXUS_RX350"
-    draft.extracted_vin = "VIN_MASKED_RX350_002"
-    draft.extracted_plate = "51G-***.***"
+    draft.extracted_vin = "JTJBARBZ8N0123456"
+    draft.extracted_plate = "51G-123.45"
     draft.extracted_film_type = "Phim cách nhiệt JB20 + PPF T-TYPE"
     draft.extracted_job_items = "WINDSHIELD;REAR_WINDOW;FRONT_SIDE;REAR_SIDE_TRIANGLE;SUNROOF;PPF_FULL"
     draft.extracted_delivery_time = (datetime.datetime.utcnow() + datetime.timedelta(hours=8)).isoformat() + "Z"
@@ -1717,9 +1735,10 @@ def confirm_ocr(draft_id: str, data: dict, db: Session = Depends(get_db)):
             norm_payload["warning"] = "Chưa có định mức ACTIVE cho dòng xe/năm model — kiểm tra Hồ sơ xe > Định mức phim."
     new_req = DbRequest(
         request_id=new_req_id,
-        dealer_id="DEALER_LEXUS_SG", customer_id="KH_MASKED_001",
+        dealer_id="DEALER_LEXUS_SG",
+        customer_id="CUST_001",
         customer_name=data.get("customer_name", draft.extracted_customer_name),
-        vehicle_id="VH-MASKED-002",
+        vehicle_id="VEH_001",
         vin_number=data.get("vin", draft.extracted_vin),
         vehicle_model_code=vmodel,
         material_code="JB20",

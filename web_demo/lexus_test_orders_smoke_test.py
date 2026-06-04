@@ -108,11 +108,22 @@ def main():
     )
     add(10, "requested_delivery_at ISO +07", ok10, str(r10a.get("requested_delivery_time"))[:40])
 
-    ok11 = "KH_MASKED" in str(r10a.get("customer_name", "")) and "KH_MASKED" in str(r10b.get("customer_name", ""))
-    add(11, "customer masked trên request", ok11, "")
+    ok11 = (
+        len(str(r10a.get("customer_name", "")).strip()) >= 3
+        and len(str(r10b.get("customer_name", "")).strip()) >= 3
+        and "MASKED" not in str(r10a.get("customer_name", "")).upper()
+        and "MASKED" not in str(r10b.get("customer_name", "")).upper()
+    )
+    add(11, "customer_name demo đầy đủ (không MASKED)", ok11, "")
 
-    ok12 = "VIN_MASKED" in str(r10a.get("vin_masked", "")) and "VIN_MASKED" in str(r10b.get("vin_masked", ""))
-    add(12, "vin_masked trên request", ok12, "")
+    def _vin_len(r):
+        v = (r.get("vin_number") or r.get("vin_masked") or "").strip()
+        return len(v)
+
+    ok12 = _vin_len(r10a) >= 17 and _vin_len(r10b) >= 17 and "MASKED" not in str(
+        r10a.get("vin_number", "") + r10a.get("vin_masked", "")
+    ).upper()
+    add(12, "VIN 17 ký tự demo (không MASKED)", ok12, "")
 
     na115 = r10a.get("norm_application") or {}
     if not na115 and r10a.get("norm_application_json"):

@@ -2513,8 +2513,12 @@ async function hienThiDon(req) {
   const vidEl = document.getElementById('det-vehicle-id');
   if (vidEl) vidEl.textContent = req.vehicle_id || '—';
   document.getElementById('det-customer').textContent = req.customer_name;
+  const phEl = document.getElementById('det-customer-phone');
+  if (phEl) phEl.textContent = req.customer_phone || req.phone || req.phone_masked || '—';
+  const addrEl = document.getElementById('det-customer-address');
+  if (addrEl) addrEl.textContent = req.customer_address || req.address || req.address_masked || '—';
   document.getElementById('det-model').textContent = _reqSvcModel(req);
-  document.getElementById('det-vin').textContent = req.vin_masked || req.vin_number;
+  document.getElementById('det-vin').textContent = (req.vin_number || req.vin_masked || '—').trim() || '—';
   document.getElementById('det-deadline').textContent = fmtDt(req.requested_delivery_time);
   const normCard = document.getElementById('det-norm-card');
   const normBody = document.getElementById('det-norm-body');

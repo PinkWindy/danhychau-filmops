@@ -44,9 +44,9 @@ def _seed_customer_management_demo(db):
     """Bổ sung dealer / KH / xe demo CRM — không xóa dữ liệu CSV hiện có."""
     ts = datetime.datetime.utcnow().isoformat() + "Z"
     extra_dealers = [
-        ("DEALER_MERCEDES_HCM", "Mercedes-Benz HCM", "MB HCM", "Mercedes", "ADDRESS_MASKED_MB_001", "ACTIVE"),
-        ("DEALER_BMW_PMH", "BMW Phú Mỹ Hưng", "BMW PMH", "BMW", "ADDRESS_MASKED_BMW_PMH", "ACTIVE"),
-        ("DEALER_DIRECT_RETAIL", "Kênh bán lẻ trực tiếp DYC", "DYC Retail", "DIRECT", "ADDRESS_MASKED_DIRECT", "ACTIVE"),
+        ("DEALER_MERCEDES_HCM", "Mercedes-Benz HCM", "MB HCM", "Mercedes", "Số 1 Hàm Nghi, Quận 1, TP.HCM", "ACTIVE"),
+        ("DEALER_BMW_PMH", "BMW Phú Mỹ Hưng", "BMW PMH", "BMW", "Khu đô thị Phú Mỹ Hưng, Quận 7, TP.HCM", "ACTIVE"),
+        ("DEALER_DIRECT_RETAIL", "Kênh bán lẻ trực tiếp DYC", "DYC Retail", "DIRECT", "123 Nguyễn Huệ, Quận 1, TP.HCM", "ACTIVE"),
     ]
     for did, dname, legal, grp, addr, st in extra_dealers:
         if not db.query(DbDealer).filter(DbDealer.dealer_id == did).first():
@@ -57,15 +57,15 @@ def _seed_customer_management_demo(db):
                     legal_name=legal,
                     dealer_group=grp,
                     address=addr,
-                    contact_phone="PHONE_MASKED_DEALER",
+                    contact_phone="02839998888",
                     status=st,
                     created_at=ts,
                 )
             )
     extra_cust = [
-        ("CUS-20260604-001", "KH_MASKED_001", "KH_MASKED_001", "DEALER_LEXUS_SG", "DEALER", "END_CUSTOMER"),
-        ("CUS-20260604-002", "KH_MASKED_002", "KH_MASKED_002", "DEALER_TOYOTA_BENTHANH", "DEALER", "END_CUSTOMER"),
-        ("CUS-20260604-003", "KH_MASKED_003", "KH_MASKED_003", None, "DIRECT", "DIRECT_RETAIL"),
+        ("CUS-20260604-001", "Hoàng Thị Lan", "Hoàng Thị Lan", "DEALER_LEXUS_SG", "DEALER", "END_CUSTOMER"),
+        ("CUS-20260604-002", "Võ Đức Thịnh", "Võ Đức Thịnh", "DEALER_TOYOTA_BENTHANH", "DEALER", "END_CUSTOMER"),
+        ("CUS-20260604-003", "Bùi Minh Khoa", "Bùi Minh Khoa", None, "DIRECT", "DIRECT_RETAIL"),
     ]
     for cid, cname, masked, src_d, ch, ctype in extra_cust:
         if not db.query(DbCustomer).filter(DbCustomer.customer_id == cid).first():
@@ -74,8 +74,10 @@ def _seed_customer_management_demo(db):
                     customer_id=cid,
                     customer_name=cname,
                     customer_masked=masked,
-                    phone_masked="PHONE_MASKED",
-                    address_masked="ADDRESS_MASKED",
+                    phone="0909111222",
+                    phone_masked="0909111222",
+                    address="88 Lê Lợi, Quận 1, TP.HCM",
+                    address_masked="88 Lê Lợi, Quận 1, TP.HCM",
                     source_dealer_id=src_d,
                     customer_type=ctype,
                     source_channel=ch,
@@ -86,17 +88,17 @@ def _seed_customer_management_demo(db):
                 )
             )
     extra_veh = [
-        ("VEH-20260604-001", "LEXUS_RX350", "Lexus RX350", "VIN_MASKED_RX350_001", "CUS-20260604-001", "DEALER_LEXUS_SG"),
-        ("VEH-20260604-002", "LEXUS_LM500H", "Lexus LM500h", "VIN_MASKED_LM500H_001", "CUS-20260604-001", "DEALER_LEXUS_SG"),
-        ("VEH-20260604-003", "TOYOTA_CAMRY", "Toyota Camry", "VIN_MASKED_CAMRY_001", "CUS-20260604-002", "DEALER_TOYOTA_BENTHANH"),
-        ("VEH-20260604-004", "LEXUS_ES250", "Lexus ES250", "VIN_MASKED_ES250_001", "CUS-20260604-002", "DEALER_TOYOTA_BENTHANH"),
+        ("VEH-20260604-001", "LEXUS_RX350", "Lexus RX350", "JTJBARBZ1N9012345", "CUS-20260604-001", "DEALER_LEXUS_SG"),
+        ("VEH-20260604-002", "LEXUS_LM500H", "Lexus LM500h", "JTJBARBZ2N9012345", "CUS-20260604-001", "DEALER_LEXUS_SG"),
+        ("VEH-20260604-003", "TOYOTA_CAMRY", "Toyota Camry", "4T1B11HK5NU912346", "CUS-20260604-002", "DEALER_TOYOTA_BENTHANH"),
+        ("VEH-20260604-004", "LEXUS_ES250", "Lexus ES250", "JTHBK1GG8N2123457", "CUS-20260604-002", "DEALER_TOYOTA_BENTHANH"),
     ]
     for vid, vcode, mname, vinm, cust, deal in extra_veh:
         if not db.query(DbVehicleProfile).filter(DbVehicleProfile.vehicle_id == vid).first():
             db.add(
                 DbVehicleProfile(
                     vehicle_id=vid,
-                    vin_number=f"VIN-SEED-{vid}",
+                    vin_number=vinm,
                     vin_masked=vinm,
                     vehicle_model_code=vcode,
                     model_name=mname,
@@ -232,7 +234,7 @@ def _lexus_web_vehicle_rows():
     return [
         DbVehicleProfile(
             vehicle_id="VEH_LEX_CO_001",
-            vin_number="VIN_LEX_WEB_NX350_001",
+            vin_number="JTJZBAR0EN9123456",
             plate_number="51L-88001",
             vehicle_model_code="LEXUS_NX350",
             model_year=2026,
@@ -243,7 +245,7 @@ def _lexus_web_vehicle_rows():
         ),
         DbVehicleProfile(
             vehicle_id="VEH_LEX_CO_002",
-            vin_number="VIN_LEX_WEB_ES250_001",
+            vin_number="JTHBK1GG8N2123458",
             plate_number="51L-88002",
             vehicle_model_code="LEXUS_ES250",
             model_year=2026,
@@ -254,7 +256,7 @@ def _lexus_web_vehicle_rows():
         ),
         DbVehicleProfile(
             vehicle_id="VEH_LEX_CO_003",
-            vin_number="VIN_LEX_WEB_RX350_002",
+            vin_number="JTJBARBZ8N0123459",
             plate_number="51L-88003",
             vehicle_model_code="LEXUS_RX350",
             model_year=2026,
@@ -265,7 +267,7 @@ def _lexus_web_vehicle_rows():
         ),
         DbVehicleProfile(
             vehicle_id="VEH_LEX_CO_004",
-            vin_number="VIN_LEX_WEB_LX600_001",
+            vin_number="JTJBARBZ4N9123450",
             plate_number="51L-88004",
             vehicle_model_code="LEXUS_LX600",
             model_year=2026,
@@ -662,9 +664,9 @@ def clean_and_load_csv():
             request_id="REQ-LEXUS-CO-20260611-004",
             dealer_id="DEALER_LEXUS_SG",
             customer_id="CUST_001",
-            customer_name="KH_LEXUS_MASKED_LX",
+            customer_name="Trần Quốc Huy (Lexus LX600 demo)",
             vehicle_id="VEH_LEX_CO_004",
-            vin_number="VIN_LEX_WEB_LX600_001",
+            vin_number="JTJBARBZ4N9123450",
             vehicle_model_code="LEXUS_LX600",
             material_code="JB20",
             job_items="JOB_FILM_WINDSHIELD;JOB_FILM_SIDE",
@@ -681,9 +683,9 @@ def clean_and_load_csv():
             request_id="REQ-LEXUS-CO-20260611-003",
             dealer_id="DEALER_LEXUS_SG",
             customer_id="CUST_007",
-            customer_name="KH_LEXUS_MASKED_RX",
+            customer_name="Lê Phương Dung (Lexus RX350 demo)",
             vehicle_id="VEH_LEX_CO_003",
-            vin_number="VIN_LEX_WEB_RX350_002",
+            vin_number="JTJBARBZ8N0123459",
             vehicle_model_code="LEXUS_RX350",
             material_code="JB20",
             job_items="JOB_FILM_SIDE;JOB_FILM_REAR",
@@ -699,9 +701,9 @@ def clean_and_load_csv():
             request_id="REQ-LEXUS-CO-20260611-002",
             dealer_id="DEALER_LEXUS_SG",
             customer_id="CUST_001",
-            customer_name="KH_LEXUS_MASKED_ES",
+            customer_name="Nguyễn Hoài Nam (Lexus ES250 demo)",
             vehicle_id="VEH_LEX_CO_002",
-            vin_number="VIN_LEX_WEB_ES250_001",
+            vin_number="JTHBK1GG8N2123458",
             vehicle_model_code="LEXUS_ES250",
             material_code="JB20",
             job_items="JOB_FILM_SIDE;JOB_FILM_REAR",
@@ -714,9 +716,9 @@ def clean_and_load_csv():
             request_id="REQ-LEXUS-CO-20260611-001",
             dealer_id="DEALER_LEXUS_SG",
             customer_id="CUST_001",
-            customer_name="KH_LEXUS_MASKED_NX",
+            customer_name="Phạm Gia Bảo (Lexus NX350 demo)",
             vehicle_id="VEH_LEX_CO_001",
-            vin_number="VIN_LEX_WEB_NX350_001",
+            vin_number="JTJZBAR0EN9123456",
             vehicle_model_code="LEXUS_NX350",
             material_code="T-TYPE",
             job_items="JOB_PPF_FULL;JOB_FILM_WINDSHIELD",
@@ -729,9 +731,9 @@ def clean_and_load_csv():
             request_id="REQ-20260603-001",
             dealer_id="DEALER_LEXUS_SG",
             customer_id="CUST_001",
-            customer_name="KH_MASKED_001",
+            customer_name="Đỗ Minh Khang",
             vehicle_id="VEH_001",
-            vin_number="VIN_MASKED_RX350_001",
+            vin_number="JTJBARBZ7N5123456",
             vehicle_model_code="LEXUS_RX350",
             material_code="JB20",
             job_items="JOB_FILM_SIDE;JOB_FILM_REAR",
@@ -743,9 +745,9 @@ def clean_and_load_csv():
             request_id="REQ-20260602-005",
             dealer_id="DEALER_TOYOTA_BENTHANH",
             customer_id="CUST_002",
-            customer_name="KH_MASKED_002",
+            customer_name="Trần Thị Hương Giang",
             vehicle_id="VEH_002",
-            vin_number="VIN_MASKED_ES250_001",
+            vin_number="JTHBK1GG8N2123460",
             vehicle_model_code="LEXUS_ES250",
             material_code="JB20",
             job_items="JOB_FILM_SIDE;JOB_FILM_REAR",
@@ -767,9 +769,9 @@ def clean_and_load_csv():
             request_id="REQ-20260603-009",
             dealer_id="DEALER_BMW_PHUMYHUNG",
             customer_id="CUST_003",
-            customer_name="KH_MASKED_003",
+            customer_name="Mai Tuấn Kiệt",
             vehicle_id="VEH_003",
-            vin_number="VIN_MASKED_CAMRY_001",
+            vin_number="4T1B11HK5NU912347",
             vehicle_model_code="TOYOTA_CAMRY",
             material_code="RS20",
             job_items="JOB_FILM_SIDE;JOB_FILM_REAR",
@@ -786,9 +788,9 @@ def clean_and_load_csv():
             request_id="REQ-20260603-015",
             dealer_id="DEALER_LEXUS_SG",
             customer_id="CUST_001",
-            customer_name="KH_MASKED_004",
+            customer_name="Lý Quốc Anh",
             vehicle_id="VEH_001",
-            vin_number="VIN_MASKED_LM500H_001",
+            vin_number="JTJBARBZ3N8123451",
             vehicle_model_code="LEXUS_LM500H",
             material_code="RS20",
             job_items="JOB_FILM_SIDE",
@@ -801,9 +803,9 @@ def clean_and_load_csv():
             request_id="REQ-20260604-001",
             dealer_id="DEALER_LEXUS_SG",
             customer_id="CUST_001",
-            customer_name="KH_MASKED_VIP_001",
+            customer_name="Đỗ Minh Khang",
             vehicle_id="VEH_001",
-            vin_number="VIN_MASKED_RX350_VIP",
+            vin_number="JTJBARBZ7N5123456",
             vehicle_model_code="LEXUS_RX350",
             material_code="JB20",
             job_items="PPF_FULL;WINDSHIELD;REAR_WINDOW;FRONT_SIDE;REAR_SIDE_TRIANGLE;SUNROOF",

@@ -149,10 +149,17 @@ def _ocr_checks(db) -> dict:
         if not row:
             out[did] = {"exists": False}
             continue
-        masked = False
+        demo_ok = False
         try:
             pl = json.loads(row.extra_payload_json or "{}")
-            masked = "MASKED" in str(pl.get("customer_masked", "")) + str(pl.get("vin_masked", ""))
+            blob = (
+                str(pl.get("customer_name", ""))
+                + str(pl.get("customer_masked", ""))
+                + str(pl.get("vin_number", ""))
+                + str(pl.get("vin_masked", ""))
+            )
+            vin_demo = pl.get("vin_number") or pl.get("vin_masked") or ""
+            demo_ok = ("MASKED" not in blob.upper()) and len(str(vin_demo).strip()) >= 17
         except json.JSONDecodeError:
             pass
         out[did] = {
@@ -160,7 +167,7 @@ def _ocr_checks(db) -> dict:
             "review_status": row.review_status,
             "ocr_status": row.ocr_status,
             "created_request_id": (row.created_request_id or "").strip(),
-            "masked_payload": masked,
+            "masked_payload": demo_ok,
         }
     return out
 
@@ -494,7 +501,7 @@ def build_report() -> tuple[str, dict]:
         lines.append(
             f"- **Chưa tự tạo request:** `{'OK' if not info.get('created_request_id') else 'FAIL'}` (`created_request_id={info.get('created_request_id')!r}`)"
         )
-        lines.append(f"- **Payload masked (KH_/VIN_):** `{'OK' if info.get('masked_payload') else 'FAIL'}`")
+        lines.append(f"- **Payload demo đầy đủ (không placeholder MASKED, VIN 17 ký tự):** `{'OK' if info.get('masked_payload') else 'FAIL'}`")
     lines.append("")
     lines.append(f"- **OCR draft checks tổng:** `{'PASS' if ocr_ok else 'FAIL'}`")
     lines.append("")

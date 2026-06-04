@@ -1269,7 +1269,7 @@ def register_customer_routes(app, get_db):
                     dealer_name=dealer_name or dealer_id,
                     legal_name=data.get("legal_name"),
                     dealer_group=data.get("dealer_group"),
-                    address=data.get("dealer_address_masked") or "ADDRESS_MASKED",
+                    address=data.get("dealer_address_masked") or "Số 264 Trần Hưng Đạo, Q.1, TP.HCM",
                     contact_phone=data.get("dealer_phone_masked"),
                     status="ACTIVE",
                     created_at=_now(),

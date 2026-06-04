@@ -20,6 +20,10 @@ from database import (
 router = APIRouter(prefix="/api/inventory", tags=["inventory"])
 
 LOT_TERMINAL = frozenset({"CLOSED", "CLEARED", "SCRAPPED"})
+# LOT mẫu cho smoke / admin — không đưa vào picker phân bổ chung (tránh nhiễu sau test)
+LOT_DEMO_IDS_HIDE_FROM_ACTIVE_OPTIONS = frozenset(
+    {"LOT-DEMO-CLEARED-001", "LOT-DEMO-DEPLETED-001", "LOT-DEMO-LOCKED-001"}
+)
 # Manual xuất kho: không cho khi đã terminal hoặc DEPLETED / hết tồn
 LOT_MANUAL_ISSUE_BLOCKED = frozenset({"CLOSED", "CLEARED", "SCRAPPED", "DEPLETED"})
 OFFCUT_ISSUEABLE = frozenset({"AVAILABLE", "PARTIALLY_USED"})
@@ -1098,6 +1102,8 @@ def register_inventory_routes(app, get_db):
         rows = db.query(DbLotInventory).filter(DbLotInventory.material_code == material_code).all()
         out = []
         for l in rows:
+            if l.lot_id in LOT_DEMO_IDS_HIDE_FROM_ACTIVE_OPTIONS:
+                continue
             eff = _norm_lot_status(l)
             if eff in LOT_TERMINAL or eff == "DEPLETED":
                 continue

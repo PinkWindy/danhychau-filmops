@@ -60,7 +60,10 @@ def main() -> int:
     ok(any((d.get("dealer_id") == "DEALER_LEXUS_SG") for d in dealers), "DEALER_LEXUS_SG missing")
     # 3
     cust = _items(client.get("/api/end-customers"))
-    ok(any("MASKED" in str(c.get("customer_masked") or "") for c in cust), "masked customer")
+    ok(
+        any(len((c.get("customer_name") or "").strip()) >= 3 for c in cust),
+        "end-customers have display names",
+    )
     # 4
     veh = _items(client.get("/api/vehicles"))
     ok(any((v.get("vehicle_model_code") or "").upper() == "RX350" for v in veh), "RX350 vehicle")
