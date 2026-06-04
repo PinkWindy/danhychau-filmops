@@ -24,6 +24,77 @@ def map_offcut_id(old_id):
     return val
 
 
+def _seed_customer_management_demo(db):
+    """Bổ sung dealer / KH / xe demo CRM — không xóa dữ liệu CSV hiện có."""
+    ts = datetime.datetime.utcnow().isoformat() + "Z"
+    extra_dealers = [
+        ("DEALER_MERCEDES_HCM", "Mercedes-Benz HCM", "MB HCM", "Mercedes", "ADDRESS_MASKED_MB_001", "ACTIVE"),
+        ("DEALER_BMW_PMH", "BMW Phú Mỹ Hưng", "BMW PMH", "BMW", "ADDRESS_MASKED_BMW_PMH", "ACTIVE"),
+        ("DEALER_DIRECT_RETAIL", "Kênh bán lẻ trực tiếp DYC", "DYC Retail", "DIRECT", "ADDRESS_MASKED_DIRECT", "ACTIVE"),
+    ]
+    for did, dname, legal, grp, addr, st in extra_dealers:
+        if not db.query(DbDealer).filter(DbDealer.dealer_id == did).first():
+            db.add(
+                DbDealer(
+                    dealer_id=did,
+                    dealer_name=dname,
+                    legal_name=legal,
+                    dealer_group=grp,
+                    address=addr,
+                    contact_phone="PHONE_MASKED_DEALER",
+                    status=st,
+                    created_at=ts,
+                )
+            )
+    extra_cust = [
+        ("CUS-20260604-001", "KH_MASKED_001", "KH_MASKED_001", "DEALER_LEXUS_SG", "DEALER", "END_CUSTOMER"),
+        ("CUS-20260604-002", "KH_MASKED_002", "KH_MASKED_002", "DEALER_TOYOTA_BENTHANH", "DEALER", "END_CUSTOMER"),
+        ("CUS-20260604-003", "KH_MASKED_003", "KH_MASKED_003", None, "DIRECT", "DIRECT_RETAIL"),
+    ]
+    for cid, cname, masked, src_d, ch, ctype in extra_cust:
+        if not db.query(DbCustomer).filter(DbCustomer.customer_id == cid).first():
+            db.add(
+                DbCustomer(
+                    customer_id=cid,
+                    customer_name=cname,
+                    customer_masked=masked,
+                    phone_masked="PHONE_MASKED",
+                    address_masked="ADDRESS_MASKED",
+                    source_dealer_id=src_d,
+                    customer_type=ctype,
+                    source_channel=ch,
+                    crm_status="NEW_PENDING_VERIFICATION",
+                    consent_status="UNKNOWN",
+                    status="ACTIVE",
+                    created_at=ts,
+                )
+            )
+    extra_veh = [
+        ("VEH-20260604-001", "LEXUS_RX350", "Lexus RX350", "VIN_MASKED_RX350_001", "CUS-20260604-001", "DEALER_LEXUS_SG"),
+        ("VEH-20260604-002", "LEXUS_LM500H", "Lexus LM500h", "VIN_MASKED_LM500H_001", "CUS-20260604-001", "DEALER_LEXUS_SG"),
+        ("VEH-20260604-003", "TOYOTA_CAMRY", "Toyota Camry", "VIN_MASKED_CAMRY_001", "CUS-20260604-002", "DEALER_TOYOTA_BENTHANH"),
+        ("VEH-20260604-004", "LEXUS_ES250", "Lexus ES250", "VIN_MASKED_ES250_001", "CUS-20260604-002", "DEALER_TOYOTA_BENTHANH"),
+    ]
+    for vid, vcode, mname, vinm, cust, deal in extra_veh:
+        if not db.query(DbVehicleProfile).filter(DbVehicleProfile.vehicle_id == vid).first():
+            db.add(
+                DbVehicleProfile(
+                    vehicle_id=vid,
+                    vin_number=f"VIN-SEED-{vid}",
+                    vin_masked=vinm,
+                    vehicle_model_code=vcode,
+                    model_name=mname,
+                    model_year=2026,
+                    color="Màu demo",
+                    customer_id=cust,
+                    dealer_id=deal,
+                    vehicle_status="ACTIVE",
+                    status="ACTIVE",
+                    created_at=ts,
+                )
+            )
+
+
 def _mat_slug(material_code: str) -> str:
     return material_code.replace("-", "")
 
@@ -622,7 +693,15 @@ def clean_and_load_csv():
     ]
     for r in reqs:
         db.add(r)
-    
+
+    db.execute(
+        text(
+            "UPDATE requests SET source_channel = 'OCR' "
+            "WHERE source_channel IS NULL OR TRIM(source_channel) = ''"
+        )
+    )
+    _seed_customer_management_demo(db)
+
     # 8. Add Workstreams for REQ-20260604-001
     db.query(DbWorkstream).delete()
     wf_plan = json.dumps([

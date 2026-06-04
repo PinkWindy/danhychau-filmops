@@ -50,6 +50,7 @@ const TRANG_THAI_VI = {
   'WAITING_INVENTORY_COMMIT': 'Chờ xác nhận kho',
   'CLOSED': 'Đã hoàn tất',
   'EXCEPTION_HOLD': 'Ngoại lệ — Chờ xử lý',
+  'NEEDS_REVIEW': 'Cần rà soát / thiếu dữ liệu hoặc kho',
   'PENDING_APPROVAL': 'Chờ phê duyệt',
   'PENDING': 'Chờ KTV nhận',
   'COMPLETED_BY_TECHNICIAN': 'KTV đã hoàn tất',
@@ -194,10 +195,295 @@ document.getElementById('btn-read-all').addEventListener('click', async () => {
   toast('info', 'Đã đọc hết', 'Tất cả thông báo đã được đánh dấu là đã đọc.');
 });
 
+// ═══ TẠO ĐƠN THỦ CÔNG + KHÁCH HÀNG ═══════════════════════════════════════════
+let _mcQuickMode = null;
+
+async function taiTaoDonTay() {
+  try {
+    const [dealers, custs, vehs] = await Promise.all([
+      fetch('/api/dealers').then(r => r.json()),
+      fetch('/api/end-customers').then(r => r.json()),
+      fetch('/api/vehicles').then(r => r.json()),
+    ]);
+    const sd = document.getElementById('mc-dealer-select');
+    const sc = document.getElementById('mc-cust-select');
+    const sv = document.getElementById('mc-veh-select');
+    const curD = sd.value, curC = sc.value, curV = sv.value;
+    sd.innerHTML = '<option value="">— Chọn —</option>' + dealers.map(d => `<option value="${d.dealer_id}">${d.dealer_id} — ${d.dealer_name}</option>`).join('');
+    sc.innerHTML = '<option value="">— Chọn —</option>' + custs.map(c => `<option value="${c.customer_id}">${c.customer_id} — ${c.customer_masked || c.customer_name}</option>`).join('');
+    sv.innerHTML = '<option value="">— Chọn —</option>' + vehs.map(v => `<option value="${v.vehicle_id}">${v.vehicle_id} — ${v.vehicle_model_code}</option>`).join('');
+    if ([...sd.options].some(o => o.value === curD)) sd.value = curD;
+    if ([...sc.options].some(o => o.value === curC)) sc.value = curC;
+    if ([...sv.options].some(o => o.value === curV)) sv.value = curV;
+  } catch (e) { toast('error', 'Lỗi tải danh mục', e.message); }
+}
+
+function _mcIsoDelivery() {
+  const d = document.getElementById('mc-deliv-date').value;
+  const t = document.getElementById('mc-deliv-time').value || '17:30';
+  if (!d) return '';
+  return `${d}T${t}:00+07:00`;
+}
+
+async function taiKhachHang() {
+  const sub = document.querySelector('.cust-sub.active')?.dataset.csub || 'dealers';
+  try {
+    const sum = await fetch('/api/customers/summary').then(r => r.json());
+    if (sub === 'dealers') {
+      const rows = await fetch('/api/dealers').then(r => r.json());
+      document.getElementById('cust-pane-dealers').innerHTML = `
+        <div class="kpi-grid kpi-grid-compact" style="margin-bottom:12px">
+          <div class="kpi-card" data-color="blue"><div class="kpi-val">${sum.total_dealers}</div><div class="kpi-label">Tổng đại lý</div></div>
+          <div class="kpi-card" data-color="green"><div class="kpi-val">${sum.active_dealers}</div><div class="kpi-label">Active</div></div>
+        </div>
+        <div class="table-wrap"><table class="data-table"><thead><tr>
+          <th>dealer_id</th><th>dealer_name</th><th>legal_name</th><th>group</th><th>phone</th><th>status</th><th></th>
+        </tr></thead><tbody>
+        ${rows.map(d => `<tr><td><strong>${d.dealer_id}</strong></td><td>${d.dealer_name}</td><td>${d.legal_name||'—'}</td><td>${d.dealer_group||'—'}</td><td>${d.contact_phone||'—'}</td><td>${d.status}</td>
+          <td><button class="btn btn-outline btn-sm" onclick="moDrawerDealer('${d.dealer_id}')">Lịch sử</button></td></tr>`).join('')}
+        </tbody></table></div>`;
+    } else if (sub === 'customers') {
+      const rows = await fetch('/api/end-customers').then(r => r.json());
+      document.getElementById('cust-pane-customers').innerHTML = `
+        <div class="kpi-grid kpi-grid-compact" style="margin-bottom:12px">
+          <div class="kpi-card" data-color="blue"><div class="kpi-val">${sum.total_end_customers}</div><div class="kpi-label">Tổng KH</div></div>
+          <div class="kpi-card" data-color="teal"><div class="kpi-val">${sum.verified_customers}</div><div class="kpi-label">Verified</div></div>
+          <div class="kpi-card" data-color="orange"><div class="kpi-val">${sum.pending_customers}</div><div class="kpi-label">Pending</div></div>
+          <div class="kpi-card" data-color="red"><div class="kpi-val">${sum.duplicate_review_count}</div><div class="kpi-label">Duplicate review</div></div>
+        </div>
+        <div class="table-wrap"><table class="data-table"><thead><tr>
+          <th>customer_id</th><th>masked</th><th>source</th><th>dealer</th><th>crm</th><th></th>
+        </tr></thead><tbody>
+        ${rows.map(c => `<tr><td><strong>${c.customer_id}</strong></td><td>${c.customer_masked||c.customer_name}</td><td>${c.source_channel}</td><td>${c.source_dealer_id||'—'}</td><td>${c.crm_status}</td>
+          <td><button class="btn btn-outline btn-sm" onclick="moDrawerCustomer('${c.customer_id}')">Xem</button></td></tr>`).join('')}
+        </tbody></table></div>`;
+    } else {
+      const rows = await fetch('/api/vehicles').then(r => r.json());
+      document.getElementById('cust-pane-vehicles').innerHTML = `
+        <div class="kpi-grid kpi-grid-compact" style="margin-bottom:12px">
+          <div class="kpi-card" data-color="blue"><div class="kpi-val">${sum.total_vehicles}</div><div class="kpi-label">Tổng xe</div></div>
+          <div class="kpi-card" data-color="orange"><div class="kpi-val">${sum.vehicles_without_customer}</div><div class="kpi-label">Chưa gắn KH</div></div>
+        </div>
+        <div class="table-wrap"><table class="data-table"><thead><tr>
+          <th>vehicle_id</th><th>model</th><th>vin_masked</th><th>dealer</th><th>customer</th><th></th>
+        </tr></thead><tbody>
+        ${rows.map(v => `<tr><td><strong>${v.vehicle_id}</strong></td><td>${v.vehicle_model_code}</td><td>${v.vin_masked||'—'}</td><td>${v.dealer_id||'—'}</td><td>${v.customer_id||'—'}</td>
+          <td><button class="btn btn-outline btn-sm" onclick="moDrawerVehicle('${v.vehicle_id}')">Xem</button></td></tr>`).join('')}
+        </tbody></table></div>`;
+    }
+    document.getElementById('cust-pane-dealers').style.display = sub === 'dealers' ? 'block' : 'none';
+    document.getElementById('cust-pane-customers').style.display = sub === 'customers' ? 'block' : 'none';
+    document.getElementById('cust-pane-vehicles').style.display = sub === 'vehicles' ? 'block' : 'none';
+  } catch (e) { toast('error', 'Lỗi tab Khách hàng', e.message); }
+}
+
+window.moDrawerDealer = async function(id) {
+  const ov = document.getElementById('modal-drawer-overlay');
+  const h = await fetch(`/api/dealers/${encodeURIComponent(id)}/history`).then(r => r.json());
+  document.getElementById('drawer-title').textContent = 'Đại lý — ' + id;
+  document.getElementById('drawer-body').innerHTML = `<pre style="white-space:pre-wrap;font-size:12px">${JSON.stringify(h, null, 2)}</pre>`;
+  ov.style.display = 'flex';
+};
+window.moDrawerCustomer = async function(id) {
+  const ov = document.getElementById('modal-drawer-overlay');
+  const h = await fetch(`/api/customers/${encodeURIComponent(id)}/history`).then(r => r.json());
+  document.getElementById('drawer-title').textContent = 'Khách hàng — ' + id;
+  document.getElementById('drawer-body').innerHTML = `<pre style="white-space:pre-wrap;font-size:12px">${JSON.stringify(h, null, 2)}</pre>`;
+  ov.style.display = 'flex';
+};
+window.moDrawerVehicle = async function(id) {
+  const ov = document.getElementById('modal-drawer-overlay');
+  const h = await fetch(`/api/vehicles/${encodeURIComponent(id)}/history`).then(r => r.json());
+  document.getElementById('drawer-title').textContent = 'Xe — ' + id;
+  document.getElementById('drawer-body').innerHTML = `<pre style="white-space:pre-wrap;font-size:12px">${JSON.stringify(h, null, 2)}</pre>`;
+  ov.style.display = 'flex';
+};
+
+function _openQuick(title, html) {
+  document.getElementById('modal-quick-title').textContent = title;
+  document.getElementById('modal-quick-body').innerHTML = html;
+  document.getElementById('modal-quick-overlay').style.display = 'flex';
+}
+
+document.getElementById('modal-quick-cancel')?.addEventListener('click', () => {
+  document.getElementById('modal-quick-overlay').style.display = 'none';
+  _mcQuickMode = null;
+});
+document.getElementById('drawer-close')?.addEventListener('click', () => {
+  document.getElementById('modal-drawer-overlay').style.display = 'none';
+});
+
+document.getElementById('modal-quick-ok')?.addEventListener('click', async () => {
+  const actor = 'AD-001';
+  try {
+    if (_mcQuickMode === 'dealer') {
+      const body = {
+        dealer_id: document.getElementById('qc-dealer-id').value.trim(),
+        dealer_name: document.getElementById('qc-dealer-name').value.trim(),
+        legal_name: document.getElementById('qc-dealer-legal').value.trim() || null,
+        dealer_group: document.getElementById('qc-dealer-group').value.trim() || null,
+        address: document.getElementById('qc-dealer-addr').value.trim() || null,
+        phone_masked: document.getElementById('qc-dealer-phone').value.trim() || null,
+        created_by: actor,
+        note: document.getElementById('qc-dealer-note').value.trim() || null,
+      };
+      const r = await fetch('/api/dealers', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      if (!r.ok) throw new Error(await r.text());
+      toast('success', 'Đại lý', 'Đã tạo đại lý');
+      document.getElementById('mc-dealer-select').value = body.dealer_id;
+    } else if (_mcQuickMode === 'customer') {
+      const body = {
+        customer_id: document.getElementById('qc-cust-id').value.trim(),
+        customer_masked: document.getElementById('qc-cust-mask').value.trim(),
+        phone_masked: document.getElementById('qc-cust-phone').value.trim() || null,
+        address_masked: document.getElementById('qc-cust-addr').value.trim() || null,
+        source_dealer_id: document.getElementById('mc-dealer-select').value || null,
+        source_channel: 'DEALER',
+        created_by: actor,
+        note: document.getElementById('qc-cust-note').value.trim() || null,
+      };
+      const r = await fetch('/api/end-customers', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      if (!r.ok) throw new Error(await r.text());
+      toast('success', 'Khách hàng', 'Đã tạo khách hàng');
+      document.getElementById('mc-cust-select').value = body.customer_id;
+    } else if (_mcQuickMode === 'vehicle') {
+      const body = {
+        vehicle_id: document.getElementById('qc-veh-id').value.trim(),
+        customer_id: document.getElementById('mc-cust-select').value || null,
+        dealer_id: document.getElementById('mc-dealer-select').value || null,
+        vehicle_model_code: document.getElementById('qc-veh-code').value.trim(),
+        model_name: document.getElementById('qc-veh-model').value.trim(),
+        vin_masked: document.getElementById('qc-veh-vin').value.trim(),
+        delivery_date: document.getElementById('qc-veh-deliv').value || null,
+        created_by: actor,
+        note: document.getElementById('qc-veh-note').value.trim() || null,
+      };
+      const r = await fetch('/api/vehicles', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      if (!r.ok) throw new Error(await r.text());
+      toast('success', 'Xe', 'Đã tạo hồ sơ xe');
+      document.getElementById('mc-veh-select').value = body.vehicle_id;
+    }
+    document.getElementById('modal-quick-overlay').style.display = 'none';
+    taiTaoDonTay();
+  } catch (e) { toast('error', 'Lỗi lưu', e.message); }
+});
+
+document.getElementById('mc-btn-quick-dealer')?.addEventListener('click', () => {
+  _mcQuickMode = 'dealer';
+  const sug = 'DEALER-Q-' + Date.now().toString().slice(-6);
+  _openQuick('Tạo đại lý nhanh', `
+    <label>dealer_id</label><input id="qc-dealer-id" class="wide" value="${sug}" />
+    <label>dealer_name</label><input id="qc-dealer-name" />
+    <label>legal_name</label><input id="qc-dealer-legal" />
+    <label>dealer_group</label><input id="qc-dealer-group" />
+    <label>address_masked</label><input id="qc-dealer-addr" value="ADDRESS_MASKED" />
+    <label>phone_masked</label><input id="qc-dealer-phone" value="PHONE_MASKED" />
+    <label>note</label><input id="qc-dealer-note" />`);
+});
+document.getElementById('mc-btn-quick-cust')?.addEventListener('click', () => {
+  _mcQuickMode = 'customer';
+  const sug = 'CUS-Q-' + Date.now().toString().slice(-6);
+  _openQuick('Tạo khách hàng nhanh', `
+    <label>customer_id</label><input id="qc-cust-id" value="${sug}" />
+    <label>customer_masked</label><input id="qc-cust-mask" value="KH_MASKED_Q" />
+    <label>phone_masked</label><input id="qc-cust-phone" />
+    <label>address_masked</label><input id="qc-cust-addr" />
+    <label>note</label><input id="qc-cust-note" />`);
+});
+document.getElementById('mc-btn-quick-veh')?.addEventListener('click', () => {
+  _mcQuickMode = 'vehicle';
+  const sug = 'VEH-Q-' + Date.now().toString().slice(-6);
+  _openQuick('Tạo xe nhanh', `
+    <label>vehicle_id</label><input id="qc-veh-id" value="${sug}" />
+    <label>vehicle_model_code</label><input id="qc-veh-code" value="LEXUS_RX350" />
+    <label>model_name</label><input id="qc-veh-model" value="Lexus RX350" />
+    <label>vin_masked</label><input id="qc-veh-vin" value="VIN_MASKED_Q" />
+    <label>delivery_date</label><input id="qc-veh-deliv" type="date" />
+    <label>note</label><input id="qc-veh-note" />`);
+});
+
+document.getElementById('mc-dealer-select')?.addEventListener('change', (e) => {
+  const id = e.target.value;
+  document.getElementById('mc-dealer-hint').textContent = id ? `Đã chọn: ${id}` : '';
+});
+document.getElementById('mc-cust-select')?.addEventListener('change', async (e) => {
+  const id = e.target.value;
+  if (!id) return;
+  const c = await fetch('/api/end-customers').then(r => r.json()).then(arr => arr.find(x => x.customer_id === id));
+  if (c) {
+    document.getElementById('mc-cust-masked').value = c.customer_masked || c.customer_name || '';
+    document.getElementById('mc-phone-masked').value = c.phone_masked || '';
+    document.getElementById('mc-addr-masked').value = c.address_masked || '';
+  }
+});
+document.getElementById('mc-veh-select')?.addEventListener('change', async (e) => {
+  const id = e.target.value;
+  if (!id) return;
+  const v = await fetch('/api/vehicles').then(r => r.json()).then(arr => arr.find(x => x.vehicle_id === id));
+  if (v) {
+    document.getElementById('mc-veh-model').value = v.vehicle_model_code || '';
+    document.getElementById('mc-vin-masked').value = v.vin_masked || '';
+  }
+});
+
+document.getElementById('mc-btn-submit')?.addEventListener('click', async () => {
+  const dealer = document.getElementById('mc-dealer-select').value;
+  if (!dealer) { toast('warning', 'Thiếu đại lý', 'Chọn hoặc tạo đại lý nhanh'); return; }
+  const vm = document.getElementById('mc-veh-model').value.trim();
+  if (!vm) { toast('warning', 'Thiếu model', 'Nhập vehicle_model_code'); return; }
+  const ppf = document.getElementById('mc-svc-ppf').checked;
+  const wf = document.getElementById('mc-svc-wf').checked;
+  if (!ppf && !wf) { toast('warning', 'Dịch vụ', 'Chọn ít nhất một dịch vụ'); return; }
+  if (ppf && !document.getElementById('mc-ppf-type').value) { toast('warning', 'PPF', 'Chọn loại PPF'); return; }
+  const wfItems = [...document.querySelectorAll('.mc-wf-item:checked')].map(x => x.value);
+  const payload = {
+    dealer_id: dealer,
+    customer_id: document.getElementById('mc-cust-select').value || undefined,
+    customer_masked: document.getElementById('mc-cust-masked').value.trim() || undefined,
+    phone_masked: document.getElementById('mc-phone-masked').value.trim() || undefined,
+    address_masked: document.getElementById('mc-addr-masked').value.trim() || undefined,
+    vehicle_id: document.getElementById('mc-veh-select').value || undefined,
+    vehicle_model: vm,
+    vin_masked: document.getElementById('mc-vin-masked').value.trim() || undefined,
+    requested_delivery_at: _mcIsoDelivery() || undefined,
+    service_selection: {
+      include_ppf: ppf,
+      ppf_type: document.getElementById('mc-ppf-type').value,
+      include_window_film: wf,
+      window_film_items: wfItems,
+    },
+    assigned_teams: {
+      ppf_team: document.getElementById('mc-team-ppf').value,
+      window_film_team: document.getElementById('mc-team-wf').value,
+    },
+    created_by: 'AD-001',
+    note: document.getElementById('mc-note').value.trim() || undefined,
+  };
+  try {
+    const r = await fetch('/api/requests/manual-create', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.detail || JSON.stringify(data));
+    toast('success', 'Đã tạo đơn', 'Đơn thủ công thành công');
+    document.querySelector('[data-tab="requests"]').click();
+    setTimeout(() => { window.chonDon(data.request_id); }, 300);
+  } catch (e) { toast('error', 'Lỗi tạo đơn', e.message); }
+});
+document.getElementById('mc-btn-draft')?.addEventListener('click', () => {
+  localStorage.setItem('mc_draft', JSON.stringify({ note: document.getElementById('mc-note').value }));
+  toast('info', 'Nháp', 'Đã lưu localStorage (demo)');
+});
+document.getElementById('mc-btn-reset')?.addEventListener('click', () => {
+  document.getElementById('mc-note').value = '';
+  document.getElementById('mc-cust-masked').value = '';
+  toast('info', 'Reset', 'Form đã xóa một phần');
+});
+
 // ─── ĐIỀU HƯỚNG ──────────────────────────────────────────────────────────────
 const tabLoaders = {
   dashboard: taiTongQuan,
   ocr: taiDanhSachOcr,
+  manual: taiTaoDonTay,
+  customers: taiKhachHang,
   requests: taiDonThiCong,
   workstreams: taiBangLuong,
   jobcards: taiLenhThiCong,
@@ -282,6 +568,16 @@ async function taiTongQuan() {
     document.getElementById('stat-wf-done').textContent = dash.wf_completed || 0;
     document.getElementById('stat-approval-ws').textContent = dash.pending_approval_workstreams || 0;
     document.getElementById('stat-closed').textContent = dash.closed_requests || 0;
+    const elC = document.getElementById('stat-total-customers');
+    if (elC) elC.textContent = dash.total_customers ?? '—';
+    const elD = document.getElementById('stat-total-dealers-dash');
+    if (elD) elD.textContent = dash.total_dealers ?? '—';
+    const elV = document.getElementById('stat-total-vehicles-dash');
+    if (elV) elV.textContent = dash.total_vehicles ?? '—';
+    const elM = document.getElementById('stat-manual-today');
+    if (elM) elM.textContent = dash.manual_requests_today ?? 0;
+    const elO = document.getElementById('stat-ocr-today');
+    if (elO) elO.textContent = dash.ocr_requests_today ?? 0;
 
     // Hàng chờ phê duyệt
     const choiDuyet = wss.filter(w => w.status === 'PENDING_APPROVAL');
@@ -509,10 +805,17 @@ async function hienThiDon(req) {
   stEl.className = `status-badge status-${(req.status||'').toLowerCase().replace(/_/g,'-')}`;
   stEl.textContent = TRANG_THAI_VI[req.status] || req.status;
   document.getElementById('board-multi-ws-badge').style.display = req.is_multi_workstream ? 'inline-block' : 'none';
-  document.getElementById('det-dealer').textContent = req.dealer_id;
+  document.getElementById('det-dealer').textContent = req.dealer_id || '—';
+  const sc = req.source_channel || 'OCR';
+  const scEl = document.getElementById('det-source-channel');
+  if (scEl) scEl.textContent = sc === 'MANUAL' ? 'Thủ công (MANUAL)' : 'OCR';
+  const cidEl = document.getElementById('det-customer-id');
+  if (cidEl) cidEl.textContent = req.customer_id || '—';
+  const vidEl = document.getElementById('det-vehicle-id');
+  if (vidEl) vidEl.textContent = req.vehicle_id || '—';
   document.getElementById('det-customer').textContent = req.customer_name;
   document.getElementById('det-model').textContent = req.vehicle_model_code;
-  document.getElementById('det-vin').textContent = req.vin_number;
+  document.getElementById('det-vin').textContent = req.vin_masked || req.vin_number;
   document.getElementById('det-deadline').textContent = fmtDt(req.requested_delivery_time);
   const cgBox = document.getElementById('cutting-group-box');
   if (req.is_grouped_cut) {
@@ -524,7 +827,7 @@ async function hienThiDon(req) {
 
   // Tiến trình
   const steps = ['DRAFT','STANDARDIZED','NORM_ASSIGNED','ALLOCATED','APPROVED','IN_PROGRESS','CLOSED'];
-  const specialMap = { 'PARTIALLY_COMPLETED':'IN_PROGRESS','WAITING_INVENTORY_COMMIT':'IN_PROGRESS','EXCEPTION_HOLD':'ALLOCATED' };
+  const specialMap = { 'PARTIALLY_COMPLETED':'IN_PROGRESS','WAITING_INVENTORY_COMMIT':'IN_PROGRESS','EXCEPTION_HOLD':'ALLOCATED','NEEDS_REVIEW':'ALLOCATED' };
   const effStatus = specialMap[req.status] || req.status;
   const curIdx = steps.indexOf(effStatus);
   steps.forEach((st, idx) => {
@@ -552,7 +855,7 @@ async function hienThiDon(req) {
   } else if (req.status === 'NORM_ASSIGNED') {
     document.getElementById('agent-run-zone').style.display = 'block';
     desc.textContent = 'BƯỚC 3: AI Agent đề xuất nguồn vật tư (LOT/mảnh dư) phù hợp. Nếu đa luồng sẽ tạo 2 luồng thi công.';
-  } else if (req.status === 'ALLOCATED') {
+  } else if (req.status === 'ALLOCATED' || req.status === 'NEEDS_REVIEW') {
     if (req.is_multi_workstream) {
       document.getElementById('hitl-ws-zone').style.display = 'block';
       await hienThiThePheDuyet(req.request_id);
@@ -1837,6 +2140,13 @@ document.addEventListener('DOMContentLoaded', () => {
     btn.addEventListener('click', () => {
       _invSub = btn.dataset.invSub;
       taiQuanLyKho();
+    });
+  });
+  document.querySelectorAll('.cust-sub').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.cust-sub').forEach(b => { b.classList.remove('active'); b.classList.remove('btn-primary'); b.classList.add('btn-outline'); });
+      btn.classList.add('active'); btn.classList.remove('btn-outline'); btn.classList.add('btn-primary');
+      taiKhachHang();
     });
   });
   taiTongQuan();

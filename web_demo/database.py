@@ -18,33 +18,60 @@ class DbDealer(Base):
     __tablename__ = "dealers"
     dealer_id = Column(String, primary_key=True, index=True)
     dealer_name = Column(String, nullable=False)
+    legal_name = Column(String)
+    dealer_group = Column(String)
+    tax_code = Column(String)
     address = Column(String)
     contact_phone = Column(String)
+    contact_person = Column(String)
     email = Column(String)
     status = Column(String, default="ACTIVE")
+    created_at = Column(String)
+    updated_at = Column(String)
+    note = Column(Text)
 
 
 class DbCustomer(Base):
     __tablename__ = "customers"
     customer_id = Column(String, primary_key=True, index=True)
     customer_name = Column(String, nullable=False)
+    customer_masked = Column(String)
     phone = Column(String)
+    phone_masked = Column(String)
     email = Column(String)
+    address = Column(Text)
+    address_masked = Column(String)
     source_dealer_id = Column(String)
+    customer_type = Column(String, default="END_CUSTOMER")
+    source_channel = Column(String, default="MANUAL")
+    crm_status = Column(String, default="NEW_PENDING_VERIFICATION")
+    consent_status = Column(String, default="UNKNOWN")
+    created_from_request_id = Column(String)
     status = Column(String, default="ACTIVE")
+    created_at = Column(String)
+    updated_at = Column(String)
+    note = Column(Text)
 
 
 class DbVehicleProfile(Base):
     __tablename__ = "vehicle_profiles"
     vehicle_id = Column(String, primary_key=True, index=True)
-    vin_number = Column(String, unique=True, index=True)
+    vin_number = Column(String, index=True)
+    vin_masked = Column(String)
     plate_number = Column(String)
     vehicle_model_code = Column(String)
+    model_name = Column(String)
     model_year = Column(Integer)
     color = Column(String)
     customer_id = Column(String)
     dealer_id = Column(String)
+    delivery_date = Column(String)
+    created_from_request_id = Column(String)
+    vehicle_status = Column(String, default="ACTIVE")
     status = Column(String, default="ACTIVE")
+    created_at = Column(String)
+    updated_at = Column(String)
+    note = Column(Text)
 
 
 class DbLotInventory(Base):
@@ -130,6 +157,12 @@ class DbRequest(Base):
     created_at = Column(String)
     # Multi-workstream flag
     is_multi_workstream = Column(Boolean, default=False)
+    # Channel & CRM links
+    source_channel = Column(String, default="OCR")
+    request_no = Column(String)
+    dealer_name = Column(String)
+    vin_masked = Column(String)
+    service_selection_json = Column(Text)
 
 
 class DbWorkstream(Base):
@@ -380,6 +413,58 @@ def init_db():
         ]
         for col, col_def in offcut_new_cols:
             _add_column_if_missing(conn, "offcut_inventory", col, col_def)
+
+        dealer_new_cols = [
+            ("legal_name", "TEXT"),
+            ("dealer_group", "TEXT"),
+            ("tax_code", "TEXT"),
+            ("contact_person", "TEXT"),
+            ("created_at", "TEXT"),
+            ("updated_at", "TEXT"),
+            ("note", "TEXT"),
+        ]
+        for col, col_def in dealer_new_cols:
+            _add_column_if_missing(conn, "dealers", col, col_def)
+
+        customer_new_cols = [
+            ("customer_masked", "TEXT"),
+            ("phone_masked", "TEXT"),
+            ("address_masked", "TEXT"),
+            ("address", "TEXT"),
+            ("customer_type", "TEXT DEFAULT 'END_CUSTOMER'"),
+            ("source_channel", "TEXT DEFAULT 'MANUAL'"),
+            ("crm_status", "TEXT DEFAULT 'NEW_PENDING_VERIFICATION'"),
+            ("consent_status", "TEXT DEFAULT 'UNKNOWN'"),
+            ("created_from_request_id", "TEXT"),
+            ("created_at", "TEXT"),
+            ("updated_at", "TEXT"),
+            ("note", "TEXT"),
+        ]
+        for col, col_def in customer_new_cols:
+            _add_column_if_missing(conn, "customers", col, col_def)
+
+        vehicle_new_cols = [
+            ("vin_masked", "TEXT"),
+            ("model_name", "TEXT"),
+            ("delivery_date", "TEXT"),
+            ("created_from_request_id", "TEXT"),
+            ("vehicle_status", "TEXT DEFAULT 'ACTIVE'"),
+            ("created_at", "TEXT"),
+            ("updated_at", "TEXT"),
+            ("note", "TEXT"),
+        ]
+        for col, col_def in vehicle_new_cols:
+            _add_column_if_missing(conn, "vehicle_profiles", col, col_def)
+
+        request_new_cols = [
+            ("source_channel", "TEXT DEFAULT 'OCR'"),
+            ("request_no", "TEXT"),
+            ("dealer_name", "TEXT"),
+            ("vin_masked", "TEXT"),
+            ("service_selection_json", "TEXT"),
+        ]
+        for col, col_def in request_new_cols:
+            _add_column_if_missing(conn, "requests", col, col_def)
 
         conn.commit()
         conn.close()

@@ -6,6 +6,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
+from sqlalchemy import or_
 
 from database import (
     SessionLocal, init_db,
@@ -16,6 +17,7 @@ from database import (
     DbOcrDraft, DbNotification
 )
 from inventory_api import register_inventory_routes, assert_source_valid_for_wf6_commit
+from customer_api import register_customer_routes
 
 app = FastAPI(title="DYC Film Warehouse — Multi-Workstream Agentic Portal")
 
@@ -37,6 +39,7 @@ def get_db():
         db.close()
 
 register_inventory_routes(app, get_db)
+register_customer_routes(app, get_db)
 
 def _now():
     return datetime.datetime.utcnow().isoformat() + "Z"
@@ -155,7 +158,8 @@ def _update_request_status_from_workstreams(db: Session, req: DbRequest):
     elif any(s == "APPROVED" for s in statuses):
         req.status = "APPROVED"
     elif all(s == "PENDING_APPROVAL" for s in statuses):
-        req.status = "ALLOCATED"  # ready for approval
+        if getattr(req, "status", None) != "NEEDS_REVIEW":
+            req.status = "ALLOCATED"  # ready for approval
 
 def _commit_workstream_inventory(db: Session, ws: DbWorkstream, tech_id: str = "KTV-003"):
     """Commit inventory transaction for a single workstream."""
@@ -260,6 +264,18 @@ def get_dashboard(db: Session = Depends(get_db)):
         DbNotification.is_read == False).count()
     ocr_pending = db.query(DbOcrDraft).filter(
         DbOcrDraft.review_status == "REVIEWING").count()
+    total_customers = db.query(DbCustomer).count()
+    total_dealers = db.query(DbDealer).count()
+    total_vehicles = db.query(DbVehicleProfile).count()
+    today_prefix = datetime.date.today().strftime("%Y-%m-%d")
+    manual_today = db.query(DbRequest).filter(
+        DbRequest.source_channel == "MANUAL",
+        DbRequest.created_at.like(f"{today_prefix}%"),
+    ).count()
+    ocr_today = db.query(DbRequest).filter(
+        DbRequest.created_at.like(f"{today_prefix}%"),
+        or_(DbRequest.source_channel == "OCR", DbRequest.source_channel == None),
+    ).count()
     jobs_in_progress = db.query(DbJobCard).filter(
         DbJobCard.status == "IN_PROGRESS").count()
 
@@ -277,6 +293,11 @@ def get_dashboard(db: Session = Depends(get_db)):
         "jobs_in_progress": jobs_in_progress,
         "unread_notifications": unread_notifs,
         "ocr_pending_review": ocr_pending,
+        "total_customers": total_customers,
+        "total_dealers": total_dealers,
+        "total_vehicles": total_vehicles,
+        "manual_requests_today": manual_today,
+        "ocr_requests_today": ocr_today,
     }
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -789,8 +810,8 @@ def complete_workstream(ws_id: str, data: dict = None, db: Session = Depends(get
 def approve_request_legacy(request_id: str, db: Session = Depends(get_db)):
     req = db.query(DbRequest).filter(DbRequest.request_id == request_id).first()
     if not req: raise HTTPException(404, "Not found")
-    if req.status not in ("ALLOCATED",):
-        raise HTTPException(400, f"Request must be ALLOCATED. Current: {req.status}")
+    if req.status not in ("ALLOCATED", "NEEDS_REVIEW"):
+        raise HTTPException(400, f"Request must be ALLOCATED or NEEDS_REVIEW. Current: {req.status}")
 
     wss = db.query(DbWorkstream).filter(DbWorkstream.request_id == request_id).all()
     jc_ids = []
@@ -1033,7 +1054,8 @@ def confirm_ocr(draft_id: str, data: dict, db: Session = Depends(get_db)):
         job_items=draft.extracted_job_items,
         status="DRAFT", is_grouped_cut=False, is_multi_workstream=is_multi,
         requested_delivery_time=draft.extracted_delivery_time,
-        created_at=_now()
+        created_at=_now(),
+        source_channel="OCR",
     )
     db.add(new_req)
     draft.review_status = "CONFIRMED"; draft.confirmed_by = "ADMIN-001"
@@ -1090,7 +1112,7 @@ def demo_run_all(request_id: str, db: Session = Depends(get_db)):
         elif req.status == "NORM_ASSIGNED":
             r = run_request_step(request_id, db); db.refresh(req)
             steps.append({"step":"WF4_ALLOCATE","result":r.get("detail","")})
-        elif req.status == "ALLOCATED":
+        elif req.status in ("ALLOCATED", "NEEDS_REVIEW"):
             r = approve_request_legacy(request_id, db); db.refresh(req)
             steps.append({"step":"WF5_APPROVE_ALL","result":r.get("detail","")})
         elif req.status in ("APPROVED","IN_PROGRESS","PARTIALLY_COMPLETED"):

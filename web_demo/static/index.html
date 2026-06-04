@@ -27,6 +27,8 @@
     <div class="nav-links" id="nav-links">
       <button class="nav-tab active" data-tab="dashboard"><i class="fa-solid fa-gauge-high"></i> Tổng quan</button>
       <button class="nav-tab" data-tab="ocr"><i class="fa-solid fa-camera"></i> Nhập phiếu OCR</button>
+      <button class="nav-tab" data-tab="manual"><span class="nav-emoji" aria-hidden="true">📝</span> Tạo đơn</button>
+      <button class="nav-tab" data-tab="customers"><span class="nav-emoji" aria-hidden="true">👥</span> Khách hàng</button>
       <button class="nav-tab" data-tab="requests"><i class="fa-solid fa-file-lines"></i> Đơn thi công</button>
       <button class="nav-tab" data-tab="workstreams"><i class="fa-solid fa-layer-group"></i> Luồng thi công</button>
       <button class="nav-tab" data-tab="jobcards"><i class="fa-solid fa-screwdriver-wrench"></i> Lệnh thi công</button>
@@ -143,6 +145,14 @@
       </div>
     </div>
 
+    <div class="kpi-grid kpi-grid-compact" style="margin-top:14px">
+      <div class="kpi-card" data-color="blue"><div class="kpi-icon"><i class="fa-solid fa-user"></i></div><div><div class="kpi-val" id="stat-total-customers">—</div><div class="kpi-label">Khách hàng</div></div></div>
+      <div class="kpi-card" data-color="purple"><div class="kpi-icon"><i class="fa-solid fa-store"></i></div><div><div class="kpi-val" id="stat-total-dealers-dash">—</div><div class="kpi-label">Đại lý</div></div></div>
+      <div class="kpi-card" data-color="teal"><div class="kpi-icon"><i class="fa-solid fa-car"></i></div><div><div class="kpi-val" id="stat-total-vehicles-dash">—</div><div class="kpi-label">Hồ sơ xe</div></div></div>
+      <div class="kpi-card" data-color="orange"><div class="kpi-icon"><i class="fa-solid fa-pen-to-square"></i></div><div><div class="kpi-val" id="stat-manual-today">—</div><div class="kpi-label">Đơn thủ công hôm nay</div></div></div>
+      <div class="kpi-card" data-color="green"><div class="kpi-icon"><i class="fa-solid fa-camera"></i></div><div><div class="kpi-val" id="stat-ocr-today">—</div><div class="kpi-label">Đơn OCR hôm nay</div></div></div>
+    </div>
+
     <div class="dashboard-panels">
       <!-- Hàng chờ phê duyệt -->
       <div class="panel">
@@ -248,6 +258,105 @@
     </div>
   </div>
 
+  <!-- ════════════════ TẠO ĐƠN THỦ CÔNG ════════════════ -->
+  <div class="tab-pane" id="tab-manual">
+    <div class="section-header">
+      <h2><span aria-hidden="true">📝</span> Tạo đơn thi công thủ công</h2>
+      <p>Không qua OCR — chọn đại lý, khách, xe và dịch vụ PPF / phim cách nhiệt.</p>
+    </div>
+    <div class="manual-create-layout">
+      <div class="panel" style="max-width:920px;margin:0 auto">
+        <div class="panel-header"><h3>Thông tin đơn</h3></div>
+        <div class="manual-form" style="padding:16px">
+          <div class="manual-section"><h4>1. Đại lý</h4>
+            <div class="form-row">
+              <label>Chọn đại lý</label>
+              <select id="mc-dealer-select"><option value="">— Chọn —</option></select>
+              <button type="button" class="btn btn-outline btn-sm" id="mc-btn-quick-dealer">+ Tạo đại lý nhanh</button>
+            </div>
+            <p class="muted" id="mc-dealer-hint" style="font-size:11px"></p>
+          </div>
+          <div class="manual-section"><h4>2. Khách hàng</h4>
+            <div class="form-row">
+              <label>Khách hàng</label>
+              <select id="mc-cust-select"><option value="">— Chọn —</option></select>
+              <button type="button" class="btn btn-outline btn-sm" id="mc-btn-quick-cust">+ Tạo KH nhanh</button>
+            </div>
+            <div class="form-grid-2">
+              <div><label>customer_masked</label><input type="text" id="mc-cust-masked" placeholder="KH_MASKED_…" /></div>
+              <div><label>phone_masked</label><input type="text" id="mc-phone-masked" /></div>
+              <div style="grid-column:1/-1"><label>address_masked</label><input type="text" id="mc-addr-masked" /></div>
+            </div>
+          </div>
+          <div class="manual-section"><h4>3. Xe</h4>
+            <div class="form-row">
+              <label>Hồ sơ xe</label>
+              <select id="mc-veh-select"><option value="">— Chọn —</option></select>
+              <button type="button" class="btn btn-outline btn-sm" id="mc-btn-quick-veh">+ Tạo xe nhanh</button>
+            </div>
+            <div class="form-grid-2">
+              <div><label>vehicle_model_code</label><input type="text" id="mc-veh-model" placeholder="LEXUS_RX350" /></div>
+              <div><label>vin_masked</label><input type="text" id="mc-vin-masked" /></div>
+            </div>
+          </div>
+          <div class="manual-section"><h4>4. Thời gian giao xe</h4>
+            <div class="form-grid-2">
+              <div><label>Ngày</label><input type="date" id="mc-deliv-date" /></div>
+              <div><label>Giờ</label><input type="time" id="mc-deliv-time" /></div>
+            </div>
+            <p class="muted" style="font-size:11px">Có thể để trống — hệ thống đánh dấu NEEDS_REVIEW.</p>
+          </div>
+          <div class="manual-section"><h4>5. Dịch vụ</h4>
+            <label class="chk"><input type="checkbox" id="mc-svc-ppf" checked /> Có phim PPF</label>
+            <div id="mc-ppf-box" style="margin:8px 0 12px 16px">
+              <label>PPF type</label>
+              <select id="mc-ppf-type"><option value="T-TYPE">T-TYPE — trong</option><option value="M-TYPE">M-TYPE — mờ</option></select>
+              <p class="muted" style="font-size:11px">Block: 152×1300 cm · Khấu trừ: 13,0 m (readonly)</p>
+            </div>
+            <label class="chk"><input type="checkbox" id="mc-svc-wf" checked /> Có phim cách nhiệt</label>
+            <div id="mc-wf-box" style="margin:8px 0 0 16px;font-size:12px">
+              <label class="chk"><input type="checkbox" class="mc-wf-item" value="WINDSHIELD" checked /> Kính lái — RT40</label>
+              <label class="chk"><input type="checkbox" class="mc-wf-item" value="REAR_WINDOW" checked /> Kính hậu — JB20</label>
+              <label class="chk"><input type="checkbox" class="mc-wf-item" value="FRONT_SIDE" checked /> Sườn trước — JB20</label>
+              <label class="chk"><input type="checkbox" class="mc-wf-item" value="REAR_SIDE_TRIANGLE" checked /> Sườn sau + tam giác — JB20</label>
+              <label class="chk"><input type="checkbox" class="mc-wf-item" value="SUNROOF" checked /> Sunroof — JB20</label>
+            </div>
+          </div>
+          <div class="manual-section"><h4>6. Đội thi công</h4>
+            <div class="form-grid-2">
+              <div><label>PPF team</label><select id="mc-team-ppf"><option>PPF_TEAM_A</option><option>PPF_TEAM_B</option></select></div>
+              <div><label>Window film team</label><select id="mc-team-wf"><option>WINDOW_FILM_TEAM_B</option><option>WINDOW_FILM_TEAM_A</option></select></div>
+            </div>
+          </div>
+          <div class="manual-section"><h4>7. Ghi chú</h4>
+            <textarea id="mc-note" rows="2" style="width:100%"></textarea>
+          </div>
+          <div class="form-actions" style="display:flex;gap:10px;flex-wrap:wrap;margin-top:16px">
+            <button type="button" class="btn btn-primary" id="mc-btn-submit"><i class="fa-solid fa-check"></i> Tạo đơn</button>
+            <button type="button" class="btn btn-outline" id="mc-btn-draft">Lưu nháp (local)</button>
+            <button type="button" class="btn btn-outline" id="mc-btn-reset">Reset</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════════ QUẢN LÝ KHÁCH HÀNG ════════════════ -->
+  <div class="tab-pane" id="tab-customers">
+    <div class="section-header">
+      <h2><span aria-hidden="true">👥</span> Quản lý khách hàng & hồ sơ</h2>
+      <p>Đại lý, khách hàng lẻ, hồ sơ xe — xem / sửa / lịch sử.</p>
+    </div>
+    <div class="cust-subtabs" style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
+      <button type="button" class="btn btn-primary btn-sm cust-sub active" data-csub="dealers">Đại lý</button>
+      <button type="button" class="btn btn-outline btn-sm cust-sub" data-csub="customers">Khách hàng lẻ</button>
+      <button type="button" class="btn btn-outline btn-sm cust-sub" data-csub="vehicles">Hồ sơ xe</button>
+    </div>
+    <div id="cust-pane-dealers" class="cust-pane"></div>
+    <div id="cust-pane-customers" class="cust-pane" style="display:none"></div>
+    <div id="cust-pane-vehicles" class="cust-pane" style="display:none"></div>
+  </div>
+
   <!-- ════════════════ ĐƠN THI CÔNG E2E ════════════════ -->
   <div class="tab-pane" id="tab-requests">
     <div class="section-header">
@@ -311,6 +420,8 @@
               <h4><i class="fa-solid fa-car"></i> Thông Tin Xe & Khách Hàng</h4>
               <div class="detail-grid">
                 <span class="dl">Đại lý</span><span class="dv" id="det-dealer">—</span>
+                <span class="dl">Kênh tạo</span><span class="dv" id="det-source-channel">—</span>
+                <span class="dl">Mã KH / Xe</span><span class="dv" id="det-ids"><span id="det-customer-id">—</span> · <span id="det-vehicle-id">—</span></span>
                 <span class="dl">Khách hàng</span><span class="dv" id="det-customer">—</span>
                 <span class="dl">Dòng xe</span><span class="dv" id="det-model">—</span>
                 <span class="dl">Số VIN</span><span class="dv" id="det-vin">—</span>
@@ -722,6 +833,33 @@
     </div>
   </div>
 </main>
+
+<div class="modal-overlay" id="modal-quick-overlay" style="display:none">
+  <div class="demo-modal" style="max-width:520px">
+    <div class="demo-modal-header">
+      <i class="fa-solid fa-bolt"></i>
+      <div><h3 id="modal-quick-title">Tạo nhanh</h3><p class="muted" style="font-size:12px" id="modal-quick-sub"></p></div>
+    </div>
+    <div id="modal-quick-body" style="padding:12px 20px 20px"></div>
+    <div class="demo-modal-footer">
+      <button type="button" class="btn btn-outline" id="modal-quick-cancel">Hủy</button>
+      <button type="button" class="btn btn-primary" id="modal-quick-ok">Lưu</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-drawer-overlay" style="display:none">
+  <div class="demo-modal" style="max-width:640px;max-height:90vh;overflow-y:auto">
+    <div class="demo-modal-header">
+      <i class="fa-solid fa-eye"></i>
+      <div><h3 id="drawer-title">Chi tiết</h3></div>
+    </div>
+    <div id="drawer-body" style="padding:12px 20px 20px;font-size:13px"></div>
+    <div class="demo-modal-footer">
+      <button type="button" class="btn btn-outline" id="drawer-close">Đóng</button>
+    </div>
+  </div>
+</div>
 
 <!-- FOOTER -->
 <footer class="site-footer">

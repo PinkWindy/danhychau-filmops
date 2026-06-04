@@ -781,6 +781,20 @@ body { font-family: var(--font); background: var(--bg-base); color: var(--text-p
 .footer-contact i { color: var(--red); width: 14px; flex-shrink: 0; }
 .footer-bottom { border-top: 1px solid var(--border); padding: 14px 20px; text-align: center; font-size: 11px; color: var(--text-muted); max-width: 1700px; margin: 0 auto; }
 
+.nav-emoji { margin-right: 4px; font-size: 15px; vertical-align: middle; }
+.kpi-grid-compact .kpi-card { padding: 12px 14px; }
+.kpi-grid-compact .kpi-val { font-size: 20px; }
+.manual-section { margin-bottom: 18px; padding-bottom: 14px; border-bottom: 1px solid var(--border); }
+.manual-section h4 { font-size: 13px; margin: 0 0 10px; color: var(--text-secondary); }
+.manual-form .form-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; margin-bottom: 8px; }
+.manual-form .form-row label { min-width: 90px; font-size: 12px; }
+.manual-form .form-row select { flex: 1; min-width: 180px; }
+.manual-form .form-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.manual-form label.chk { display: block; margin: 4px 0; font-size: 13px; cursor: pointer; }
+.manual-form input[type="text"], .manual-form input[type="date"], .manual-form input[type="time"], .manual-form select, .manual-form textarea {
+  background: rgba(0,0,0,0.25); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; color: var(--text); font-size: 13px;
+}
+
 /* ══════════════════════════════════════════════════
    RESPONSIVE
 ══════════════════════════════════════════════════ */
