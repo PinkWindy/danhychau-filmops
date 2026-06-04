@@ -612,6 +612,14 @@ const GIAO_DICH_VI = {
   'LOT_CLEARED': 'Clear LOT (audit)',
   'OFFCUT_CLEARED': 'Clear mảnh dư (audit)',
   'SOFT_LOCK_RELEASED_MANUAL': 'Release lock (audit)',
+  'REQUEST_MATERIAL_OVERRIDDEN': 'Đổi mã vật tư (Quản lý)',
+  'OCR_DRAFT_CONFIRMED': 'Xác nhận phiếu OCR',
+  'REQUEST_CREATED_FROM_IMAGE': 'Tạo đơn từ ảnh OCR',
+  'CUSTOMER_CREATED_FROM_OCR': 'Tạo KH từ OCR',
+  'VEHICLE_CREATED_FROM_OCR': 'Tạo xe từ OCR',
+  'WORKSTREAM_CREATED': 'Tạo luồng thi công',
+  'NORM_AUTO_FILLED': 'Tự điền định mức',
+  'MATERIAL_PREFERENCE_APPLIED': 'Áp Material Preference',
 };
 
 // ─── TIỆN ÍCH ────────────────────────────────────────────────────────────────
@@ -2360,15 +2368,25 @@ window.moPhieuOcr = async function(draftId) {
   if (services.includes('PPF') && services.includes('WINDOW_FILM')) {
     document.getElementById('ocr-services-text').textContent = 'Phiếu yêu cầu cả PPF + Phim cách nhiệt. Hệ thống sẽ tự động tạo 2 luồng thi công: Đội PPF và Đội Cách Nhiệt.';
     svcBox.style.display = 'block';
+  } else if (services.includes('WINDOW_FILM')) {
+    document.getElementById('ocr-services-text').textContent = 'Phiếu chỉ có phim cách nhiệt. Sau khi xác nhận, hệ thống tạo một luồng WINDOW_FILM_INSTALLATION (không PPF).';
+    svcBox.style.display = 'block';
   } else { svcBox.style.display = 'none'; }
 
   const confirmBtn = document.getElementById('btn-confirm-ocr');
   const cancelBtn = document.getElementById('btn-cancel-ocr');
+  const isLexDraft = /^OCR-DRAFT-LEXUS-/.test(d.ocr_draft_id || '');
   if (d.ocr_status !== 'COMPLETED') { confirmBtn.disabled = true; confirmBtn.textContent = 'Chờ AI xử lý...'; }
   else if (readonly) {
     confirmBtn.disabled = true; cancelBtn.disabled = true;
     confirmBtn.textContent = d.review_status === 'CONFIRMED' ? `✅ Đã tạo đơn: ${d.created_request_id}` : '✅ Đã xử lý xong';
-  } else { confirmBtn.disabled = false; confirmBtn.innerHTML = '<i class="fa-solid fa-check-circle"></i> Xác nhận & Tạo đơn thi công'; cancelBtn.disabled = false; }
+  } else {
+    confirmBtn.disabled = false;
+    confirmBtn.innerHTML = isLexDraft
+      ? '<i class="fa-solid fa-check-circle"></i> Xác nhận tạo đơn'
+      : '<i class="fa-solid fa-check-circle"></i> Xác nhận & Tạo đơn thi công';
+    cancelBtn.disabled = false;
+  }
   taiDanhSachOcr();
 };
 
@@ -2382,12 +2400,23 @@ document.getElementById('btn-confirm-ocr').addEventListener('click', async () =>
     services: document.getElementById('ocrf-services')?.value,
   };
   try {
-    const data = await fetch(`/api/ocr/${currentOcrDraftId}/confirm`, {
-      method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload)
-    }).then(r => r.json());
-    toast('success', '✅ Tạo đơn thành công', data.detail);
-    moPhieuOcr(currentOcrDraftId); taiThongBao(); taiTongQuan();
-  } catch(e) { toast('error', 'Lỗi xác nhận phiếu', e.message); }
+    const data = await fetchJSON(`/api/ocr/${encodeURIComponent(currentOcrDraftId)}/confirm`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    toast('success', '✅ Tạo đơn thành công', data.detail || '');
+    moPhieuOcr(currentOcrDraftId);
+    taiThongBao();
+    taiTongQuan();
+    taiDonThiCong();
+    if (data.request_id && /^REQ-TEST-LEXUS-/.test(data.request_id)) {
+      document.querySelector('[data-tab="requests"]')?.click();
+      setTimeout(() => chonDon(data.request_id), 300);
+    }
+  } catch (e) {
+    toast('error', 'Lỗi xác nhận phiếu', e.message);
+  }
 });
 document.getElementById('btn-cancel-ocr').addEventListener('click', async () => {
   if (!currentOcrDraftId) return;
@@ -2396,10 +2425,38 @@ document.getElementById('btn-cancel-ocr').addEventListener('click', async () => 
   moPhieuOcr(currentOcrDraftId);
 });
 
+document.getElementById('btn-lexus-ocr-seed')?.addEventListener('click', async () => {
+  try {
+    const data = await fetchJSON('/api/test-data/lexus-ocr-drafts', { method: 'POST' });
+    const existed = !!data.already_existed;
+    toast(
+      'success',
+      existed ? 'Đã cập nhật' : 'Đã tạo phiếu',
+      existed
+        ? 'Phiếu test đã tồn tại, đã cập nhật dữ liệu mới.'
+        : 'Đã tạo 2 phiếu OCR test Lexus.',
+    );
+    taiDanhSachOcr();
+    taiThongBao();
+    taiTongQuan();
+  } catch (e) {
+    toast('error', 'Lỗi tạo phiếu test', e.message);
+  }
+});
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // ĐƠN THI CÔNG E2E
 // ═══════════════════════════════════════════════════════════════════════════════
 let currentRequestId = null;
+
+function _reqSvcModel(r) {
+  try {
+    const s = r.service_selection_json ? JSON.parse(r.service_selection_json) : (r.service_selection || {});
+    return s.display_model_name || s.model_name || r.vehicle_model_code || '—';
+  } catch (e) {
+    return r.vehicle_model_code || '—';
+  }
+}
 
 async function taiDonThiCong() {
   try {
@@ -2410,7 +2467,8 @@ async function taiDonThiCong() {
       : reqs.map(r => `
           <div class="req-item ${r.request_id === currentRequestId ? 'active' : ''}" onclick="chonDon('${r.request_id}')">
             <h4>${r.request_id} ${r.is_multi_workstream ? '<span style="color:var(--purple-light);font-size:10px"><i class="fa-solid fa-layer-group"></i> Đa luồng</span>' : ''}</h4>
-            <p>${r.vehicle_model_code} | ${r.customer_name}</p>
+            <p>${_esc(r.dealer_name || r.dealer_id || '—')} · ${_esc(_reqSvcModel(r))} · ${_esc(r.customer_name || '')}</p>
+            ${['ALLOCATED','NEEDS_REVIEW'].includes(r.status) ? '<p class="muted" style="font-size:10px;margin:4px 0 0">Bước tiếp: Phê duyệt Quản lý</p>' : ''}
             <div class="req-badges">${trangThaiBadge(r.status)}</div>
           </div>`).join('');
     if (currentRequestId) {
@@ -2433,16 +2491,29 @@ async function hienThiDon(req) {
   stEl.className = `status-badge status-${(req.status||'').toLowerCase().replace(/_/g,'-')}`;
   stEl.textContent = TRANG_THAI_VI[req.status] || req.status;
   document.getElementById('board-multi-ws-badge').style.display = req.is_multi_workstream ? 'inline-block' : 'none';
-  document.getElementById('det-dealer').textContent = req.dealer_id || '—';
+  document.getElementById('det-dealer').textContent = req.dealer_name || req.dealer_id || '—';
   const sc = req.source_channel || 'OCR';
   const scEl = document.getElementById('det-source-channel');
   if (scEl) scEl.textContent = sc === 'MANUAL' ? 'Thủ công (MANUAL)' : 'OCR';
+  const rno = document.getElementById('det-request-no');
+  if (rno) rno.textContent = req.request_no || '—';
+  const cno = document.getElementById('det-contract-no');
+  if (cno) cno.textContent = req.contract_no || '—';
+  const rdt = document.getElementById('det-request-date');
+  if (rdt) rdt.textContent = req.request_date || '—';
+  const oim = document.getElementById('det-ocr-image');
+  if (oim) {
+    const fn = req.ocr_source_image || '—';
+    oim.innerHTML = fn && fn !== '—'
+      ? `<a href="/static/test_orders/${encodeURIComponent(fn)}" target="_blank" rel="noopener">${_esc(fn)}</a>`
+      : '—';
+  }
   const cidEl = document.getElementById('det-customer-id');
   if (cidEl) cidEl.textContent = req.customer_id || '—';
   const vidEl = document.getElementById('det-vehicle-id');
   if (vidEl) vidEl.textContent = req.vehicle_id || '—';
   document.getElementById('det-customer').textContent = req.customer_name;
-  document.getElementById('det-model').textContent = req.vehicle_model_code;
+  document.getElementById('det-model').textContent = _reqSvcModel(req);
   document.getElementById('det-vin').textContent = req.vin_masked || req.vin_number;
   document.getElementById('det-deadline').textContent = fmtDt(req.requested_delivery_time);
   const normCard = document.getElementById('det-norm-card');
@@ -2460,6 +2531,9 @@ async function hienThiDon(req) {
         return `${_esc(i.job_item)} ${_esc(i.material_code || '—')} ${_esc(i.size || '')}${src}`;
       })
       .join('<br/>');
+    const warnList = Array.isArray(na.warnings) && na.warnings.length
+      ? `<div class="hitl-alert" style="margin-top:8px">${na.warnings.map((w) => _esc(w)).join('<br/>')}</div>`
+      : '';
     normBody.innerHTML = `
       <div><strong>norm_id</strong>: ${na.norm_id || na.norm?.norm_id || '—'}</div>
       <div><strong>film_type</strong>: ${na.film_type || na.norm?.film_type || '—'}</div>
@@ -2468,6 +2542,7 @@ async function hienThiDon(req) {
       ${na.override_reason ? `<div><strong>override_reason</strong>: ${_esc(na.override_reason)}</div>` : ''}
       <div style="margin-top:6px">${items || '<span class="muted">Không có auto_fill_items</span>'}</div>
       ${na.warning ? `<div class="hitl-alert" style="margin-top:8px">${_esc(na.warning)}</div>` : ''}
+      ${warnList}
     `;
   } else if (normCard) {
     normCard.style.display = 'none';
@@ -2520,6 +2595,28 @@ async function hienThiDon(req) {
       if (matWarn) matWarn.style.display = 'none';
     }
   }
+  const auditCard = document.getElementById('det-audit-card');
+  const auditBody = document.getElementById('det-audit-body');
+  if (auditCard && auditBody) {
+    try {
+      const logs = await fetchJSON(`/api/audit-logs?request_id=${encodeURIComponent(req.request_id)}`);
+      if (logs && logs.length) {
+        auditCard.style.display = 'block';
+        auditBody.innerHTML = logs.slice(0, 40).map((log) => {
+          const t = GIAO_DICH_VI[log.transaction_type] || log.transaction_type;
+          return `<div style="border-bottom:1px solid rgba(255,255,255,0.06);padding:6px 0">
+            <div><strong>${_esc(t)}</strong> <span class="muted">${fmtDt(log.timestamp)}</span></div>
+            <div class="muted">${_esc(log.actor || '')} · ${_esc(log.reason || '')}</div>
+          </div>`;
+        }).join('');
+      } else {
+        auditCard.style.display = 'none';
+        auditBody.innerHTML = '';
+      }
+    } catch (e) {
+      auditCard.style.display = 'none';
+    }
+  }
   const cgBox = document.getElementById('cutting-group-box');
   if (req.is_grouped_cut) {
     cgBox.style.display = 'flex';
@@ -2559,20 +2656,46 @@ async function hienThiDon(req) {
     document.getElementById('agent-run-zone').style.display = 'block';
     desc.textContent = 'BƯỚC 3: AI Agent đề xuất nguồn vật tư (LOT/mảnh dư) phù hợp. Nếu đa luồng sẽ tạo 2 luồng thi công.';
   } else if (req.status === 'ALLOCATED' || req.status === 'NEEDS_REVIEW') {
-    if (req.is_multi_workstream) {
+    let wssProbe = [];
+    try {
+      wssProbe = await fetch(`/api/requests/${encodeURIComponent(req.request_id)}/workstreams`).then((r) => r.json());
+    } catch (e) { wssProbe = []; }
+    const hasPendingWs = (wssProbe || []).some((ws) => ws.status === 'PENDING_APPROVAL');
+    if (req.is_multi_workstream || hasPendingWs) {
       document.getElementById('hitl-ws-zone').style.display = 'block';
       await hienThiThePheDuyet(req.request_id);
+      desc.textContent = 'Quản lý phê duyệt workstream (vật tư / LOT).';
     } else {
       document.getElementById('hitl-1-zone').style.display = 'block';
       document.getElementById('prop-source').textContent = `${req.allocated_source_type}: ${req.allocated_source_id}`;
       document.getElementById('prop-len').textContent = `${req.planned_deduction_length_m} m`;
     }
   } else if (req.status === 'APPROVED') {
-    if (req.is_multi_workstream) { document.getElementById('hitl-ws-zone').style.display = 'block'; await hienThiThePheDuyet(req.request_id); }
-    else { document.getElementById('hitl-2-zone').style.display = 'block'; document.getElementById('input-actual-block').value = req.planned_cut_block || ''; document.getElementById('input-actual-len').value = req.planned_deduction_length_m || ''; }
+    let wssProbe = [];
+    try {
+      wssProbe = await fetch(`/api/requests/${encodeURIComponent(req.request_id)}/workstreams`).then((r) => r.json());
+    } catch (e) { wssProbe = []; }
+    const hasWs = (wssProbe || []).length > 0;
+    if (req.is_multi_workstream || hasWs) {
+      document.getElementById('hitl-ws-zone').style.display = 'block';
+      await hienThiThePheDuyet(req.request_id);
+    } else {
+      document.getElementById('hitl-2-zone').style.display = 'block';
+      document.getElementById('input-actual-block').value = req.planned_cut_block || '';
+      document.getElementById('input-actual-len').value = req.planned_deduction_length_m || '';
+    }
   } else if (req.status === 'IN_PROGRESS') {
-    if (req.is_multi_workstream) { document.getElementById('hitl-ws-zone').style.display = 'block'; await hienThiThePheDuyet(req.request_id); }
-    else { document.getElementById('hitl-2-zone').style.display = 'block'; }
+    let wssProbe = [];
+    try {
+      wssProbe = await fetch(`/api/requests/${encodeURIComponent(req.request_id)}/workstreams`).then((r) => r.json());
+    } catch (e) { wssProbe = []; }
+    const hasWs = (wssProbe || []).length > 0;
+    if (req.is_multi_workstream || hasWs) {
+      document.getElementById('hitl-ws-zone').style.display = 'block';
+      await hienThiThePheDuyet(req.request_id);
+    } else {
+      document.getElementById('hitl-2-zone').style.display = 'block';
+    }
   } else if (req.status === 'PARTIALLY_COMPLETED') {
     document.getElementById('partial-zone').style.display = 'block';
     document.getElementById('hitl-ws-zone').style.display = 'block';
@@ -2586,7 +2709,11 @@ async function hienThiDon(req) {
     desc.textContent = 'Có ngoại lệ xảy ra. Kiểm tra lý do và thử lại.';
   }
 
-  if (req.is_multi_workstream) {
+  let wssAll = [];
+  try {
+    wssAll = await fetch(`/api/requests/${encodeURIComponent(req.request_id)}/workstreams`).then((r) => r.json());
+  } catch (e) { wssAll = []; }
+  if (req.is_multi_workstream || (wssAll && wssAll.length > 0)) {
     document.getElementById('workstream-section').style.display = 'block';
     await hienThiTheLuong(req.request_id);
   } else { document.getElementById('workstream-section').style.display = 'none'; }

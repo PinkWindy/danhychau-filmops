@@ -219,7 +219,12 @@
           <input type="file" id="file-input" accept="image/*,.pdf" style="display:none">
         </div>
         <div class="ocr-drafts-panel">
-          <div class="panel-header"><h3><i class="fa-solid fa-list"></i> Danh sách phiếu chờ duyệt</h3></div>
+          <div class="panel-header" style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px">
+            <h3 style="margin:0"><i class="fa-solid fa-list"></i> Danh sách phiếu chờ duyệt</h3>
+            <button type="button" class="btn btn-outline btn-sm" id="btn-lexus-ocr-seed" title="Tạo dữ liệu demo end-to-end">
+              <i class="fa-solid fa-flask"></i> Tạo 2 phiếu test Lexus mới
+            </button>
+          </div>
           <div id="ocr-drafts-list"><p class="text-center muted pad-20">Chưa có phiếu nào.</p></div>
         </div>
       </div>
@@ -449,6 +454,10 @@
               <div class="detail-grid">
                 <span class="dl">Đại lý</span><span class="dv" id="det-dealer">—</span>
                 <span class="dl">Kênh tạo</span><span class="dv" id="det-source-channel">—</span>
+                <span class="dl">Số phiếu YC</span><span class="dv" id="det-request-no">—</span>
+                <span class="dl">Số HĐ</span><span class="dv" id="det-contract-no">—</span>
+                <span class="dl">Ngày phiếu</span><span class="dv" id="det-request-date">—</span>
+                <span class="dl">Ảnh OCR gốc</span><span class="dv" id="det-ocr-image">—</span>
                 <span class="dl">Mã KH / Xe</span><span class="dv" id="det-ids"><span id="det-customer-id">—</span> · <span id="det-vehicle-id">—</span></span>
                 <span class="dl">Khách hàng</span><span class="dv" id="det-customer">—</span>
                 <span class="dl">Dòng xe</span><span class="dv" id="det-model">—</span>
@@ -477,6 +486,11 @@
               <h4><i class="fa-solid fa-boxes-stacked"></i> Vật tư áp dụng</h4>
               <div id="det-mat-app-warn" class="hitl-alert" style="display:none;margin-bottom:8px;border-color:rgba(255,193,7,0.45);background:rgba(255,193,7,0.1)"></div>
               <div id="det-mat-app-body" style="font-size:12px"></div>
+            </div>
+
+            <div class="detail-card" id="det-audit-card" style="display:none;margin-top:10px">
+              <h4><i class="fa-solid fa-clock-rotate-left"></i> Audit (theo đơn)</h4>
+              <div id="det-audit-body" style="font-size:11px;max-height:220px;overflow-y:auto"></div>
             </div>
 
             <div class="action-card">

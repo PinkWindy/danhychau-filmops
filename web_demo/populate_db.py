@@ -18,6 +18,7 @@ from database import (
     DbNotification,
     DbInventoryTransaction,
     DbMaterialPreference,
+    DbVehicleFilmNorm,
 )
 
 def map_lot_id(old_id):
@@ -133,6 +134,35 @@ def _seed_amis_and_vehicle_norms(db):
                 amis_customer_code="KH00009",
                 status="ACTIVE",
                 created_at=ts,
+            )
+        )
+    # Định mức demo RX350 (Lexus test orders — resolve theo RX350 + năm 2026)
+    nid = "NORM-DEMO-RX350-WF-2024-2027"
+    if not db.query(DbVehicleFilmNorm).filter(DbVehicleFilmNorm.norm_id == nid).first():
+        db.add(
+            DbVehicleFilmNorm(
+                norm_id=nid,
+                film_type="Phim cách nhiệt",
+                vehicle_model_code="RX350",
+                model_year_range="2024-2027",
+                windshield_size="150x80",
+                windshield_width_cm=150.0,
+                windshield_length_cm=80.0,
+                rear_window_size="140x75",
+                rear_window_width_cm=140.0,
+                rear_window_length_cm=75.0,
+                front_side_size="100x55",
+                front_side_width_cm=100.0,
+                front_side_length_cm=55.0,
+                rear_side_triangle_size="45x40",
+                rear_side_triangle_width_cm=45.0,
+                rear_side_triangle_length_cm=40.0,
+                sunroof_size="90x50",
+                sunroof_width_cm=90.0,
+                sunroof_length_cm=50.0,
+                status="ACTIVE",
+                created_at=ts,
+                note="Seed: Lexus RX350H test OCR — định mức demo",
             )
         )
     cid = "CUS_AMIS_RETAIL_001"

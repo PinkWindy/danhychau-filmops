@@ -248,6 +248,104 @@ def resolve_vehicle_norm(
     }
 
 
+def _range_year_distance(model_year: Optional[int], range_str: Optional[str]) -> Optional[int]:
+    """Khoảng cách tối thiểu từ model_year tới biên hoặc tâm khoảng năm trong chuỗi định mức."""
+    if model_year is None:
+        return 0
+    nums = [int(x) for x in re.findall(r"\d{4}", str(range_str or ""))]
+    if len(nums) >= 2:
+        lo, hi = min(nums[0], nums[1]), max(nums[0], nums[1])
+        if lo <= int(model_year) <= hi:
+            return 0
+        return min(abs(int(model_year) - lo), abs(int(model_year) - hi))
+    if len(nums) == 1:
+        return abs(int(model_year) - nums[0])
+    return 9999
+
+
+def find_nearest_active_vehicle_norm(
+    db: Session,
+    vehicle_model_code: str,
+    model_year: Optional[int],
+    film_type: str,
+) -> Optional[DbVehicleFilmNorm]:
+    """Khi không khớp năm trong range, chọn bản ACTIVE gần nhất theo vehicle_model_code + film_type."""
+    ft = (film_type or "").strip()
+    candidates = candidate_model_codes(vehicle_model_code)
+    rows = (
+        db.query(DbVehicleFilmNorm)
+        .filter(DbVehicleFilmNorm.status == "ACTIVE")
+        .filter(DbVehicleFilmNorm.vehicle_model_code.in_(candidates))
+    )
+    if ft:
+        rows = rows.filter(DbVehicleFilmNorm.film_type == ft)
+    rows = rows.order_by(DbVehicleFilmNorm.norm_id).all()
+    if not rows:
+        return None
+    if model_year is None:
+        return rows[0]
+    best: Optional[DbVehicleFilmNorm] = None
+    best_d = 10**9
+    for row in rows:
+        d = _range_year_distance(model_year, row.model_year_range)
+        if d is None:
+            continue
+        if d < best_d:
+            best_d = d
+            best = row
+    return best
+
+
+def resolve_vehicle_norm_with_year_fallback(
+    db: Session,
+    vehicle_model_code: str,
+    model_year: Optional[int],
+    film_type: str,
+) -> Dict[str, Any]:
+    """
+    Ưu tiên định mức khớp đúng model_year trong range; nếu không có thì fallback bản ACTIVE gần nhất.
+    Trả thêm year_exact_match, warnings phục vụ OCR / API resolve.
+    """
+    vm = (vehicle_model_code or "").strip()
+    ft = (film_type or "").strip() or "Phim cách nhiệt"
+    warnings: List[str] = []
+
+    norm = find_active_vehicle_norm(db, vm, model_year, ft)
+    if norm:
+        nft = ft or (norm.film_type or "").strip()
+        return {
+            "found": True,
+            "year_exact_match": True,
+            "norm": norm_row_to_dict(norm),
+            "auto_fill_items": build_auto_fill_items(db, norm, nft),
+            "warnings": warnings,
+        }
+
+    near = find_nearest_active_vehicle_norm(db, vm, model_year, ft)
+    if near:
+        nft = ft or (near.film_type or "").strip()
+        warnings.append(
+            f"Không có định mức khớp chính xác năm model; đã áp dụng norm gần nhất ({near.model_year_range})."
+        )
+        return {
+            "found": True,
+            "year_exact_match": False,
+            "norm": norm_row_to_dict(near),
+            "auto_fill_items": build_auto_fill_items(db, near, nft),
+            "warnings": warnings,
+        }
+
+    ytxt = str(model_year) if model_year is not None else "—"
+    warnings.append(f"Chưa có định mức active cho {vm} năm {ytxt}.")
+    return {
+        "found": False,
+        "year_exact_match": False,
+        "norm": None,
+        "auto_fill_items": [],
+        "warnings": warnings,
+    }
+
+
 def sync_size_string(width_cm: Optional[float], length_cm: Optional[float], current_size: Optional[str]) -> str:
     w, h = float(width_cm or 0), float(length_cm or 0)
     if w > 0 and h > 0:

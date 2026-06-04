@@ -23,6 +23,11 @@ from vehicle_norm_api import register_vehicle_norm_routes
 from location_api import register_location_routes
 from material_preference_api import register_material_preference_routes
 from vehicle_norm_logic import resolve_vehicle_norm
+from ocr_lexus_test_data import (
+    confirm_lexus_test_ocr,
+    is_lexus_test_draft_id,
+    upsert_lexus_ocr_drafts,
+)
 
 _log = logging.getLogger("uvicorn.error")
 
@@ -356,7 +361,8 @@ def get_dashboard(db: Session = Depends(get_db)):
         unread_notifs = db.query(DbNotification).filter(
             DbNotification.is_read == False).count()
         ocr_pending = db.query(DbOcrDraft).filter(
-            DbOcrDraft.review_status == "REVIEWING").count()
+            DbOcrDraft.review_status.in_(["REVIEWING", "NEEDS_REVIEW"])
+        ).count()
         total_customers = db.query(DbCustomer).count()
         total_dealers = db.query(DbDealer).count()
         total_vehicles = db.query(DbVehicleProfile).count()
@@ -744,18 +750,27 @@ def approve_workstream(ws_id: str, data: dict = None, db: Session = Depends(get_
         raise HTTPException(400, f"Workstream in wrong status: {ws.status}")
 
     data = data or {}
-    # Handle PPF type change
-    new_ppf_type = data.get("selected_material_code")
-    if new_ppf_type and new_ppf_type != ws.selected_material_code:
-        reason = data.get("change_reason", "")
+    # Đổi mã vật tư / loại PPF trước khi duyệt — bắt buộc change_reason
+    new_mat = data.get("selected_material_code")
+    if new_mat and str(new_mat).strip() != str(ws.selected_material_code or "").strip():
+        reason = (data.get("change_reason") or "").strip()
         if not reason:
-            raise HTTPException(400, "Bắt buộc nhập change_reason khi đổi PPF type.")
-        _audit(db, ws.request_id, "PPF_TYPE_CHANGED", "WORKSTREAM", ws_id,
-               ws.selected_material_code, new_ppf_type, reason, "QL-002",
-               ws_id, ws.workstream_type)
-        ws.selected_material_code = new_ppf_type
-        ws.ppf_type_changed = True
-        ws.ppf_type_change_reason = reason
+            raise HTTPException(
+                400,
+                "Bắt buộc nhập change_reason khi đổi mã vật tư (Window Film) hoặc loại PPF.",
+            )
+        old_m = ws.selected_material_code
+        if ws.workstream_type == "PPF_INSTALLATION":
+            _audit(db, ws.request_id, "PPF_TYPE_CHANGED", "WORKSTREAM", ws_id,
+                   old_m, new_mat, reason, "QL-002",
+                   ws_id, ws.workstream_type)
+            ws.ppf_type_changed = True
+            ws.ppf_type_change_reason = reason
+        elif ws.workstream_type == "WINDOW_FILM_INSTALLATION":
+            _audit(db, ws.request_id, "REQUEST_MATERIAL_OVERRIDDEN", "WORKSTREAM", ws_id,
+                   old_m, new_mat, reason, "QL-002",
+                   ws_id, ws.workstream_type)
+        ws.selected_material_code = new_mat
 
     # Handle source change
     new_source_id = data.get("allocated_source_id")
@@ -1177,9 +1192,34 @@ def request_complete_job(jc_id: str, data: dict = None, db: Session = Depends(ge
 # ═══════════════════════════════════════════════════════════════════════════════
 # OCR INTAKE
 # ═══════════════════════════════════════════════════════════════════════════════
+def _serialize_ocr_draft_row(r: DbOcrDraft) -> dict:
+    """Trả về dict JSON-safe; merge extra_payload_json để UI đọc request_no, contract_no, ..."""
+    out = {}
+    for c in r.__table__.columns:
+        out[c.name] = getattr(r, c.name)
+    ep = getattr(r, "extra_payload_json", None) or None
+    if ep:
+        try:
+            extra = json.loads(ep)
+            if isinstance(extra, dict):
+                for k, v in extra.items():
+                    if k not in out or out.get(k) in (None, ""):
+                        out[k] = v
+        except Exception:
+            pass
+    return out
+
+
 @app.get("/api/ocr-drafts")
 def get_ocr_drafts(db: Session = Depends(get_db)):
-    return db.query(DbOcrDraft).order_by(DbOcrDraft.created_at.desc()).all()
+    rows = db.query(DbOcrDraft).order_by(DbOcrDraft.created_at.desc()).all()
+    return [_serialize_ocr_draft_row(x) for x in rows]
+
+
+@app.post("/api/test-data/lexus-ocr-drafts")
+def post_lexus_test_ocr_drafts(db: Session = Depends(get_db)):
+    """Seed / cập nhật 2 OCR draft Lexus test (demo)."""
+    return upsert_lexus_ocr_drafts(db)
 
 @app.post("/api/ocr/upload")
 async def upload_image(file: UploadFile = File(...), db: Session = Depends(get_db)):
@@ -1197,6 +1237,8 @@ async def upload_image(file: UploadFile = File(...), db: Session = Depends(get_d
 
 @app.post("/api/ocr/{draft_id}/process")
 def process_ocr(draft_id: str, db: Session = Depends(get_db)):
+    if is_lexus_test_draft_id(draft_id):
+        return {"status": "info", "detail": "Phiếu test Lexus — đã có dữ liệu OCR đầy đủ, không chạy lại mock."}
     draft = db.query(DbOcrDraft).filter(DbOcrDraft.ocr_draft_id == draft_id).first()
     if not draft: raise HTTPException(404, "OCR Draft not found")
     if draft.ocr_status == "COMPLETED":
@@ -1224,6 +1266,8 @@ def process_ocr(draft_id: str, db: Session = Depends(get_db)):
 
 @app.post("/api/ocr/{draft_id}/confirm")
 def confirm_ocr(draft_id: str, data: dict, db: Session = Depends(get_db)):
+    if is_lexus_test_draft_id(draft_id):
+        return confirm_lexus_test_ocr(db, draft_id, data or {}, actor="ADMIN-001")
     draft = db.query(DbOcrDraft).filter(DbOcrDraft.ocr_draft_id == draft_id).first()
     if not draft: raise HTTPException(404, "Not found")
     if draft.review_status in ("CONFIRMED","CANCELLED"):

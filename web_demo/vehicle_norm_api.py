@@ -13,7 +13,7 @@ from database import DbVehicleFilmNorm, DbVehicleProfile, DbAuditLog
 from vehicle_norm_logic import (
     hydrate_norm_sizes_from_strings,
     norm_row_to_dict,
-    resolve_vehicle_norm,
+    resolve_vehicle_norm_with_year_fallback,
     sync_size_string,
 )
 
@@ -209,7 +209,9 @@ def register_vehicle_norm_routes(app, get_db):
         model_year: Optional[int] = Query(None),
         film_type: str = Query(...),
     ):
-        return resolve_vehicle_norm(db, vehicle_model_code.strip(), model_year, film_type.strip())
+        return resolve_vehicle_norm_with_year_fallback(
+            db, vehicle_model_code.strip(), model_year, film_type.strip()
+        )
 
     @router.post("/vehicle-norms")
     def create_norm(data: dict, db: Session = Depends(get_db)):
