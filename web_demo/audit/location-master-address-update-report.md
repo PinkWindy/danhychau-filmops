@@ -2,8 +2,8 @@
 
 ## 1. Summary
 
-- Đã import danh mục Tỉnh/Thành phố và Phường/Xã từ file Excel chính thức (`Danh-muc-Phuong-xa_moi.xlsx`).
-- Cột **D** dùng cho Tỉnh/Thành phố; cột **J** dùng cho Phường/Xã (sheet `1.DM Phường xã mới`, header dòng 3, dữ liệu từ dòng 4).
+- Đã import danh mục Tỉnh/Thành phố và Phường/Xã từ file **CSV** (`Danh-muc-Phuong-xa_moi.csv`).
+- Cột **C** = Tên tỉnh/Thành phố; cột **I** = Tên Phường/Xã (dòng 1 header, dữ liệu từ dòng 2). *(Legacy: vẫn hỗ trợ `.xlsx` sheet `1.DM Phường xã mới`, cột D/J.)*
 - Dữ liệu được sinh ra thành `static/location_master.json`.
 - UI dùng API `GET /api/location/provinces` và `GET /api/location/wards` để đổ datalist gợi ý; người dùng vẫn gõ tay được.
 - Ghép **full_address** (frontend + backend) tránh lỗi dư tiền tố (ví dụ `Phường Phường`, `Đường Đường`, `Thành phố Thành phố`).
@@ -13,25 +13,25 @@
 
 | Mục | Giá trị |
 |-----|---------|
-| File | `data/Danh-muc-Phuong-xa_moi.xlsx` (hoặc bản sao tại thư mục gốc dự án — xem `location_master_import.py`) |
-| Sheet | `1.DM Phường xã mới` |
-| Tỉnh/TP | Cột **D** |
-| Phường/Xã | Cột **J** |
-| Header | Dòng **3** |
-| Dữ liệu | Từ dòng **4** |
+| File (mặc định) | `data/Danh-muc-Phuong-xa_moi.csv` (hoặc `../Danh-muc-Phuong-xa_moi.csv` — xem `location_master_import.py`) |
+| Định dạng | CSV UTF-8 (BOM OK); `source_format` trong JSON: `csv` |
+| Tỉnh/TP | Cột **C** — *Tên tỉnh/TP mới* |
+| Phường/Xã | Cột **I** — *Tên Phường/Xã mới* |
+| Header | Dòng **1** |
+| Dữ liệu | Từ dòng **2** |
 
 ## 3. Files Changed
 
 | File | Mô tả |
 |------|--------|
-| `location_master_import.py` | Script đọc Excel → `static/location_master.json` |
+| `location_master_import.py` | Script đọc CSV (mặc định) hoặc Excel legacy → `static/location_master.json` |
 | `location_api.py` | Router `/api/location/provinces`, `/api/location/wards` |
 | `main.py` | Đăng ký `register_location_routes` |
 | `vehicle_norm_logic.py` | `normalize_address_part`, `format_street`, `format_ward`, `format_province`, `build_full_address` |
 | `customer_api.py` | POST/PUT dealer & end-customers: tự build `full_address` khi trống; cập nhật khi đổi thành phần địa chỉ |
 | `static/app.js` | `DYC_LOCATION_MASTER`, load provinces/wards, datalist; `buildFullAddress` đồng bộ logic Python; nút tự tạo lại địa chỉ |
 | `location_master_address_smoke_test.py` | Smoke import + API + `build_full_address` + POST/PUT |
-| `data/README-DIA-BAN.txt` | Hướng dẫn đặt file Excel |
+| `data/README-DIA-BAN.txt` | Hướng dẫn đặt file CSV |
 | `README.md`, `DEPLOY.md` | Mục cập nhật danh mục địa bàn |
 | `audit/location-master-address-update-report.md` | Báo cáo này |
 
@@ -44,7 +44,7 @@
 
 ## 5. Smoke Test Result
 
-**Thời điểm chạy test (máy dev):** 2026-06-04 15:21:11 +07:00  
+**Thời điểm chạy test (máy dev):** 2026-06-04 15:33:26 +07:00  
 
 **Lệnh đã chạy (thư mục `web_demo/`):**
 
@@ -55,32 +55,32 @@
 
 | Chỉ số | Giá trị thực tế |
 |--------|-----------------|
-| Số tỉnh/thành phố import được | **3** |
-| Số phường/xã import được (tổng sau dedupe, `items_count`) | **5** |
+| Nguồn | `Danh-muc-Phuong-xa_moi.csv` (`source_format`: **csv**) |
+| Số tỉnh/thành phố import được | **34** |
+| Số phường/xã import được (tổng sau dedupe, `items_count`) | **3321** |
 | File JSON đầu ra | `static/location_master.json` |
 
-**5 tỉnh/thành phố mẫu** (trong lần import này chỉ có 3 bản ghi tỉnh/TP — liệt kê đủ):  
-`Tỉnh Đồng Nai`, `Thành phố Hà Nội`, `Thành phố Hồ Chí Minh`  
-*(Thứ tự in trên console import: sort locale — `Tỉnh Đồng Nai`, `Thành phố Hà Nội`, `Thành phố Hồ Chí Minh`.)*
+**5 tỉnh/thành phố mẫu** (5 khóa đầu sau sort locale, như console import):  
+`Tỉnh An Giang`, `Tỉnh Bắc Ninh`, `Tỉnh Cà Mau`, `Tỉnh Cao Bằng`, `Tỉnh Đắk Lắk`
 
-**5 phường/xã mẫu Thành phố Hồ Chí Minh** (trong master hiện có **2** phường cho TP.HCM — liệt kê đủ):  
-`Phường An Phú`, `Phường Cầu Ông Lãnh`
+**5 phường/xã mẫu khu vực TP.HCM** (trong CSV khóa tỉnh/TP là **`Tp Hồ Chí Minh`** — không phải chuỗi “Thành phố Hồ Chí Minh”; 5 mẫu đầu sau sort):  
+`Đặc khu Côn Đảo`, `Phường An Đông`, `Phường An Hội Đông`, `Phường An Hội Tây`, `Phường An Khánh`
 
-> *Ghi chú:* Con số 3 / 5 phản ánh file `data/Danh-muc-Phuong-xa_moi.xlsx` đang có trên máy (tập mẫu / tập rút gọn). Khi thay bằng file Excel danh mục đầy đủ và chạy lại import, cập nhật lại mục này.
+> *Ghi chú:* Cột nguồn CSV: **C** = Tên tỉnh/TP mới, **I** = Tên Phường/Xã mới (dòng 1 header). Có thể chạy lại import sau mỗi lần đổi file `data/Danh-muc-Phuong-xa_moi.csv`.
 
 ### 5.2 Kết quả từng test case (`location_master_address_smoke_test.py`)
 
 | # | Kết quả | Mô tả ngắn |
 |---|---------|------------|
-| 1 | PASS | File Excel tồn tại |
-| 2 | PASS | Chạy import → `location_master.json` (provinces=3, wards=5) |
+| 1 | PASS | File CSV danh mục tồn tại |
+| 2 | PASS | Chạy import → `location_master.json` (provinces=34, wards=3321) |
 | 3 | PASS | JSON có key `data` |
 | 4 | PASS | Có ít nhất 1 tỉnh/TP |
 | 5 | PASS | Có ít nhất 1 phường/xã |
 | 6 | PASS | `GET /api/location/provinces` → 200 |
 | 7 | PASS | `provinces` có `items` |
 | 8 | PASS | `GET /api/location/wards?province=Thành phố Hà Nội` → 200 |
-| 9 | PASS | `GET /api/location/wards?province=Thành phố Hồ Chí Minh` có items |
+| 9 | PASS | `GET /api/location/wards` với tỉnh/TP chứa “Hồ Chí Minh” (vd. `Tp Hồ Chí Minh`) có items |
 | 10 | PASS | Province không tồn tại → `items: []` |
 | 11 | PASS | `build_full_address` đủ phần, không `Phường Phường` |
 | 12 | PASS | Ward thiếu tiền tố → thêm `Phường` đúng |
@@ -101,7 +101,7 @@ LOCATION MASTER & ADDRESS BUILD SMOKE TEST PASSED
 
 ## 6. Remaining Notes
 
-- Danh mục phụ thuộc file Excel đầu vào; cần chạy lại import khi Bộ/Nhà nước cập nhật danh mục.
+- Danh mục phụ thuộc file **CSV** đầu vào; cần chạy lại import khi cập nhật danh mục.
 - Vẫn cho gõ tay để xử lý trường hợp đặc biệt hoặc chưa có trong master.
 - Có thể nâng cấp sau thành bảng DB riêng nếu cần quản trị địa bàn từ backend.
 

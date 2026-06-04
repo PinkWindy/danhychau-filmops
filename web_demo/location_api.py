@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""API đọc danh mục địa bàn từ static/location_master.json (không bắt buộc runtime)."""
+"""API đọc danh mục địa bàn từ static/location_master.json (sinh bởi location_master_import từ CSV hoặc Excel)."""
 import json
 import logging
 import os

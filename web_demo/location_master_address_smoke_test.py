@@ -9,16 +9,17 @@ import sys
 import uuid
 from pathlib import Path
 
-from fastapi.testclient import TestClient
-from openpyxl import Workbook
+import csv
 
-from database import init_db, SessionLocal
+from fastapi.testclient import TestClient
+
+from database import init_db
 from main import app
 from vehicle_norm_logic import build_full_address
-from location_master_import import SHEET_NAME, run_import
+from location_master_import import run_import
 
 HERE = Path(__file__).resolve().parent
-EXCEL = HERE / "data" / "Danh-muc-Phuong-xa_moi.xlsx"
+DATA_CSV = HERE / "data" / "Danh-muc-Phuong-xa_moi.csv"
 JSON_OUT = HERE / "static" / "location_master.json"
 client = TestClient(app)
 ROWS = []
@@ -28,41 +29,43 @@ def add(n, name, ok, detail=""):
     ROWS.append((n, name, ok, detail))
 
 
-def _ensure_sample_excel():
-    """Tạo Excel mẫu đúng cấu trúc sheet/cột nếu chưa có file chính thức (để CI/smoke pass)."""
-    EXCEL.parent.mkdir(parents=True, exist_ok=True)
-    if EXCEL.is_file():
+def _ensure_sample_csv():
+    """Tạo CSV mẫu (cột C = tỉnh/TP, cột I = phường/xã) nếu chưa có file (để CI/smoke pass)."""
+    DATA_CSV.parent.mkdir(parents=True, exist_ok=True)
+    if DATA_CSV.is_file():
         return
-    wb = Workbook()
-    ws = wb.active
-    ws.title = SHEET_NAME
-    ws.cell(1, 1, "row1")
-    ws.cell(2, 1, "row2")
-    ws.cell(3, 1, "header")
-    # D=4, J=10 — dữ liệu từ dòng 4
-    rows = [
-        ("Thành phố Hồ Chí Minh", "Phường Cầu Ông Lãnh"),
-        ("Thành phố Hồ Chí Minh", "Phường An Phú"),
-        ("Thành phố Hà Nội", "Phường Hoàn Kiếm"),
-        ("Thành phố Hà Nội", "Phường Ba Đình"),
-        ("Tỉnh Đồng Nai", "Xã An Phước"),
+    # Header + tối thiểu 9 cột (index 2 = C, 8 = I)
+    hdr = [
+        "STT",
+        "Mã tỉnh",
+        "Tên tỉnh/TP mới",
+        "D",
+        "E",
+        "F",
+        "G",
+        "H",
+        "Tên Phường/Xã mới",
     ]
-    r = 4
-    for prov, ward in rows:
-        ws.cell(r, 4, prov)
-        ws.cell(r, 10, ward)
-        r += 1
-    wb.save(EXCEL)
-    wb.close()
+    body = [
+        ["1", "01", "Thành phố Hồ Chí Minh", "", "", "", "", "", "Phường Cầu Ông Lãnh"],
+        ["2", "01", "Thành phố Hồ Chí Minh", "", "", "", "", "", "Phường An Phú"],
+        ["3", "01", "Thành phố Hà Nội", "", "", "", "", "", "Phường Hoàn Kiếm"],
+        ["4", "01", "Thành phố Hà Nội", "", "", "", "", "", "Phường Ba Đình"],
+        ["5", "75", "Tỉnh Đồng Nai", "", "", "", "", "", "Xã An Phước"],
+    ]
+    with open(DATA_CSV, "w", encoding="utf-8-sig", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(hdr)
+        w.writerows(body)
 
 
 def main():
     init_db()
-    _ensure_sample_excel()
-    add(1, "File Excel tồn tại", EXCEL.is_file(), str(EXCEL))
+    _ensure_sample_csv()
+    add(1, "File CSV danh mục tồn tại", DATA_CSV.is_file(), str(DATA_CSV))
 
     try:
-        meta, data = run_import(str(EXCEL), str(JSON_OUT))
+        meta, data = run_import(str(DATA_CSV), str(JSON_OUT))
     except Exception as e:
         add(2, "Chạy import tạo location_master.json", False, str(e))
         _print_fail()
@@ -89,11 +92,22 @@ def main():
 
     r8 = client.get("/api/location/wards", params={"province": "Thành phố Hà Nội"})
     add(8, "GET wards Hà Nội 200", r8.status_code == 200, "")
-    if "Thành phố Hồ Chí Minh" in j.get("data", {}):
-        r9 = client.get("/api/location/wards", params={"province": "Thành phố Hồ Chí Minh"})
-        add(9, "GET wards TP.HCM có items", r9.status_code == 200 and len(r9.json().get("items", [])) >= 1, r9.text[:100])
+
+    hcm_key = None
+    for pk in j.get("data", {}):
+        if "Hồ Chí Minh" in pk or "Ho Chi Minh" in pk:
+            hcm_key = pk
+            break
+    if hcm_key:
+        r9 = client.get("/api/location/wards", params={"province": hcm_key})
+        add(
+            9,
+            "GET wards TP.HCM có items",
+            r9.status_code == 200 and len(r9.json().get("items", [])) >= 1,
+            f"{hcm_key!r} {r9.text[:80]}",
+        )
     else:
-        add(9, "GET wards TP.HCM (skip)", True, "no HCM in sample")
+        add(9, "GET wards TP.HCM (skip)", True, "no HCM province key in master")
 
     r9b = client.get("/api/location/wards", params={"province": "Không tồn tại XYZ"})
     add(10, "wards province lạ → []", r9b.status_code == 200 and r9b.json().get("items") == [], str(r9b.json()))

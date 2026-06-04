@@ -25,7 +25,7 @@ function _normSizeDisplay(n, sizeKey, wKey, lKey) {
   return '—';
 }
 
-/** Master địa bàn: load từ GET /api/location (JSON sinh từ Excel). */
+/** Master địa bàn: load từ GET /api/location (JSON sinh từ CSV/Excel qua location_master_import). */
 window.DYC_LOCATION_MASTER = window.DYC_LOCATION_MASTER || {
   provinces: [],
   wardsByProvince: {},

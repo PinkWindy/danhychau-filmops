@@ -19,9 +19,11 @@ Mục tiêu: có một **URL công khai** (HTTPS) mở được trang demo, API 
 
 ## Cập nhật danh mục Tỉnh/Thành phố — Phường/Xã
 
-**Bước 1:** Đặt file Excel vào:
+**Bước 1:** Đặt file CSV danh mục vào:
 
-`web_demo/data/Danh-muc-Phuong-xa_moi.xlsx`
+`web_demo/data/Danh-muc-Phuong-xa_moi.csv`
+
+(Cột **C** = Tên tỉnh/Thành phố, cột **I** = Tên Phường/Xã; dòng đầu là header. UTF-8.)
 
 **Bước 2:** Trên máy build/deploy, trong thư mục `web_demo`:
 

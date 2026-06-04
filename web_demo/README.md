@@ -34,7 +34,7 @@ Mở trình duyệt: `http://127.0.0.1:8000/static/index.html` (hoặc URL gốc
 
 ## Cập nhật danh mục Tỉnh/Thành phố — Phường/Xã
 
-1. Đặt file Excel chính thức vào `web_demo/data/Danh-muc-Phuong-xa_moi.xlsx` (hoặc đặt cùng cấp thư mục gốc dự án — script import sẽ tự tìm). Chi tiết sheet/cột: xem [`data/README-DIA-BAN.txt`](./data/README-DIA-BAN.txt).
+1. Đặt file **`Danh-muc-Phuong-xa_moi.csv`** vào `web_demo/data/` (UTF-8; cột **C** = Tên tỉnh/TP, cột **I** = Tên Phường/Xã — dòng 1 header). Có thể đặt bản sao cùng cấp thư mục gốc dự án; script sẽ tự tìm nếu thiếu trong `data/`. Chi tiết: [`data/README-DIA-BAN.txt`](./data/README-DIA-BAN.txt).
 2. Trong thư mục `web_demo`: `python location_master_import.py`
 3. Kiểm tra file sinh ra: `static/location_master.json`
 4. Khởi động lại app (`uvicorn`).
