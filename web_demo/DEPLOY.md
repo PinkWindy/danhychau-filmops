@@ -6,12 +6,12 @@
 ## Thư mục `web_demo/audit/` (báo cáo — không phải runtime)
 
 - **`audit/`** nằm **cùng cấp** với `main.py`, `static/`, `data/`: chỉ dùng cho **tài liệu nghiệm thu**, **báo cáo smoke/UAT**, file markdown tiền tố **`BAOCAO-`**. Chi tiết: [`audit/README.md`](./audit/README.md).
-- **Audit log nghiệp vụ thật** (thao tác user, thay đổi dữ liệu có `reason`, v.v.) nằm trong **SQLite** `warehouse_demo.db`, bảng **`audit_logs`** (ORM: `DbAuditLog`) — xem trên UI tab **Nhật ký kiểm toán**. Việc có/không có thư mục `audit/` **không ảnh hưởng** tới việc khởi động hay chạy FastAPI.
+- **Audit log nghiệp vụ thật** (thao tác user, thay đổi dữ liệu có `reason`, v.v.) nằm trong DB (SQLite `warehouse_demo.db` hoặc PostgreSQL khi bạn cấu hình `DATABASE_URL`), bảng **`audit_logs`** (ORM: `DbAuditLog`) — xem trên UI tab **Nhật ký kiểm toán**. Việc có/không có thư mục `audit/` **không ảnh hưởng** tới việc khởi động hay chạy FastAPI.
 - Các script Python `*_smoke_test.py` vẫn ở **root** `web_demo/` (không đặt trong `audit/`).
 
-Mục tiêu: có một **URL công khai** (HTTPS) mở được trang demo, API chạy ổn.
+Mục tiêu: có một **URL công khai** (HTTPS) mở được ứng dụng, API chạy ổn, dữ liệu có thể cấu hình **demo (SQLite)** hoặc **vận hành (PostgreSQL)** — xem **Phần B2**.
 
-**Công cụ dùng trong bài này:** GitHub (lưu code) + Render (chạy server Python). **Vercel** chỉ nhắc ở cuối (tùy chọn), vì app của bạn là FastAPI + SQLite — phù hợp Render hơn.
+**Công cụ dùng trong bài này:** GitHub (lưu code) + Render (chạy server Python). **Vercel** chỉ nhắc ở cuối (tùy chọn), vì app của bạn là FastAPI — phù hợp Render; DB nên dùng **PostgreSQL** nếu cần lưu trữ lâu dài.
 
 **Quan trọng:** Trong repo phải có **cả hai** thư mục `web_demo/` **và** `knowledge/` (cùng cấp). Script `populate_db.py` đọc CSV từ `knowledge/`. Không được chỉ upload mỗi thư mục `web_demo` nếu thiếu `knowledge/`.
 
@@ -170,6 +170,42 @@ Gợi ý điền như sau:
 
 ---
 
+## Phần B2 — Vận hành thật (production): PostgreSQL + không seed demo tự động
+
+**Vì sao cần:** SQLite trên ổ instance Render (free) thường **không bền** — redeploy có thể làm mất file DB. Để mọi thao tác bạn làm trên web **được lưu ổn định**, nên gắn **PostgreSQL** (Render **PostgreSQL** hoặc DB ngoài) và trỏ app bằng biến môi trường.
+
+### Bước B2.1 — Tạo PostgreSQL trên Render
+
+1. Dashboard Render → **New +** → **PostgreSQL** (hoặc dùng DB có sẵn).
+2. Sau khi tạo xong, copy **Internal Database URL** (dạng `postgresql://...` hoặc `postgres://...`).
+
+### Bước B2.2 — Gắn vào Web Service
+
+1. Mở **Web Service** (FastAPI) → **Environment**.
+2. Thêm biến:
+   - **`DATABASE_URL`** = URL vừa copy (Render thường tự inject nếu bạn **Link** Postgres vào service — tên biến có thể là `DATABASE_URL`; app đọc đúng tên này).
+3. **Không** cần đặt `DYC_STARTUP_SEED_DEMO` trừ khi bạn muốn nạp bộ demo một lần trên DB trống (staging):
+   - Mặc định với PostgreSQL: **không** tự seed demo khi khởi động — DB chỉ có dữ liệu bạn nhập / `populate_db.py` / import.
+   - Một lần seed trên Postgres (DB trống): đặt `DYC_STARTUP_SEED_DEMO=true`, deploy, kiểm tra, rồi **xóa biến hoặc đặt `false`** để lần sau không ghi đè logic nghiệp vụ.
+
+### Bước B2.3 — Deploy lại
+
+Sau khi thêm `DATABASE_URL`, Render build lại (cài `psycopg2-binary` từ `requirements.txt`). Lần chạy đầu app gọi `create_all` — tạo đủ bảng trên Postgres.
+
+### Bước B2.4 — Nạp dữ liệu ban đầu (nếu DB trống)
+
+- Chạy **Shell** trên Web Service: `cd web_demo && python populate_db.py` **hoặc** nhập tay đại lý / kho trên UI — tùy quy trình của bạn.
+- Endpoint **`POST /api/admin/reset-database-standard-seed`** chỉ dành cho **SQLite**; với PostgreSQL hãy dùng **backup/restore** (pg_dump) hoặc công cụ quản trị.
+
+### Biến môi trường tóm tắt
+
+| Biến | Ý nghĩa |
+|------|--------|
+| `DATABASE_URL` | Nếu có → dùng Postgres (hoặc URL khác SQLAlchemy hỗ trợ). Để trống → SQLite file `web_demo/warehouse_demo.db` (local / disk tạm). |
+| `DYC_STARTUP_SEED_DEMO` | `true` / `false` / để trống. Trống: SQLite = seed nếu DB trống; PostgreSQL = **không** seed. |
+
+---
+
 ## Phần C — Nạp dữ liệu mẫu (populate) trên Render
 
 ### Khi nào cần làm?
@@ -247,7 +283,8 @@ Nếu muốn CI kiểm tra trên GitHub:
 
 | Vấn đề | Giải thích ngắn |
 |--------|------------------|
-| **SQLite + Free Render** | Dữ liệu nằm trên ổ đĩa instance; redeploy/restart đôi khi reset — demo chấp nhận hoặc chạy lại `populate_db.py`. |
+| **SQLite + Free Render** | Dữ liệu trên ổ instance có thể **mất khi redeploy** — chỉ phù hợp demo hoặc cần gắn **Persistent Disk** / chuyển **PostgreSQL** (xem Phần B2). |
+| **PostgreSQL (DATABASE_URL)** | Dữ liệu bền theo DB; app **không** tự seed demo khi khởi động (trừ khi bật `DYC_STARTUP_SEED_DEMO=true`). |
 | **HTTPS** | Render cấp sẵn — không cần cấu hình SSL thủ công. |
 | **Bảo mật** | Repo demo không nên chứa mật khẩu thật, API key thật. |
 

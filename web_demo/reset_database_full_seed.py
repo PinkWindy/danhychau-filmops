@@ -44,8 +44,14 @@ def run_full_reset_sequence(web_demo_dir: Optional[Path] = None) -> Dict[str, An
 
     from sqlalchemy.orm import close_all_sessions
 
-    from database import DATABASE_PATH, SessionLocal, engine, init_db
+    from database import DATABASE_PATH, SessionLocal, database_is_sqlite, engine, init_db
     from standard_seed_data import seed_all_demo_data, summarize_table_counts
+
+    if not database_is_sqlite():
+        raise RuntimeError(
+            "reset_database_full_seed chỉ hỗ trợ SQLite. "
+            "Khi deploy bằng PostgreSQL (DATABASE_URL), dùng pg_dump / backup Render hoặc tắt endpoint reset."
+        )
 
     backups = base / "backups"
     backups.mkdir(parents=True, exist_ok=True)

@@ -10,8 +10,12 @@ from sqlalchemy.orm import Session
 from sqlalchemy import or_
 
 from database import (
-    SessionLocal, init_db,
-    DbDealer, DbCustomer, DbVehicleProfile,
+    SessionLocal,
+    init_db,
+    database_is_sqlite,
+    DbDealer,
+    DbCustomer,
+    DbVehicleProfile,
     DbLotInventory, DbOffcutInventory,
     DbRequest, DbWorkstream, DbJobCard,
     DbAuditLog, DbCuttingGroupMatrix,
@@ -37,9 +41,23 @@ from ocr_lexus_test_data import (
 _log = logging.getLogger("uvicorn.error")
 
 
+def _should_startup_demo_seed() -> bool:
+    """
+    - Mặc định SQLite (local): seed bộ demo chuẩn nếu DB trống (chưa có dealer).
+    - PostgreSQL (DATABASE_URL): không seed — dữ liệu do bạn nhập / migrate (vận hành thật).
+    - Ghi đè: DYC_STARTUP_SEED_DEMO=true|false|force|never (true/force = luôn thử seed nếu DB trống).
+    """
+    ex = (os.getenv("DYC_STARTUP_SEED_DEMO") or "").strip().lower()
+    if ex in ("0", "false", "no", "never", "off"):
+        return False
+    if ex in ("1", "true", "yes", "force", "on"):
+        return True
+    return database_is_sqlite()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Đảm bảo SQLite có bảng/cột mới (Render / production) trước khi nhận request."""
+    """Schema + migration (SQLite) trước khi nhận request; seed demo tùy môi trường."""
     try:
         init_db()
         _log.info("DYC init_db() completed (schema / migrations).")
@@ -47,11 +65,15 @@ async def lifespan(app: FastAPI):
 
         db = SessionLocal()
         try:
-            if seed_all_demo_data_if_missing_canonical(db):
-                db.commit()
-                _log.info("DYC standard_seed: đã seed dữ liệu demo chuẩn (DB trống).")
+            if _should_startup_demo_seed():
+                if seed_all_demo_data_if_missing_canonical(db):
+                    db.commit()
+                    _log.info("DYC standard_seed: đã seed dữ liệu demo chuẩn (DB trống).")
+                else:
+                    db.rollback()
             else:
                 db.rollback()
+                _log.info("DYC startup: không chạy seed demo (PostgreSQL hoặc DYC_STARTUP_SEED_DEMO tắt).")
             # Định mức phim cách nhiệt: không import Excel tự động khi khởi động — dùng UI hoặc POST /api/vehicle-norms/import-from-excel
         except Exception:
             _log.exception("DYC seed skipped or partial.")
@@ -95,6 +117,14 @@ def admin_reset_database_standard_seed(request: Request):
     import secrets
     from pathlib import Path
 
+    if not database_is_sqlite():
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "RESET_SQLITE_ONLY",
+                "message": "Reset + seed chuẩn chỉ hỗ trợ SQLite. Với PostgreSQL (DATABASE_URL) hãy dùng backup/restore hoặc công cụ quản trị DB.",
+            },
+        )
     if os.getenv("ALLOW_DB_RESET", "").lower() != "true":
         raise HTTPException(status_code=403, detail="ALLOW_DB_RESET is not enabled")
     expected = (os.getenv("ADMIN_RESET_TOKEN") or "").strip()

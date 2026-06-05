@@ -1,15 +1,58 @@
 import os
 import sqlite3
-from sqlalchemy import create_engine, Column, String, Float, Boolean, Integer, Text
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
 import datetime
 
-db_dir = os.path.dirname(os.path.abspath(__file__))
-DATABASE_URL = f"sqlite:///{os.path.join(db_dir, 'warehouse_demo.db')}"
-DATABASE_PATH = os.path.join(db_dir, 'warehouse_demo.db')
+from sqlalchemy import create_engine, Column, String, Float, Boolean, Integer, Text
+from sqlalchemy.engine.url import make_url
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker
 
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+db_dir = os.path.dirname(os.path.abspath(__file__))
+
+
+def _default_sqlite_database_url() -> str:
+    return f"sqlite:///{os.path.join(db_dir, 'warehouse_demo.db')}"
+
+
+def _build_database_url() -> str:
+    """Ưu tiên biến môi trường DATABASE_URL (Render PostgreSQL, v.v.). Để trống = SQLite local."""
+    raw = (os.getenv("DATABASE_URL") or "").strip()
+    if not raw:
+        return _default_sqlite_database_url()
+    # Render/Heroku đôi khi gửi postgres:// — SQLAlchemy 2 cần postgresql://
+    if raw.startswith("postgres://"):
+        raw = "postgresql://" + raw[len("postgres://") :]
+    return raw
+
+
+DATABASE_URL = _build_database_url()
+
+
+def database_is_sqlite() -> bool:
+    return DATABASE_URL.strip().lower().startswith("sqlite")
+
+
+def _sqlite_db_file_path() -> str:
+    """Đường dẫn file .db khi dùng SQLite (init_db migration thủ công + reset script)."""
+    if not database_is_sqlite():
+        return ""
+    try:
+        u = make_url(DATABASE_URL)
+        name = (u.database or "warehouse_demo.db").strip()
+        if os.path.isabs(name):
+            return name
+        return os.path.abspath(os.path.join(db_dir, name))
+    except Exception:
+        return os.path.join(db_dir, "warehouse_demo.db")
+
+
+DATABASE_PATH = _sqlite_db_file_path() if database_is_sqlite() else ""
+
+if database_is_sqlite():
+    engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+else:
+    engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
@@ -461,8 +504,11 @@ def _add_column_if_missing(conn, table, col, col_def):
 def init_db():
     """Create tables and add any missing columns (safe migration for SQLite)."""
     Base.metadata.create_all(bind=engine)
+    # PostgreSQL: schema đủ từ models — không chạy PRAGMA/ALTER kiểu SQLite.
+    if not database_is_sqlite():
+        return
     # SQLite doesn't auto-add new columns via create_all — do it manually
-    if os.path.exists(DATABASE_PATH):
+    if DATABASE_PATH and os.path.exists(DATABASE_PATH):
         conn = sqlite3.connect(DATABASE_PATH)
         lot_new_cols = [
             ("material_name",           "TEXT"),

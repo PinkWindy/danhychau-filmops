@@ -1,6 +1,8 @@
 # DYC — Web demo (FastAPI + SQLite + SPA)
 
-Ứng dụng demo quản lý kho phim / đơn thi công / khách hàng / định mức. Chạy local:
+Ứng dụng quản lý kho phim / đơn thi công / khách hàng / định mức. **Local:** SQLite mặc định. **Online vận hành:** nên cấu hình `DATABASE_URL` trỏ PostgreSQL (xem [`DEPLOY.md`](./DEPLOY.md) phần B2).
+
+Chạy local:
 
 ```bash
 cd web_demo
