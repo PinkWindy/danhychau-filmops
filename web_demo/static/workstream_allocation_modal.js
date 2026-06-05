@@ -59,6 +59,16 @@
     );
   }
 
+  /** Đồng bộ ROLL_WIDTH_FULL_CM=150 trong wf_allocation_service: tận khổ → mét chạy cuộn. */
+  function wfRollStripM(w_cm, l_cm) {
+    const w = parseFloat(w_cm) || 0;
+    const l = parseFloat(l_cm) || 0;
+    if (w <= 0 || l <= 0) return 0;
+    const lo = w <= l ? w : l;
+    const hi = w <= l ? l : w;
+    return hi >= 150 ? lo / 100 : hi / 100;
+  }
+
   async function enrichWfAllocationFromNorm(ws, alloc, modelYearOverride, opts) {
     let req = {};
     try {
@@ -137,8 +147,13 @@
       if (it.is_selected) {
         const qtz = Math.max(1, parseInt(it.quantity, 10) || 1);
         it.quantity = qtz;
+        const wcmF = parseFloat(it.required_width_cm) || 0;
         const lcmF = parseFloat(it.required_length_cm) || 0;
-        if (lcmF > 0) it.required_length_m = Math.round((lcmF / 100) * qtz * 10000) / 10000;
+        if (wcmF > 0 && lcmF > 0) {
+          it.required_length_m = Math.round(wfRollStripM(wcmF, lcmF) * qtz * 10000) / 10000;
+        } else if (lcmF > 0) {
+          it.required_length_m = Math.round((lcmF / 100) * qtz * 10000) / 10000;
+        }
       }
     }
     return { req, normRes };
@@ -479,13 +494,7 @@
       const w_cm = parseFloat(it.required_width_cm) || 0;
       const l_cm = parseFloat(it.required_length_cm) || 0;
       if (w_cm <= 0 || l_cm <= 0) continue;
-      let strip;
-      if (ji === 'WINDSHIELD') strip = Math.max(w_cm, l_cm) / 100;
-      else {
-        const hi = Math.max(w_cm, l_cm);
-        const lo = Math.min(w_cm, l_cm);
-        strip = hi >= 150 ? lo / 100 : hi / 100;
-      }
+      const strip = wfRollStripM(w_cm, l_cm);
       blocks.push({
         kind: 'SINGLE',
         material_code: mc,
@@ -516,8 +525,9 @@
       .forEach((mc) => {
         const row = byMaterial[mc];
         const parts = row.blocks.map((x) => `${esc(x.block_cm)} cm — ${esc(x.label)}`);
+        const cmRun = Math.round(row.total_roll_strip_m * 100);
         linesParts.push(
-          `${esc(mc)}: ${parts.join('; ')} → tổng mét trừ LOT (gộp khổ): <strong>${row.total_roll_strip_m.toFixed(2)} m</strong>`
+          `${esc(mc)}: ${parts.join('; ')} → tổng mét trừ LOT (gộp khổ): <strong>${row.total_roll_strip_m.toFixed(2)} m</strong> (${cmRun} cm chạy cuộn)`
         );
       });
     return { version: 1, blocks, by_material: byMaterial, lines_html: linesParts.join('<br>') };
@@ -570,7 +580,7 @@
           if (!ok) matBad = true;
           const label = need <= 1e-9 ? '—' : ok ? 'Đủ' : 'Thiếu';
           const col = need <= 1e-9 ? 'var(--text-secondary)' : ok ? 'var(--teal-light)' : 'var(--amber)';
-          html += `${esc(mc)}: gộp khổ cần <strong>${need.toFixed(2)}m</strong> — đã phân <strong>${got.toFixed(2)}m</strong> — <span style="color:${col}">${label}</span><br>`;
+          html += `${esc(mc)}: gộp khổ cần <strong>${need.toFixed(2)}m</strong> (${Math.round(need * 100)} cm chạy cuộn) — đã phân <strong>${got.toFixed(2)}m</strong> — <span style="color:${col}">${label}</span><br>`;
         });
       if (w) {
         w.style.display = matBad ? 'block' : 'none';

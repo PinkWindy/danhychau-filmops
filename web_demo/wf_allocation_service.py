@@ -36,8 +36,8 @@ def _mc_norm(it: Dict[str, Any]) -> str:
 
 
 def _roll_strip_m_windshield(w_cm: float, l_cm: float) -> float:
-    """Kính lái: mét chạy khổ theo cạnh dài (vd 90×152 → 1,52m)."""
-    return max(float(w_cm or 0), float(l_cm or 0)) / 100.0
+    """Kính lái: cùng quy tắc tận khổ cuộn như hạng mục khác (vd 87×152 → 0,87m)."""
+    return _roll_strip_m_non_windshield(w_cm, l_cm)
 
 
 def _roll_strip_m_non_windshield(w_cm: float, l_cm: float) -> float:
@@ -58,8 +58,8 @@ def compute_wf_roll_cut_summary(alloc: Dict[str, Any]) -> Dict[str, Any]:
     Quy tắc nghiệp vụ:
     - Kính hậu + Sườn trước cùng material_code và cùng chiều dài (cm, lệch ≤1cm):
       một khối L×(W1+W2), mét khổ = L/100 (vd 60×130 + 92×130 → 130×152 → 1,3m).
-    - Kính lái: mét khổ = max(W,L)/100.
-    - Các hạng mục khác: cạnh lớn ≥ ~152cm thì mét = cạnh nhỏ/100, không thì mét = cạnh lớn/100.
+    - Kính lái và các hạng mục đơn lẻ: cạnh lớn ≥ ~152cm (tận khổ cuộn) thì mét chạy cuộn = cạnh nhỏ/100,
+      ngược lại mét = cạnh lớn/100 (vd 87×152 → 0,87m).
     """
     items = [x for x in (alloc.get("items") or []) if isinstance(x, dict)]
     by_code = {str(x.get("item_code")): x for x in items if x.get("item_code")}
@@ -132,7 +132,12 @@ def compute_wf_roll_cut_summary(alloc: Dict[str, Any]) -> Dict[str, Any]:
         row = by_material[mc]
         parts = [f"{x.get('block_cm', '')} cm — {x.get('label', '')}" for x in row["blocks"]]
         tot = float(row["total_roll_strip_m"] or 0)
-        lines_vi.append(f"{mc}: " + "; ".join(parts) + f" → tổng mét trừ LOT (gộp khổ): <strong>{tot:.2f} m</strong>")
+        cm_run = int(round(tot * 100.0 + 1e-9))
+        lines_vi.append(
+            f"{mc}: "
+            + "; ".join(parts)
+            + f" → tổng mét trừ LOT (gộp khổ): <strong>{tot:.2f} m</strong> ({cm_run} cm chạy cuộn)"
+        )
 
     return {
         "version": 1,
@@ -261,7 +266,14 @@ def build_default_wf_allocation(db: Session, ws: DbWorkstream) -> Dict[str, Any]
 
         is_sel = bool(want and mc)
         qty = 1 if is_sel else 0
-        req_m = round((l_cm / 100.0) * max(1, qty), 4) if is_sel else 0.0
+        if is_sel:
+            if w_cm > 0 and l_cm > 0:
+                strip_m = _roll_strip_m_non_windshield(w_cm, l_cm)
+                req_m = round(strip_m * max(1, qty), 4)
+            else:
+                req_m = round((l_cm / 100.0) * max(1, qty), 4)
+        else:
+            req_m = 0.0
         sources: List[Dict[str, Any]] = []
         if is_sel and mc and req_m > 0:
             sid = (ws.allocated_source_id or "").strip() if (ws.allocated_source_type or "").upper() == "LOT" else ""
@@ -328,8 +340,12 @@ def _normalize_wf_body(body: Dict[str, Any], ws: DbWorkstream) -> Dict[str, Any]
         req_m = float(raw.get("required_length_m") or 0)
         sz = (raw.get("planned_size") or "").strip()
         if is_sel:
-            if req_m <= 0 and l_cm > 0:
-                req_m = round((l_cm / 100.0) * max(1, qty), 4)
+            if req_m <= 0:
+                if w_cm > 0 and l_cm > 0:
+                    strip_m = _roll_strip_m_non_windshield(w_cm, l_cm)
+                    req_m = round(strip_m * max(1, qty), 4)
+                elif l_cm > 0:
+                    req_m = round((l_cm / 100.0) * max(1, qty), 4)
             if req_m <= 0:
                 raise _err("WF_INVALID_ITEM_QUANTITY", f"Hạng mục {ji}: required_length_m phải > 0.")
             if not sz and w_cm and l_cm:
