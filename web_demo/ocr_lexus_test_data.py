@@ -285,21 +285,32 @@ def confirm_lexus_test_ocr(
     customer_id = f"CUS-TEST-LEXUS-{sfx}"
     vehicle_id = f"VEH-TEST-LEXUS-{sfx}"
 
-    cust_existed = db.query(DbCustomer).filter(DbCustomer.customer_id == customer_id).first() is not None
-    if not cust_existed:
+    cust_row = db.query(DbCustomer).filter(DbCustomer.customer_id == customer_id).first()
+    addr_src = (payload.get("customer_address") or payload.get("address_masked") or "").strip()
+    ph_src = (payload.get("customer_phone") or "").strip()
+    nm_src = (payload.get("customer_name") or payload.get("customer_masked") or "").strip()
+    if cust_row:
+        if addr_src:
+            cust_row.address = addr_src
+            cust_row.full_address = addr_src
+            cust_row.address_masked = addr_src
+        if ph_src:
+            cust_row.phone = ph_src
+            cust_row.phone_masked = ph_src
+        if nm_src:
+            cust_row.customer_name = nm_src
+            cust_row.customer_masked = nm_src
+    else:
         db.add(
             DbCustomer(
                 customer_id=customer_id,
                 customer_name=cust_masked or customer_id,
                 customer_masked=cust_masked or customer_id,
-                phone=(payload.get("customer_phone") or "").strip() or None,
-                phone_masked=(payload.get("customer_phone") or "").strip() or None,
-                address=(payload.get("customer_address") or payload.get("address_masked") or "").strip()
-                or None,
-                address_masked=(payload.get("customer_address") or payload.get("address_masked") or "").strip()
-                or None,
-                full_address=(payload.get("customer_address") or payload.get("address_masked") or "").strip()
-                or None,
+                phone=ph_src or None,
+                phone_masked=ph_src or None,
+                address=addr_src or None,
+                address_masked=addr_src or None,
+                full_address=addr_src or None,
                 source_dealer_id=dealer_id,
                 customer_type="END_CUSTOMER",
                 source_channel="OCR",

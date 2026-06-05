@@ -18,7 +18,12 @@ from database import (
     DbOcrDraft, DbNotification
 )
 from inventory_api import register_inventory_routes, assert_source_valid_for_wf6_commit
-from customer_api import register_customer_routes
+from customer_api import (
+    register_customer_routes,
+    customer_plain_address,
+    customer_plain_phone,
+    customer_display_name,
+)
 from vehicle_norm_api import register_vehicle_norm_routes
 from location_api import register_location_routes
 from material_preference_api import register_material_preference_routes
@@ -619,10 +624,9 @@ def get_request(request_id: str, db: Session = Depends(get_db)):
     try:
         cust = db.query(DbCustomer).filter(DbCustomer.customer_id == req.customer_id).first()
         if cust:
-            d["customer_phone"] = (cust.phone or cust.phone_masked or "").strip() or None
-            d["customer_address"] = (
-                (cust.address or cust.full_address or cust.address_masked or "") or ""
-            ).strip() or None
+            d["customer_phone"] = customer_plain_phone(cust) or None
+            d["customer_address"] = customer_plain_address(cust) or None
+            d["customer_name"] = customer_display_name(cust, (d.get("customer_name") or "").strip())
         veh = db.query(DbVehicleProfile).filter(DbVehicleProfile.vehicle_id == req.vehicle_id).first()
         if veh:
             if not (d.get("vin_number") or "").strip():

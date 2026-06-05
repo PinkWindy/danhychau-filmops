@@ -23,6 +23,7 @@ from database import (
     DbLotInventory,
     DbNotification,
     DbOffcutInventory,
+    DbOcrDraft,
     DbRequest,
     DbVehicleFilmNorm,
     DbVehicleProfile,
@@ -208,8 +209,30 @@ def seed_dealers(db: Session) -> None:
     )
 
 
+def _purge_amis_smoke_end_customers(db: Session) -> int:
+    """Xóa khách lẻ smoke AMIS (customer_id CUS-AMIS-*) và request/xe liên quan."""
+    ids = [r[0] for r in db.query(DbCustomer.customer_id).filter(DbCustomer.customer_id.like("CUS-AMIS-%")).all()]
+    n = 0
+    for cid in ids:
+        rids = [x[0] for x in db.query(DbRequest.request_id).filter(DbRequest.customer_id == cid).all()]
+        for rid in rids:
+            db.query(DbJobCard).filter(DbJobCard.request_id == rid).delete(synchronize_session=False)
+            db.query(DbWorkstream).filter(DbWorkstream.request_id == rid).delete(synchronize_session=False)
+            db.query(DbAuditLog).filter(DbAuditLog.request_id == rid).delete(synchronize_session=False)
+            db.query(DbNotification).filter(DbNotification.related_id == rid).delete(synchronize_session=False)
+            db.query(DbOcrDraft).filter(DbOcrDraft.created_request_id == rid).delete(synchronize_session=False)
+            db.query(DbRequest).filter(DbRequest.request_id == rid).delete(synchronize_session=False)
+        db.query(DbVehicleProfile).filter(DbVehicleProfile.customer_id == cid).delete(synchronize_session=False)
+        row = db.query(DbCustomer).filter(DbCustomer.customer_id == cid).first()
+        if row:
+            db.delete(row)
+            n += 1
+    return n
+
+
 def seed_end_customers(db: Session) -> None:
     ts = _now_iso()
+    _purge_amis_smoke_end_customers(db)
     _merge_customer(
         db,
         customer_id="CUS-LEXUS-115",

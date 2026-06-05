@@ -234,8 +234,55 @@ def _serialize_dealer(d: DbDealer) -> dict:
     }
 
 
+_MASK_PLACEHOLDER_TOKENS = (
+    "ADDRESS_MASKED",
+    "PHONE_MASKED",
+    "KH_MASKED",
+    "MASKED_LEXUS",
+    "VIN_MASKED",
+)
+
+
+def _looks_like_mask_placeholder(s: Optional[str]) -> bool:
+    if not (s or "").strip():
+        return False
+    u = s.upper()
+    return any(t in u for t in _MASK_PLACEHOLDER_TOKENS)
+
+
+def customer_plain_address(c: DbCustomer) -> str:
+    """Địa chỉ hiển thị nội bộ — bỏ qua chuỗi placeholder MASKED."""
+    for v in ((c.address or "").strip(), (getattr(c, "full_address", None) or "").strip()):
+        if v and not _looks_like_mask_placeholder(v):
+            return v
+    m = (c.address_masked or "").strip()
+    if m and not _looks_like_mask_placeholder(m):
+        return m
+    return ""
+
+
+def customer_plain_phone(c: DbCustomer) -> str:
+    for v in ((c.phone or "").strip(), (c.phone_masked or "").strip()):
+        if v and not _looks_like_mask_placeholder(v):
+            return v
+    return ""
+
+
+def customer_display_name(c: DbCustomer, request_fallback: str = "") -> str:
+    for v in (
+        (c.customer_name or "").strip(),
+        (c.customer_masked or "").strip(),
+        (request_fallback or "").strip(),
+    ):
+        if v and not _looks_like_mask_placeholder(v):
+            return v
+    return (c.customer_name or c.customer_masked or request_fallback or "").strip()
+
+
 def _serialize_customer(c: DbCustomer) -> dict:
     fa = getattr(c, "full_address", None) or None
+    if not (fa or "").strip():
+        fa = customer_plain_address(c)
     if not (fa or "").strip():
         fa = build_full_address(
             getattr(c, "address_no", None),
@@ -244,24 +291,25 @@ def _serialize_customer(c: DbCustomer) -> dict:
             getattr(c, "city", None),
         )
     if not (fa or "").strip():
-        fa = (c.address or c.address_masked or "") or ""
+        fa = (c.address or "") or ""
+    plain_addr = customer_plain_address(c)
     return {
         "customer_id": c.customer_id,
         "customer_category": getattr(c, "customer_category", None) or "RETAIL_CUSTOMER",
-        "customer_name": c.customer_name,
+        "customer_name": customer_display_name(c, ""),
         "customer_masked": c.customer_masked,
         "tax_code": getattr(c, "tax_code", None) or "",
-        "phone": c.phone or "",
+        "phone": customer_plain_phone(c) or "",
         "address_no": getattr(c, "address_no", None) or "",
         "street": getattr(c, "street", None) or "",
         "ward": getattr(c, "ward", None) or "",
         "city": getattr(c, "city", None) or "",
-        "full_address": fa or "",
+        "full_address": (fa or "").strip() or plain_addr,
         "amis_customer_code": getattr(c, "amis_customer_code", None) or "",
         "status": c.status or "ACTIVE",
         "phone_masked": c.phone_masked,
         "email": c.email,
-        "address": c.address,
+        "address": (c.address or "").strip() or plain_addr,
         "address_masked": c.address_masked,
         "source_dealer_id": c.source_dealer_id,
         "customer_type": c.customer_type,
