@@ -659,7 +659,7 @@
         <table class="data-table">
           <thead><tr>
             <th>Mã luồng</th><th>Mã đơn</th><th>Loại thi công</th><th>Đội</th>
-            <th>Loại phim</th><th>Kích thước block</th><th>Nguồn vật tư</th>
+            <th>Loại phim</th>
             <th>Trạng thái</th><th>Bắt đầu</th><th>Hoàn tất</th><th>Thao tác (Quản lý)</th><th>Thao tác (KTV)</th>
           </tr></thead>
           <tbody id="table-ws-body"></tbody>
@@ -1109,6 +1109,31 @@
         <div style="border-top: 1px solid var(--border-color); padding-top: 12px; margin-top: 12px;">
            <label style="font-size: 11px; color: var(--text-secondary); display:block; margin-bottom: 4px;">Dịch vụ yêu cầu</label>
            <div id="quick-req-services" style="font-weight: bold;"></div>
+        </div>
+        <div style="border-top: 1px solid var(--border-color); padding-top: 12px; margin-top: 12px;">
+          <h4 style="font-size: 12px; margin-bottom: 8px; color: var(--text-secondary);">Thông tin phê duyệt & Thi công luồng</h4>
+          <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+            <div>
+              <label style="font-size: 11px; color: var(--text-secondary); display:block; margin-bottom: 2px;">Tên quản lý duyệt</label>
+              <div id="quick-req-manager" style="font-weight: bold;"></div>
+            </div>
+            <div>
+              <label style="font-size: 11px; color: var(--text-secondary); display:block; margin-bottom: 2px;">Thời gian duyệt</label>
+              <div id="quick-req-manager-time" style="font-weight: bold;"></div>
+            </div>
+            <div>
+              <label style="font-size: 11px; color: var(--text-secondary); display:block; margin-bottom: 2px;">Ghi nhận KTV hoàn tất</label>
+              <div id="quick-req-tech" style="font-weight: bold;"></div>
+            </div>
+            <div>
+              <label style="font-size: 11px; color: var(--text-secondary); display:block; margin-bottom: 2px;">SĐT KTV</label>
+              <div id="quick-req-tech-phone" style="font-weight: bold;"></div>
+            </div>
+            <div>
+              <label style="font-size: 11px; color: var(--text-secondary); display:block; margin-bottom: 2px;">Thời gian hoàn tất</label>
+              <div id="quick-req-tech-time" style="font-weight: bold;"></div>
+            </div>
+          </div>
         </div>
         <div style="border-top: 1px solid var(--border-color); padding-top: 12px; margin-top: 12px;">
            <h4 style="font-size: 12px; margin-bottom: 8px; color: var(--text-secondary);">Thông tin chi tiết khác</h4>

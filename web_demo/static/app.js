@@ -3736,18 +3736,18 @@ async function taiBangLuong() {
     ? '<tr><td colspan="11" class="text-center muted" style="padding:20px">Không có luồng thi công nào.</td></tr>'
     : loc.map(w => `<tr>
         <td><strong style="font-size:11px">${w.workstream_id}</strong></td>
-        <td>${w.request_id}</td>
+        <td><a href="#" onclick="xemNhanhDonThiCong('${w.request_id}', '${w.workstream_id}'); return false;" style="color:var(--primary);font-weight:600">${w.request_id}</a></td>
         <td>${loaiLuongBadge(w.workstream_type)}</td>
         <td>${w.technician_team || '—'}</td>
         <td><strong>${w.selected_material_code || '—'}</strong></td>
-        <td>${w.planned_cut_block || '—'}</td>
-        <td>${w.allocated_source_id || '—'}</td>
         <td>${trangThaiBadge(w.status)}</td>
         <td><small>${fmtDt(w.started_at)}</small></td>
         <td><small>${fmtDt(w.completed_at)}</small></td>
         <td style="white-space:nowrap">
           ${w.status === 'PENDING_APPROVAL' && w.workstream_type === 'WINDOW_FILM_INSTALLATION' ? `<button class="btn btn-green btn-sm" onclick="moModalDuyetMaPhimWF('${w.workstream_id}')">Duyệt mã phim</button>` : ''}
           ${w.status === 'PENDING_APPROVAL' && w.workstream_type !== 'WINDOW_FILM_INSTALLATION' ? `<button class="btn btn-green btn-sm" onclick="pheDuyetNhanhWs('${w.workstream_id}')">Duyệt</button>` : ''}
+        </td>
+        <td style="white-space:nowrap">
           ${w.status === 'PENDING_TECH_PREFLIGHT' && w.workstream_type === 'WINDOW_FILM_INSTALLATION' ? `<button class="btn btn-outline btn-sm" onclick="chiinhSuaWs('${w.workstream_id}')">LOT</button><button class="btn btn-green btn-sm" style="margin-left:4px" onclick="pheDuyetNhanhWs('${w.workstream_id}')">Chốt</button>` : ''}
           ${w.status === 'APPROVED' ? `<button class="btn btn-blue btn-sm" onclick="batDauWs('${w.workstream_id}')">Bắt đầu</button>` : ''}
           ${w.status === 'IN_PROGRESS' ? `<button class="btn btn-primary btn-sm" onclick="moFormXacNhan('${w.workstream_id}')">Hoàn tất</button>` : ''}
@@ -3759,6 +3759,56 @@ async function taiBangLuong() {
 ['ws-filter-type','ws-filter-status'].forEach(id => {
   document.getElementById(id)?.addEventListener('change', taiBangLuong);
 });
+
+async function xemNhanhDonThiCong(requestId, workstreamId) {
+  try {
+    const req = await fetch('/api/requests/' + requestId).then(r => r.json());
+    if(req.error) {
+      alert('Không tìm thấy đơn');
+      return;
+    }
+    const ws = wss.find(x => x.workstream_id === workstreamId) || {};
+    
+    // fetch staff list to get phone number
+    let staffs = [];
+    try {
+      staffs = await fetch('/api/staff').then(r => r.json());
+    } catch(e) { }
+    const techId = ws.technician_id || req.technician_id;
+    const tech = staffs.find(s => s.staff_id === techId) || {};
+
+    document.getElementById('quick-req-id').textContent = req.request_id || '';
+    document.getElementById('quick-req-status').innerHTML = trangThaiBadge(req.status);
+    document.getElementById('quick-req-dealer').textContent = req.dealer_name || req.dealer_id || '—';
+    document.getElementById('quick-req-customer').textContent = req.customer_name || '—';
+    document.getElementById('quick-req-phone').textContent = req.customer_id || '—';
+    document.getElementById('quick-req-model').textContent = req.model_name || req.vehicle_model_code || '—';
+    document.getElementById('quick-req-deadline').textContent = req.requested_delivery_time ? fmtDt(req.requested_delivery_time) : '—';
+    document.getElementById('quick-req-vin').textContent = req.vin_number ? req.vin_number.slice(-6) : (req.vin_masked || '—');
+    document.getElementById('quick-req-team').textContent = ws.technician_team || '—';
+    document.getElementById('quick-req-services').textContent = req.job_items || '—';
+    
+    document.getElementById('quick-req-manager').textContent = ws.approved_by || '—';
+    document.getElementById('quick-req-manager-time').textContent = ws.approved_at ? fmtDt(ws.approved_at) : '—';
+    document.getElementById('quick-req-tech').textContent = ws.assigned_technician_name || tech.full_name || techId || '—';
+    document.getElementById('quick-req-tech-phone').textContent = tech.phone || '—';
+    document.getElementById('quick-req-tech-time').textContent = ws.completed_at ? fmtDt(ws.completed_at) : '—';
+    
+    document.getElementById('quick-req-source').textContent = req.source_channel || '—';
+    document.getElementById('quick-req-ticket').textContent = req.request_no || '—';
+    document.getElementById('quick-req-contract').textContent = req.contract_no || '—';
+    document.getElementById('quick-req-date').textContent = req.request_date || '—';
+    document.getElementById('quick-req-ocr-img').innerHTML = req.ocr_source_image ? `<a href="/${req.ocr_source_image}" target="_blank" style="color:var(--primary)">Xem ảnh</a>` : '—';
+    document.getElementById('quick-req-ids').textContent = (req.customer_id || '') + ' / ' + (req.vehicle_id || '');
+    document.getElementById('quick-req-address').textContent = '—'; // no address field currently
+    document.getElementById('quick-req-sales').textContent = req.sales_consultant || '—';
+    
+    document.getElementById('quick-req-modal').style.display = 'flex';
+  } catch(e) {
+    console.error(e);
+  }
+}
+
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // LỆNH THI CÔNG (JOB CARDS)
