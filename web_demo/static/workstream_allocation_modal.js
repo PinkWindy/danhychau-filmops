@@ -265,7 +265,7 @@
       }
       it.planned_cut_block = document.getElementById(`wa_block_${it.item_code}`)?.value || it.planned_cut_block || '';
       const rq = document.getElementById(`wa_reqm_${it.item_code}`)?.value;
-      it.required_length_m = rq === '' || rq == null ? it.required_length_m || 0 : parseFloat(rq);
+      it.required_length_m = rq === '' || rq == null ? it.required_length_m || 0 : parseFloat(rq) / 100;
       if (!isPpfCtx(ctx)) {
         it.material_code = (document.getElementById(`wa_mat_${it.item_code}`)?.value || '').trim();
         const wcm = document.getElementById(`wa_wcm_${it.item_code}`)?.value;
@@ -282,18 +282,18 @@
           stack.querySelectorAll('.wa-src-line').forEach((line) => {
             const stype = (line.querySelector('.wa-src-type')?.value || 'LOT').toUpperCase();
             const sid = (line.querySelector('.wa-src-id')?.value || '').trim();
-            const len = parseFloat(line.querySelector('.wa-src-len')?.value || '0') || 0;
+            const lenCm = parseFloat(line.querySelector('.wa-src-len')?.value || '0') || 0;
             const note = (line.querySelector('.wa-src-note')?.value || '').trim();
-            if (sid && len > 0) it.sources.push({ source_type: stype, source_id: sid, allocated_length_m: len, note });
+            if (sid && lenCm > 0) it.sources.push({ source_type: stype, source_id: sid, allocated_length_m: lenCm / 100, note });
           });
         }
       } else {
         document.querySelectorAll(`tr[data-wa-src-item="${it.item_code}"]`).forEach((row) => {
           const stype = (row.querySelector('.wa-src-type')?.value || 'LOT').toUpperCase();
           const sid = (row.querySelector('.wa-src-id')?.value || '').trim();
-          const len = parseFloat(row.querySelector('.wa-src-len')?.value || '0') || 0;
+          const lenCm = parseFloat(row.querySelector('.wa-src-len')?.value || '0') || 0;
           const note = (row.querySelector('.wa-src-note')?.value || '').trim();
-          if (sid && len > 0) it.sources.push({ source_type: stype, source_id: sid, allocated_length_m: len, note });
+          if (sid && lenCm > 0) it.sources.push({ source_type: stype, source_id: sid, allocated_length_m: lenCm / 100, note });
         });
       }
     }
@@ -325,7 +325,7 @@
               <select class="field-input wa-src-type"><option value="LOT" ${st === 'LOT' ? 'selected' : ''}>Cuộn LOT</option>
                 <option value="OFFCUT" ${st === 'OFFCUT' ? 'selected' : ''}>Mảnh dư</option></select>
               <select class="field-input wa-src-id">${opts}</select>
-              <input type="number" class="field-input wa-src-len" step="0.1" min="0" value="${src.allocated_length_m != null ? src.allocated_length_m : ''}" placeholder="m">
+              <input type="number" class="field-input wa-src-len" step="1" min="0" value="${src.allocated_length_m != null ? Math.round(src.allocated_length_m * 100) : ''}" placeholder="cm">
               <input type="text" class="field-input wa-src-note" placeholder="Ghi chú" value="${esc(src.note || '')}">
               <button type="button" class="btn btn-outline btn-sm wa-del-src"${srcs.length < 2 ? ' disabled' : ''}>✕</button>
             </div></td></tr>`;
@@ -346,8 +346,8 @@
         <input type="hidden" id="wa-ppf-type" value="${esc(pt)}"></div>
       <div class="edit-section"><div class="edit-section-title"><i class="fa-solid fa-table" style="color:var(--red)"></i> Bảng hạng mục &amp; nguồn</div>
         <div style="overflow-x:auto"><table class="data-table" style="width:100%;font-size:12px"><thead><tr style="text-align:left;background:rgba(255,255,255,0.05)">
-          <th style="padding:6px">Chọn</th><th>Hạng mục</th><th>SL</th><th>Kích thước (cm)</th><th>Chiều dài yêu cầu (m)</th>
-          <th>Loại nguồn</th><th>Mã cuộn/mảnh dư</th><th>Lấy từ nguồn (m)</th><th>Ghi chú</th><th></th>
+          <th style="padding:6px">Chọn</th><th>Hạng mục</th><th>SL</th><th>Kích thước (cm)</th><th>Chiều dài yêu cầu (cm)</th>
+          <th>Loại nguồn</th><th>Mã cuộn/mảnh dư</th><th>Lấy từ nguồn (cm)</th><th>Ghi chú</th><th></th>
         </tr></thead><tbody>${rows}</tbody></table></div></div>
       <div class="edit-section" id="wa-summary-box"><div class="edit-section-title"><i class="fa-solid fa-scale-balanced" style="color:var(--teal-light)"></i> Kiểm tra (Full xe)</div>
         <div id="wa-alloc-summary"></div><div id="wa-alloc-warn" style="display:none;margin-top:8px;padding:8px;border-radius:8px;background:rgba(255,152,0,0.12);color:var(--amber);font-size:12px;font-weight:600"></div></div>
@@ -419,9 +419,9 @@
         return `<div class="wa-src-line" data-wa-src-idx="${j}" style="display:grid;grid-template-columns:110px minmax(160px,1.1fr) 88px minmax(100px,1fr) 36px;gap:8px;align-items:center;margin-bottom:6px">
           <select class="field-input wa-src-type"><option value="LOT" ${st === 'LOT' ? 'selected' : ''}>Cuộn LOT</option>
             <option value="OFFCUT" ${st === 'OFFCUT' ? 'selected' : ''}>Mảnh dư</option></select>
-          <select class="field-input wa-src-id">${opts}</select>
-          <input type="number" class="field-input wa-src-len" step="0.01" min="0" value="${src.allocated_length_m != null ? src.allocated_length_m : ''}" placeholder="m">
-          <input type="text" class="field-input wa-src-note" placeholder="Ghi chú" value="${esc(src.note || '')}">
+          <select class="field-input wa-src-id" style="min-width:140px;flex:1">${opts}</select>
+          <input type="number" class="field-input wa-src-len" step="1" min="0" value="${src.allocated_length_m != null ? Math.round(src.allocated_length_m * 100) : ''}" placeholder="cm" style="width:52px">
+          <input type="text" class="field-input wa-src-note" placeholder="Ghi chú" value="${esc(src.note || '')}" style="width:64px">
           <button type="button" class="btn btn-outline btn-sm wa-del-src"${srcs.length < 2 ? ' disabled' : ''}>✕</button>
         </div>`;
       })
@@ -482,8 +482,8 @@
         <td style="padding:6px;vertical-align:top"><input type="number" class="field-input" style="width:56px" id="wa_qty_${it.item_code}" min="0" value="${it.quantity || 0}"></td>
         <td style="padding:6px;vertical-align:top"><input type="text" class="field-input" style="width:80px" id="wa_block_${it.item_code}" value="${esc(it.planned_size || it.planned_cut_block || '')}"></td>
         <td style="padding:6px;vertical-align:top"><input type="number" class="field-input" style="width:52px" id="wa_wcm_${it.item_code}" step="0.1" value="${it.required_width_cm != null ? it.required_width_cm : ''}"></td>
-        <td style="padding:6px;vertical-align:top"><input type="number" class="field-input" style="width:52px" id="wa_lcm_${it.item_code}" step="0.1" value="${it.required_length_cm != null ? it.required_length_cm : ''}"></td>
-        <td style="padding:6px;vertical-align:top"><input type="number" class="field-input" style="width:72px" id="wa_reqm_${it.item_code}" step="0.01" value="${it.required_length_m != null ? it.required_length_m : ''}"></td>
+        <td style="padding:6px;vertical-align:top"><input type="number" class="field-input" style="width:68px" id="wa_lcm_${it.item_code}" step="0.1" value="${it.required_length_cm != null ? it.required_length_cm : ''}"></td>
+        <td style="padding:6px;vertical-align:top"><input type="number" class="field-input" style="width:72px" id="wa_reqm_${it.item_code}" step="1" value="${it.required_length_m != null ? Math.round(it.required_length_m * 100) : ''}"></td>
         <td colspan="4" style="padding:6px;vertical-align:top;background:rgba(0,30,80,0.12)"><div class="wa-src-stack" data-wa-src-item="${it.item_code}">${stackInner}</div></td>
         <td style="padding:6px;vertical-align:top;white-space:nowrap">
           <button type="button" class="btn btn-outline btn-sm" data-wa-add-src="${it.item_code}"${it.is_selected ? '' : ' disabled'}>+ Nguồn</button>
@@ -506,7 +506,7 @@
       </div>
       <div class="edit-section"><div class="edit-section-title"><i class="fa-solid fa-table" style="color:var(--blue-light)"></i> Bảng hạng mục &amp; nguồn</div>
         <div style="overflow-x:auto"><table class="data-table" style="width:100%;font-size:12px"><thead><tr style="text-align:left;background:rgba(255,255,255,0.05)">
-          <th>Chọn</th><th>Hạng mục</th><th>Mã vật tư</th><th>SL</th><th>Size</th><th>Rộng cm</th><th>Dài cm</th><th>Yêu cầu (m)</th>
+          <th>Chọn</th><th>Hạng mục</th><th>Mã vật tư</th><th>SL</th><th>Size</th><th>Rộng cm</th><th>Dài cm</th><th>Yêu cầu (cm)</th>
           <th colspan="4">Nguồn (LOT / mảnh dư)</th><th></th>
         </tr></thead><tbody>${rows}</tbody></table></div></div>
       <div class="edit-section" id="wa-summary-box"><div class="edit-section-title"><i class="fa-solid fa-scale-balanced" style="color:var(--teal-light)"></i> Kiểm tra từng hạng mục</div>
@@ -762,6 +762,25 @@
           });
           refreshSummary(ctx0);
           return;
+        }
+        if (el.classList.contains('wa-src-id')) {
+          const line = el.closest('.wa-src-line');
+          const rowPpf = el.closest('tr[data-wa-src-item]');
+          const trWf = el.closest('tr[data-wa-item]');
+          const lenInput = (line || rowPpf).querySelector('.wa-src-len');
+          if (lenInput && (!lenInput.value || parseFloat(lenInput.value) === 0) && el.value.trim() !== '') {
+            const ctx0 = window.__waEditorCtx;
+            if (isPpfCtx(ctx0)) {
+              const reqTotal = document.getElementById('wa-ppf-req-total');
+              if (reqTotal) lenInput.value = Math.round(parseFloat(reqTotal.value) * 100);
+            } else {
+              const code = trWf ? trWf.getAttribute('data-wa-item') : '';
+              const reqInput = document.getElementById(`wa_reqm_${code}`);
+              if (reqInput && reqInput.value) {
+                lenInput.value = reqInput.value;
+              }
+            }
+          }
         }
         refreshSummary(ctx);
       });
