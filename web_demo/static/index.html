@@ -29,6 +29,7 @@
       <button class="nav-tab" data-tab="ocr"><i class="fa-solid fa-camera"></i> Nhập phiếu OCR</button>
       <button class="nav-tab" data-tab="manual"><span class="nav-emoji" aria-hidden="true">📝</span> Tạo đơn</button>
       <button class="nav-tab" data-tab="customers"><span class="nav-emoji" aria-hidden="true">👥</span> Khách hàng</button>
+      <button class="nav-tab" data-tab="norms"><i class="fa-solid fa-ruler"></i> Định mức phim</button>
       <button class="nav-tab" data-tab="requests"><i class="fa-solid fa-file-lines"></i> Đơn thi công</button>
       <button class="nav-tab" data-tab="workstreams"><i class="fa-solid fa-layer-group"></i> Luồng thi công</button>
       <button class="nav-tab" data-tab="jobcards"><i class="fa-solid fa-screwdriver-wrench"></i> Lệnh thi công</button>
@@ -36,6 +37,7 @@
       <button class="nav-tab" data-tab="inventory"><i class="fa-solid fa-warehouse"></i> Quản lý kho</button>
       <button class="nav-tab" data-tab="offcuts"><i class="fa-solid fa-scissors"></i> Mảnh dư</button>
       <button class="nav-tab" data-tab="monthly"><i class="fa-solid fa-chart-column"></i> Báo cáo tháng</button>
+      <button class="nav-tab" data-tab="hr"><i class="fa-solid fa-users"></i> Nhân sự</button>
       <button class="nav-tab" data-tab="audit"><i class="fa-solid fa-shield-halved"></i> Nhật ký kiểm toán</button>
     </div>
 
@@ -234,6 +236,18 @@
             <h3><i class="fa-solid fa-magnifying-glass"></i> Kiểm tra thông tin trích xuất</h3>
             <span id="ocr-status-badge" class="status-badge"></span>
           </div>
+          <!-- Image Preview Panel with rotate, zoom, and fullscreen controls -->
+          <div class="ocr-image-preview-panel" id="ocr-image-preview-panel" style="padding: 16px; border-bottom: 1px solid var(--border-color); display: flex; flex-direction: column; align-items: center; gap: 10px;">
+            <div class="ocr-image-container" style="position: relative; width: 100%; max-height: 250px; overflow: hidden; border-radius: 8px; border: 1px solid var(--border-color); display: flex; justify-content: center; align-items: center; background: rgba(0,0,0,0.1)">
+              <img id="ocr-preview-img" src="" alt="Yêu cầu dịch vụ" style="max-width: 100%; max-height: 250px; object-fit: contain; transition: transform 0.2s ease;">
+            </div>
+            <div class="ocr-image-controls" style="display: flex; gap: 8px;">
+              <button type="button" class="btn btn-outline btn-sm" id="btn-zoom-in" title="Phóng to"><i class="fa-solid fa-magnifying-glass-plus"></i> Phóng to</button>
+              <button type="button" class="btn btn-outline btn-sm" id="btn-zoom-out" title="Thu nhỏ"><i class="fa-solid fa-magnifying-glass-minus"></i> Thu nhỏ</button>
+              <button type="button" class="btn btn-outline btn-sm" id="btn-rotate-cw" title="Xoay phải"><i class="fa-solid fa-rotate-right"></i> Xoay</button>
+              <button type="button" class="btn btn-outline btn-sm" id="btn-fullscreen" title="Toàn màn hình"><i class="fa-solid fa-expand"></i> Fullscreen</button>
+            </div>
+          </div>
           <div class="confidence-bar-wrap">
             <span>Độ chính xác:</span>
             <div class="confidence-bar"><div class="confidence-fill" id="confidence-fill" style="width:0%"></div></div>
@@ -244,17 +258,20 @@
             <div class="hitl-alert">
               <i class="fa-solid fa-layer-group"></i>
               <div>
-                <strong>Phát hiện đa dịch vụ</strong>
+                <strong id="ocr-services-title">Phát hiện đa dịch vụ</strong>
                 <p id="ocr-services-text">Phiếu chứa cả PPF + Phim cách nhiệt. Hệ thống sẽ tạo 2 luồng thi công sau khi xác nhận.</p>
               </div>
             </div>
           </div>
-          <div class="ocr-actions">
+          <div class="ocr-actions" style="display:flex; gap:10px; flex-wrap:wrap">
             <button class="btn btn-green" id="btn-confirm-ocr" style="flex:1">
               <i class="fa-solid fa-check-circle"></i> Xác nhận & Tạo đơn thi công
             </button>
             <button class="btn btn-outline btn-danger" id="btn-cancel-ocr">
               <i class="fa-solid fa-xmark"></i> Hủy phiếu
+            </button>
+            <button class="btn btn-outline btn-warning" id="btn-rollback-ocr" style="display:none; flex:1">
+              <i class="fa-solid fa-rotate-left"></i> Hủy xác nhận (Rollback)
             </button>
           </div>
         </div>
@@ -321,8 +338,8 @@
           <div class="manual-section">
             <h4>4. Thời gian giao xe</h4>
             <div class="form-grid-2">
-              <div><label>Ngày yêu cầu giao xe</label><input type="date" id="mc-deliv-date" /></div>
-              <div><label>Giờ yêu cầu giao xe</label><input type="time" id="mc-deliv-time" value="17:30" /></div>
+              <div><label>Ngày yêu cầu</label><input type="text" id="mc-req-date" placeholder="hh:mm dd/mm/yyyy" style="width:100%;padding:6px;font-size:13px" /></div>
+              <div><label>Hạn giao xe</label><input type="text" id="mc-deliv-date" placeholder="hh:mm dd/mm/yyyy" style="width:100%;padding:6px;font-size:13px" /></div>
             </div>
             <div style="margin-top:8px"><label>Ghi chú SLA</label><input type="text" id="mc-sla-note" placeholder="Tuỳ chọn" style="width:100%;max-width:480px" /></div>
             <p class="muted" style="font-size:11px">Để trống ngày/giờ — hệ thống đánh dấu cần rà soát (NEEDS_REVIEW).</p>
@@ -388,6 +405,15 @@
     <div id="cust-pane-dealers" class="cust-pane"></div>
     <div id="cust-pane-customers" class="cust-pane" style="display:none"></div>
     <div id="cust-pane-vehicles" class="cust-pane" style="display:none"></div>
+  </div>
+
+  <!-- ════════════════ QUẢN LÝ ĐỊNH MỨC PHIM ════════════════ -->
+  <div class="tab-pane" id="tab-norms">
+    <div class="section-header">
+      <h2><i class="fa-solid fa-ruler"></i> Quản lý định mức phim</h2>
+      <p>Dữ liệu chuẩn trong hệ thống để tính toán kích thước, diện tích vật tư tự động cho từng dòng xe.</p>
+    </div>
+    <div id="norms-container"></div>
   </div>
 
   <!-- ════════════════ ĐƠN THI CÔNG E2E ════════════════ -->
@@ -456,7 +482,7 @@
                 <span class="dl">Kênh tạo</span><span class="dv" id="det-source-channel">—</span>
                 <span class="dl">Số phiếu YC</span><span class="dv" id="det-request-no">—</span>
                 <span class="dl">Số HĐ</span><span class="dv" id="det-contract-no">—</span>
-                <span class="dl">Ngày phiếu</span><span class="dv" id="det-request-date">—</span>
+                <span class="dl">Ngày yêu cầu</span><span class="dv" id="det-request-date">—</span>
                 <span class="dl">Ảnh OCR gốc</span><span class="dv" id="det-ocr-image">—</span>
                 <span class="dl">Mã KH / Xe</span><span class="dv" id="det-ids"><span id="det-customer-id">—</span> · <span id="det-vehicle-id">—</span></span>
                 <span class="dl">Khách hàng</span><span class="dv" id="det-customer">—</span>
@@ -634,7 +660,7 @@
           <thead><tr>
             <th>Mã luồng</th><th>Mã đơn</th><th>Loại thi công</th><th>Đội</th>
             <th>Loại phim</th><th>Kích thước block</th><th>Nguồn vật tư</th>
-            <th>Trạng thái</th><th>Bắt đầu</th><th>Hoàn tất</th><th>Thao tác</th>
+            <th>Trạng thái</th><th>Bắt đầu</th><th>Hoàn tất</th><th>Thao tác (Quản lý)</th><th>Thao tác (KTV)</th>
           </tr></thead>
           <tbody id="table-ws-body"></tbody>
         </table>
@@ -697,12 +723,30 @@
       <p>Tồn kho cuộn phim nguyên — JB20, RT40, T-TYPE, M-TYPE, RS20</p>
     </div>
     <div class="panel">
-      <div class="panel-header"><h3><i class="fa-solid fa-boxes-stacked"></i> Danh Sách Cuộn LOT</h3></div>
+      <div class="panel-header" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+        <h3 style="margin:0;"><i class="fa-solid fa-boxes-stacked"></i> Danh Sách Cuộn LOT</h3>
+        <div class="inv-inline-filters" style="display:flex; gap:10px;">
+          <select id="kl-mat" class="field-input" style="max-width:140px;padding:6px 10px;font-size:12px" onchange="taiKhoLot()">
+            <option value="">Tất cả loại phim</option>
+            <option value="RT40">RT40</option>
+            <option value="JB20">JB20</option>
+            <option value="T-TYPE">T-TYPE</option>
+            <option value="M-TYPE">M-TYPE</option>
+            <option value="RS20">RS20</option>
+          </select>
+          <select id="kl-status" class="field-input" style="max-width:160px;padding:6px 10px;font-size:12px" onchange="taiKhoLot()">
+            <option value="" selected>Mọi trạng thái</option>
+            <option value="ACTIVE">Đang hoạt động</option>
+            <option value="DEPLETED">Cạn / Đóng / Clear</option>
+          </select>
+          <button type="button" class="btn btn-outline btn-sm" onclick="resetKhoLot()"><i class="fa-solid fa-rotate-right"></i> Làm mới</button>
+        </div>
+      </div>
       <div class="table-wrap">
         <table class="data-table">
           <thead><tr>
             <th>Mã LOT</th><th>Loại phim</th><th>Rộng (m)</th><th>Dài gốc (m)</th>
-            <th>Còn lại (m)</th><th>Đã khui</th><th>Đang khóa</th><th>Ngày nhập</th><th>Trạng thái</th>
+            <th>Còn lại (m)</th><th>Đã khui</th><th>Đang khóa</th><th>Người nhập</th><th>Ngày nhập</th><th>Trạng thái</th>
           </tr></thead>
           <tbody id="table-lots-body"></tbody>
         </table>
@@ -745,17 +789,18 @@
       <button type="button" class="btn btn-outline btn-sm" onclick="loadMaterialPreferences()"><i class="fa-solid fa-filter"></i> Lọc</button>
       <button type="button" class="btn btn-primary btn-sm" onclick="openMatPrefModal('')"><i class="fa-solid fa-plus"></i> Thêm cấu hình</button>
     </div>
+    <div class="inv-toolbar" id="inv-toolbar-tx" style="display:none">
       <select id="inv-filter-tx-type" class="field-input" style="max-width:220px;padding:6px 10px;font-size:12px">
         <option value="">Mọi loại giao dịch</option>
-        <option value="IMPORT_LOT">IMPORT_LOT</option>
-        <option value="IMPORT_OFFCUT_MANUAL">IMPORT_OFFCUT_MANUAL</option>
-        <option value="MANUAL_ISSUE_LOT">MANUAL_ISSUE_LOT</option>
-        <option value="MANUAL_ISSUE_OFFCUT">MANUAL_ISSUE_OFFCUT</option>
-        <option value="CLEAR_LOT">CLEAR_LOT</option>
-        <option value="CLEAR_OFFCUT">CLEAR_OFFCUT</option>
-        <option value="RELEASE_LOCK_MANUAL">RELEASE_LOCK_MANUAL</option>
+        <option value="IMPORT_LOT">Nhập LOT mới</option>
+        <option value="IMPORT_OFFCUT_MANUAL">Nhập mảnh dư thủ công</option>
+        <option value="MANUAL_ISSUE_LOT">Xuất LOT thủ công</option>
+        <option value="MANUAL_ISSUE_OFFCUT">Xuất mảnh dư thủ công</option>
+        <option value="CLEAR_LOT">Clear LOT (Xóa/Thanh lý)</option>
+        <option value="CLEAR_OFFCUT">Clear mảnh dư</option>
+        <option value="RELEASE_LOCK_MANUAL">Mở khóa thủ công</option>
       </select>
-      <input type="text" id="inv-filter-tx-mat" class="field-input" placeholder="material_code" style="max-width:120px;padding:6px 10px;font-size:12px">
+      <input type="text" id="inv-filter-tx-mat" class="field-input" placeholder="Mã vật tư" style="max-width:120px;padding:6px 10px;font-size:12px">
       <input type="date" id="inv-filter-tx-from" class="field-input" style="padding:6px 10px;font-size:12px">
       <input type="date" id="inv-filter-tx-to" class="field-input" style="padding:6px 10px;font-size:12px">
       <button type="button" class="btn btn-outline btn-sm" onclick="loadInventoryTransactions()"><i class="fa-solid fa-filter"></i> Lọc</button>
@@ -764,40 +809,48 @@
       <div class="panel"><div class="panel-header"><h3><i class="fa-solid fa-scroll"></i> LOT (lọc API)</h3></div>
         <div class="inv-inline-filters">
           <input type="text" id="inv-lot-q" class="field-input" placeholder="Tìm nhanh (q)" style="max-width:200px;padding:6px 10px;font-size:12px">
-          <select id="inv-lot-status" class="field-input" style="max-width:160px;padding:6px 10px;font-size:12px">
-            <option value="">Mọi trạng thái</option>
-            <option value="NEW">NEW</option>
-            <option value="IN_USE">IN_USE</option>
-            <option value="LOCKED">LOCKED</option>
-            <option value="DEPLETED">DEPLETED</option>
-            <option value="CLOSED">CLOSED</option>
-            <option value="CLEARED">CLEARED</option>
-            <option value="SCRAPPED">SCRAPPED</option>
+          <select id="inv-lot-status" class="field-input" style="max-width:160px;padding:6px 10px;font-size:12px" onchange="loadLots()">
+            <option value="">Đang hoạt động (NEW, IN_USE, LOCKED)</option>
+            <option value="NEW">MỚI (NEW)</option>
+            <option value="IN_USE" selected>ĐANG DÙNG (IN_USE)</option>
+            <option value="LOCKED">KHÓA (LOCKED)</option>
+            <option value="DEPLETED">CẠN (DEPLETED)</option>
+            <option value="CLOSED">ĐÓNG (CLOSED)</option>
+            <option value="CLEARED">XÓA SỔ (CLEARED)</option>
+            <option value="SCRAPPED">HỦY BỎ (SCRAPPED)</option>
           </select>
-          <button type="button" class="btn btn-outline btn-sm" onclick="loadLots()">Tải lại</button>
+          <button type="button" class="btn btn-outline btn-sm" onclick="resetInvLots()"><i class="fa-solid fa-rotate-right"></i> Làm mới</button>
         </div>
         <div class="table-wrap"><table class="data-table">
-          <thead><tr><th>lot_id</th><th>material_code</th><th>còn / gốc (m)</th><th>lot_status</th><th>is_locked</th><th>storage_location</th><th>Thao tác</th></tr></thead>
+          <thead><tr><th>Mã LOT</th><th>Mã Vật Tư</th><th>Còn / Gốc (m)</th><th>Trạng thái</th><th>Khóa</th><th>Vị trí lưu trữ</th><th>Người nhập kho</th><th>Ngày nhập kho</th><th>Thao tác</th></tr></thead>
           <tbody id="inv-table-lots"></tbody>
         </table></div>
       </div>
     </div>
     <div id="inv-panel-offcuts" class="inv-panel" style="display:none">
-      <div class="panel"><div class="panel-header"><h3><i class="fa-solid fa-scissors"></i> Mảnh dư</h3></div>
+      <div class="panel"><div class="panel-header"><h3><i class="fa-solid fa-scissors"></i> Mảnh dư (Quản lý)</h3></div>
         <div class="inv-inline-filters">
           <input type="text" id="inv-oc-q" class="field-input" placeholder="Tìm (q)" style="max-width:200px;padding:6px 10px;font-size:12px">
-          <button type="button" class="btn btn-outline btn-sm" onclick="loadOffcuts()">Tải lại</button>
+          <select id="inv-oc-status" class="field-input" style="max-width:180px;padding:6px 10px;font-size:12px" onchange="loadOffcuts()">
+            <option value="" selected>Đang hoạt động</option>
+            <option value="AVAILABLE">SẴN SÀNG (AVAILABLE)</option>
+            <option value="LOCKED">KHÓA (LOCKED)</option>
+            <option value="USED">ĐÃ DÙNG (USED)</option>
+            <option value="CLEARED">XÓA SỔ (CLEARED)</option>
+            <option value="SCRAPPED">HỦY BỎ (SCRAPPED)</option>
+          </select>
+          <button type="button" class="btn btn-outline btn-sm" onclick="resetInvOffcuts()"><i class="fa-solid fa-rotate-right"></i> Làm mới</button>
         </div>
         <div class="table-wrap"><table class="data-table">
-          <thead><tr><th>offcut_id</th><th>material_code</th><th>width×length</th><th>area_m²</th><th>quality</th><th>offcut_status</th><th>is_locked</th><th>storage_location</th><th>Thao tác</th></tr></thead>
+          <thead><tr><th>Mã mảnh dư</th><th>Mã vật tư</th><th>Kích thước (R×D)</th><th>Diện tích (m²)</th><th>Chất lượng</th><th>Trạng thái</th><th>Đang khóa</th><th>Vị trí</th><th>Người nhập</th><th>Ngày nhập</th><th>Thao tác</th></tr></thead>
           <tbody id="inv-table-offcuts"></tbody>
         </table></div>
       </div>
     </div>
     <div id="inv-panel-tx" class="inv-panel" style="display:none">
-      <div class="panel"><div class="panel-header"><h3><i class="fa-solid fa-list-timeline"></i> Inventory Transactions</h3></div>
+      <div class="panel"><div class="panel-header"><h3><i class="fa-solid fa-list-timeline"></i> Lịch sử Giao dịch Kho (Cắt / Xuất / Clear)</h3></div>
         <div class="table-wrap"><table class="data-table">
-          <thead><tr><th>transaction_id</th><th>transaction_type</th><th>source</th><th>material_code</th><th>before→after</th><th>reason</th><th>performed_by</th><th>performed_at</th></tr></thead>
+          <thead><tr><th>Mã giao dịch</th><th>Loại giao dịch</th><th>Nguồn (LOT/Mảnh)</th><th>Mã vật tư</th><th>Trước → Sau (m)</th><th>Lý do</th><th>Thực hiện bởi</th><th>Thời gian</th></tr></thead>
           <tbody id="inv-table-tx"></tbody>
         </table></div>
       </div>
@@ -828,14 +881,346 @@
     </div>
     <div class="panel">
       <div class="panel-header"><h3><i class="fa-solid fa-puzzle-piece"></i> Danh Sách Mảnh Dư</h3></div>
+      <div class="inv-inline-filters" style="padding: 0 16px 16px; display: flex; gap: 8px;">
+        <input type="text" id="oc-q" class="field-input" placeholder="Tìm nhanh (q)" style="max-width:200px;padding:6px 10px;font-size:12px">
+        <select id="oc-status" class="field-input" style="max-width:180px;padding:6px 10px;font-size:12px" onchange="taiManhDu()">
+          <option value="" selected>Đang hoạt động</option>
+          <option value="ALL">Mọi trạng thái</option>
+          <option value="AVAILABLE">SẴN SÀNG (AVAILABLE)</option>
+          <option value="LOCKED">KHÓA (LOCKED)</option>
+          <option value="USED">ĐÃ DÙNG (USED)</option>
+          <option value="CLEARED">XÓA SỔ (CLEARED)</option>
+          <option value="SCRAPPED">HỦY BỎ (SCRAPPED)</option>
+        </select>
+        <button type="button" class="btn btn-outline btn-sm" onclick="resetFilterOffcuts()"><i class="fa-solid fa-rotate-right"></i> Làm mới</button>
+      </div>
       <div class="table-wrap">
         <table class="data-table">
           <thead><tr>
             <th>Mã mảnh dư</th><th>LOT gốc</th><th>Loại phim</th><th>Rộng (m)</th>
-            <th>Dài (m)</th><th>Diện tích (m²)</th><th>Đang khóa</th><th>Vị trí</th><th>Ngày nhập</th><th>Trạng thái</th>
+            <th>Dài (m)</th><th>Diện tích (m²)</th><th>Đang khóa</th><th>Vị trí</th><th>Người nhập</th><th>Ngày nhập</th><th>Trạng thái</th>
           </tr></thead>
           <tbody id="table-offcuts-body"></tbody>
         </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════════ NHÂN SỰ ════════════════ -->
+  <div class="tab-pane" id="tab-hr">
+    <div class="section-header">
+      <h2><i class="fa-solid fa-users"></i> Bảng Điều Khiển Nhân Sự</h2>
+      <p>Theo dõi hiệu suất KTV: Tổng số đơn, Tỷ lệ hoàn thành và Tỷ lệ đúng hạn.</p>
+    </div>
+    
+    <div class="hr-controls" style="margin-bottom: 16px; display: flex; gap: 10px;">
+      <input type="date" id="hr-start-date" class="field-input">
+      <input type="date" id="hr-end-date" class="field-input">
+      <button class="btn btn-primary" id="btn-hr-filter"><i class="fa-solid fa-filter"></i> Lọc dữ liệu</button>
+    </div>
+    
+    <div class="panel">
+      <div class="panel-header">
+        <h3><i class="fa-solid fa-list"></i> Tổng hợp hiệu suất nhân viên</h3>
+      </div>
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Tên NV</th>
+              <th>Tổng xe được giao</th>
+              <th>Số xe hoàn thành</th>
+              <th>Tỷ lệ hoàn thành</th>
+              <th>Tỷ lệ giao đúng hạn</th>
+              <th>Thao tác</th>
+            </tr>
+          </thead>
+          <tbody id="table-hr-performance">
+            <!-- Data loaded here via JS -->
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- BẢNG QUẢN LÝ NHÂN SỰ (CRUD) -->
+    <div class="panel" style="margin-top: 20px;">
+      <div class="panel-header" style="display: flex; justify-content: space-between; align-items: center;">
+        <h3><i class="fa-solid fa-address-book"></i> Quản lý danh sách nhân sự</h3>
+        <button class="btn btn-primary btn-sm" onclick="openStaffModal()"><i class="fa-solid fa-plus"></i> Thêm nhân viên</button>
+      </div>
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Họ tên</th>
+              <th>Chức danh</th>
+              <th>Số điện thoại</th>
+              <th>Ngày vào làm</th>
+              <th>Thao tác</th>
+            </tr>
+          </thead>
+          <tbody id="table-hr-staff-list">
+            <!-- Data loaded here via JS -->
+          </tbody>
+        </table>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- BẢNG QUẢN LÝ ĐỘI NGŨ (TEAMS) -->
+    <div class="panel" style="margin-top: 20px;">
+      <div class="panel-header" style="display: flex; justify-content: space-between; align-items: center;">
+        <h3><i class="fa-solid fa-users-gear"></i> Quản lý đội nhóm</h3>
+        <button class="btn btn-primary btn-sm" onclick="openTeamModal()"><i class="fa-solid fa-plus"></i> Thêm đội</button>
+      </div>
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>ID Đội</th>
+              <th>Tên đội</th>
+              <th>Loại / Chuyên môn</th>
+              <th>Thành viên</th>
+              <th>Thao tác</th>
+            </tr>
+          </thead>
+          <tbody id="table-hr-team-list">
+            <!-- Data loaded here via JS -->
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL CHI TIẾT KTV -->
+  <div class="modal-overlay" id="hr-detail-modal" style="display:none; z-index: 9999;">
+    <div class="demo-modal hr-detail-modal-inner" style="max-width:800px;max-height:90vh;overflow-y:auto">
+      <div class="demo-modal-header" style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
+        <div style="display:flex;gap:12px;flex:1;min-width:0">
+        <i class="fa-solid fa-user-gear" style="color:var(--blue)"></i>
+        <div>
+          <h3 id="hr-detail-title">Chi Tiết Công Việc KTV</h3>
+          <p id="hr-detail-subtitle" style="font-size:12px;color:var(--text-secondary);margin-top:4px"></p>
+        </div>
+        </div>
+        <button type="button" class="btn btn-icon btn-sm" onclick="document.getElementById('hr-detail-modal').style.display='none'" title="Đóng"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div id="hr-detail-body" style="padding:0 20px 16px">
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Mã lệnh (Job)</th>
+                <th>Xe / Dòng xe</th>
+                <th>Bắt đầu</th>
+                <th>Hoàn tất</th>
+                <th>Trạng thái</th>
+                <th>Đúng hạn?</th>
+              </tr>
+            </thead>
+            <tbody id="table-hr-jobs">
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="demo-modal-footer" style="display:flex">
+        <button class="btn btn-outline" onclick="document.getElementById('hr-detail-modal').style.display='none'">Đóng</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL THÊM/SỬA NHÂN VIÊN -->
+  <div class="modal-overlay" id="staff-crud-modal" style="display:none; z-index: 9999;">
+    <div class="demo-modal" style="max-width:500px">
+      <div class="demo-modal-header" style="display:flex;justify-content:space-between;align-items:flex-start">
+        <h3 id="staff-modal-title">Thêm Nhân Viên</h3>
+        <button type="button" class="btn btn-icon btn-sm" onclick="document.getElementById('staff-crud-modal').style.display='none'"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div style="padding: 16px;">
+        <input type="hidden" id="staff-crud-id">
+        <div class="form-group" style="margin-bottom: 12px;">
+          <label style="display:block; margin-bottom: 4px; font-weight: bold; font-size: 13px;">Họ tên *</label>
+          <input type="text" id="staff-crud-name" class="field-input" placeholder="Ví dụ: Nguyễn Văn A">
+        </div>
+        <div class="form-group" style="margin-bottom: 12px;">
+          <label style="display:block; margin-bottom: 4px; font-weight: bold; font-size: 13px;">Chức danh</label>
+          <input type="text" id="staff-crud-title" class="field-input" placeholder="Ví dụ: KTV / Trưởng nhóm">
+        </div>
+        <div class="form-group" style="margin-bottom: 12px;">
+          <label style="display:block; margin-bottom: 4px; font-weight: bold; font-size: 13px;">Số điện thoại</label>
+          <input type="text" id="staff-crud-phone" class="field-input">
+        </div>
+        <div class="form-group" style="margin-bottom: 12px;">
+          <label style="display:block; margin-bottom: 4px; font-weight: bold; font-size: 13px;">Ngày vào làm</label>
+          <input type="date" id="staff-crud-join-date" class="field-input">
+        </div>
+      </div>
+      <div class="demo-modal-footer" style="display:flex; justify-content:flex-end; gap: 8px;">
+        <button class="btn btn-outline" onclick="document.getElementById('staff-crud-modal').style.display='none'">Hủy</button>
+        <button class="btn btn-primary" onclick="saveStaff()">Lưu lại</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL XEM NHANH ĐƠN THI CÔNG -->
+  <div class="modal-overlay" id="quick-req-modal" style="display:none; z-index: 9999;">
+    <div class="demo-modal" style="max-width:600px">
+      <div class="demo-modal-header" style="display:flex;justify-content:space-between;align-items:flex-start">
+        <h3><i class="fa-solid fa-file-invoice"></i> Chi Tiết Đơn: <span id="quick-req-id"></span></h3>
+        <button type="button" class="btn btn-icon btn-sm" onclick="document.getElementById('quick-req-modal').style.display='none'"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div style="padding: 16px;">
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px;">
+          <div>
+            <label style="font-size: 11px; color: var(--text-secondary); display:block; margin-bottom: 2px;">Trạng thái</label>
+            <div id="quick-req-status" style="font-weight: bold; font-size: 12px; display: inline-block;"></div>
+          </div>
+          <div>
+            <label style="font-size: 11px; color: var(--text-secondary); display:block; margin-bottom: 2px;">Đại lý</label>
+            <div id="quick-req-dealer" style="font-weight: bold;"></div>
+          </div>
+          <div>
+            <label style="font-size: 11px; color: var(--text-secondary); display:block; margin-bottom: 2px;">Khách hàng</label>
+            <div id="quick-req-customer" style="font-weight: bold;"></div>
+          </div>
+          <div>
+            <label style="font-size: 11px; color: var(--text-secondary); display:block; margin-bottom: 2px;">Điện thoại</label>
+            <div id="quick-req-phone" style="font-weight: bold;"></div>
+          </div>
+          <div>
+            <label style="font-size: 11px; color: var(--text-secondary); display:block; margin-bottom: 2px;">Dòng xe</label>
+            <div id="quick-req-model" style="font-weight: bold;"></div>
+          </div>
+          <div>
+            <label style="font-size: 11px; color: var(--text-secondary); display:block; margin-bottom: 2px;">Hạn giao xe</label>
+            <div id="quick-req-deadline" style="font-weight: bold;"></div>
+          </div>
+          <div>
+            <label style="font-size: 11px; color: var(--text-secondary); display:block; margin-bottom: 2px;">Số VIN (6 số cuối)</label>
+            <div id="quick-req-vin" style="font-weight: bold;"></div>
+          </div>
+          <div>
+            <label style="font-size: 11px; color: var(--text-secondary); display:block; margin-bottom: 2px;">Đội thi công</label>
+            <div id="quick-req-team" style="font-weight: bold;"></div>
+          </div>
+        </div>
+        <div style="border-top: 1px solid var(--border-color); padding-top: 12px; margin-top: 12px;">
+           <label style="font-size: 11px; color: var(--text-secondary); display:block; margin-bottom: 4px;">Dịch vụ yêu cầu</label>
+           <div id="quick-req-services" style="font-weight: bold;"></div>
+        </div>
+        <div style="border-top: 1px solid var(--border-color); padding-top: 12px; margin-top: 12px;">
+           <h4 style="font-size: 12px; margin-bottom: 8px; color: var(--text-secondary);">Thông tin chi tiết khác</h4>
+           <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+              <div>
+                <label style="font-size: 11px; color: var(--text-secondary); display:block; margin-bottom: 2px;">Kênh tạo</label>
+                <div id="quick-req-source" style="font-weight: bold;"></div>
+              </div>
+              <div>
+                <label style="font-size: 11px; color: var(--text-secondary); display:block; margin-bottom: 2px;">Số phiếu YC</label>
+                <div id="quick-req-ticket" style="font-weight: bold;"></div>
+              </div>
+              <div>
+                <label style="font-size: 11px; color: var(--text-secondary); display:block; margin-bottom: 2px;">Số HĐ</label>
+                <div id="quick-req-contract" style="font-weight: bold;"></div>
+              </div>
+              <div>
+                <label style="font-size: 11px; color: var(--text-secondary); display:block; margin-bottom: 2px;">Ngày yêu cầu</label>
+                <div id="quick-req-date" style="font-weight: bold;"></div>
+              </div>
+              <div>
+                <label style="font-size: 11px; color: var(--text-secondary); display:block; margin-bottom: 2px;">Ảnh OCR gốc</label>
+                <div id="quick-req-ocr-img" style="font-weight: bold;"></div>
+              </div>
+              <div>
+                <label style="font-size: 11px; color: var(--text-secondary); display:block; margin-bottom: 2px;">Mã KH / Xe</label>
+                <div id="quick-req-ids" style="font-weight: bold;"></div>
+              </div>
+              <div>
+                <label style="font-size: 11px; color: var(--text-secondary); display:block; margin-bottom: 2px;">Địa chỉ</label>
+                <div id="quick-req-address" style="font-weight: bold;"></div>
+              </div>
+              <div>
+                <label style="font-size: 11px; color: var(--text-secondary); display:block; margin-bottom: 2px;">Tư vấn khách hàng / TVBH</label>
+                <div id="quick-req-sales" style="font-weight: bold;"></div>
+              </div>
+           </div>
+        </div>
+      </div>
+      <div class="demo-modal-footer" style="display:flex; justify-content:flex-end;">
+        <button class="btn btn-outline" onclick="document.getElementById('quick-req-modal').style.display='none'">Đóng</button>
+        <button class="btn btn-primary" style="margin-left:8px" onclick="document.getElementById('quick-req-modal').style.display='none'; chuyenDenDon(document.getElementById('quick-req-id').textContent)">Xem đầy đủ bên tab Đơn thi công</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL THÊM/SỬA ĐỘI -->
+  <div class="modal-overlay" id="team-crud-modal" style="display:none; z-index: 9999;">
+    <div class="demo-modal" style="max-width:500px">
+      <div class="demo-modal-header" style="display:flex;justify-content:space-between;align-items:flex-start">
+        <h3 id="team-modal-title">Thêm Đội Nhóm</h3>
+        <button type="button" class="btn btn-icon btn-sm" onclick="document.getElementById('team-crud-modal').style.display='none'"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div style="padding: 16px;">
+        <input type="hidden" id="team-crud-id">
+        <div class="form-group" style="margin-bottom: 12px;">
+          <label style="display:block; margin-bottom: 4px; font-weight: bold; font-size: 13px;">Tên đội *</label>
+          <input type="text" id="team-crud-name" class="field-input" placeholder="Ví dụ: Đội PPF A">
+        </div>
+        <div class="form-group" style="margin-bottom: 12px;">
+          <label style="display:block; margin-bottom: 4px; font-weight: bold; font-size: 13px;">Loại (Chuyên môn)</label>
+          <input type="text" id="team-crud-type" class="field-input" placeholder="Ví dụ: PPF_TEAM / WINDOW_FILM_TEAM">
+        </div>
+      </div>
+      <div class="demo-modal-footer" style="display:flex; justify-content:flex-end; gap: 8px;">
+        <button class="btn btn-outline" onclick="document.getElementById('team-crud-modal').style.display='none'">Hủy</button>
+        <button class="btn btn-primary" onclick="saveTeam()">Lưu lại</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL THÊM THÀNH VIÊN VÀO ĐỘI -->
+  <div class="modal-overlay" id="team-member-modal" style="display:none; z-index: 9999;">
+    <div class="demo-modal" style="max-width:500px">
+      <div class="demo-modal-header" style="display:flex;justify-content:space-between;align-items:flex-start">
+        <h3>Quản lý thành viên</h3>
+        <button type="button" class="btn btn-icon btn-sm" onclick="document.getElementById('team-member-modal').style.display='none'"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div style="padding: 16px;">
+        <input type="hidden" id="team-member-team-id">
+        <div class="form-group" style="margin-bottom: 12px; display: flex; gap: 8px; align-items: flex-end;">
+          <div style="flex: 1;">
+            <label style="display:block; margin-bottom: 4px; font-weight: bold; font-size: 13px;">Chọn nhân viên</label>
+            <select id="team-member-staff-select" class="field-input">
+              <!-- JS -->
+            </select>
+          </div>
+          <div>
+            <label style="display:block; margin-bottom: 4px; font-weight: bold; font-size: 13px;">Vai trò</label>
+            <select id="team-member-role" class="field-input">
+              <option value="MEMBER">Thành viên</option>
+              <option value="LEADER">Đội trưởng</option>
+            </select>
+          </div>
+          <button class="btn btn-primary" onclick="assignTeamMember()">Thêm</button>
+        </div>
+        <hr style="margin: 16px 0; border: none; border-top: 1px solid var(--border-color);">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Tên NV</th>
+              <th>Vai trò</th>
+              <th>Xóa</th>
+            </tr>
+          </thead>
+          <tbody id="table-team-members">
+            <!-- JS -->
+          </tbody>
+        </table>
+      </div>
+      <div class="demo-modal-footer" style="display:flex; justify-content:flex-end;">
+        <button class="btn btn-outline" onclick="document.getElementById('team-member-modal').style.display='none'">Đóng</button>
       </div>
     </div>
   </div>
@@ -997,9 +1382,126 @@
   <div class="footer-bottom">
     © 2026 DYC Film Warehouse Agentic Workspace — Hệ Thống Quản Lý Kho Phim Đa Luồng Thi Công
   </div>
+  <!-- MODAL ĐẠI LÝ -->
+  <div class="modal-overlay" id="dealer-crud-modal" style="display:none; z-index: 9999;">
+    <div class="demo-modal" style="max-width:600px">
+      <div class="demo-modal-header" style="display:flex;justify-content:space-between;align-items:flex-start">
+        <h3 id="dealer-modal-title">Tạo Đại Lý</h3>
+        <button type="button" class="btn btn-icon btn-sm" onclick="document.getElementById('dealer-crud-modal').style.display='none'"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div style="padding: 16px;">
+        <input type="hidden" id="dealer-crud-action" value="create">
+        <div class="form-group" style="margin-bottom: 12px;">
+          <label style="display:block; margin-bottom: 4px; font-weight: bold; font-size: 13px;">Mã Đại Lý *</label>
+          <input type="text" id="dealer-crud-id" class="field-input" placeholder="Ví dụ: DL-001">
+        </div>
+        <div class="form-group" style="margin-bottom: 12px;">
+          <label style="display:block; margin-bottom: 4px; font-weight: bold; font-size: 13px;">Tên Đại Lý *</label>
+          <input type="text" id="dealer-crud-name" class="field-input" placeholder="Ví dụ: Đại lý A">
+        </div>
+        <div class="form-group" style="margin-bottom: 12px;">
+          <label style="display:block; margin-bottom: 4px; font-weight: bold; font-size: 13px;">SĐT / MST / AMIS</label>
+          <div style="display:flex; gap: 8px;">
+            <input type="text" id="dealer-crud-phone" class="field-input" placeholder="SĐT">
+            <input type="text" id="dealer-crud-tax" class="field-input" placeholder="Mã số thuế">
+            <input type="text" id="dealer-crud-amis" class="field-input" placeholder="Mã AMIS">
+          </div>
+        </div>
+        <div class="form-group" style="margin-bottom: 12px;">
+          <label style="display:block; margin-bottom: 4px; font-weight: bold; font-size: 13px;">Địa chỉ (Số, Đường, Phường, TP)</label>
+          <div style="display:flex; gap: 8px;">
+            <input type="text" id="dealer-crud-addrno" class="field-input" placeholder="Số nhà">
+            <input type="text" id="dealer-crud-street" class="field-input" placeholder="Đường">
+            <input type="text" id="dealer-crud-ward" class="field-input" placeholder="Phường/Xã">
+            <input type="text" id="dealer-crud-city" class="field-input" placeholder="Thành phố">
+          </div>
+        </div>
+      </div>
+      <div class="demo-modal-footer" style="display:flex; justify-content:flex-end; gap: 8px;">
+        <button class="btn btn-outline" onclick="document.getElementById('dealer-crud-modal').style.display='none'">Hủy</button>
+        <button class="btn btn-primary" onclick="saveDealer()">Lưu lại</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL KHÁCH HÀNG -->
+  <div class="modal-overlay" id="customer-crud-modal" style="display:none; z-index: 9999;">
+    <div class="demo-modal" style="max-width:600px">
+      <div class="demo-modal-header" style="display:flex;justify-content:space-between;align-items:flex-start">
+        <h3 id="customer-modal-title">Tạo Khách Hàng</h3>
+        <button type="button" class="btn btn-icon btn-sm" onclick="document.getElementById('customer-crud-modal').style.display='none'"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div style="padding: 16px;">
+        <input type="hidden" id="customer-crud-action" value="create">
+        <div class="form-group" style="margin-bottom: 12px;">
+          <label style="display:block; margin-bottom: 4px; font-weight: bold; font-size: 13px;">Mã Khách Hàng *</label>
+          <input type="text" id="customer-crud-id" class="field-input" placeholder="Ví dụ: KH-001">
+        </div>
+        <div class="form-group" style="margin-bottom: 12px;">
+          <label style="display:block; margin-bottom: 4px; font-weight: bold; font-size: 13px;">Tên Khách Hàng *</label>
+          <input type="text" id="customer-crud-name" class="field-input" placeholder="Ví dụ: Nguyễn Văn A">
+        </div>
+        <div class="form-group" style="margin-bottom: 12px;">
+          <label style="display:block; margin-bottom: 4px; font-weight: bold; font-size: 13px;">SĐT / MST / AMIS</label>
+          <div style="display:flex; gap: 8px;">
+            <input type="text" id="customer-crud-phone" class="field-input" placeholder="SĐT">
+            <input type="text" id="customer-crud-tax" class="field-input" placeholder="Mã số thuế">
+            <input type="text" id="customer-crud-amis" class="field-input" placeholder="Mã AMIS">
+          </div>
+        </div>
+        <div class="form-group" style="margin-bottom: 12px;">
+          <label style="display:block; margin-bottom: 4px; font-weight: bold; font-size: 13px;">Địa chỉ (Số, Đường, Phường, TP)</label>
+          <div style="display:flex; gap: 8px;">
+            <input type="text" id="customer-crud-addrno" class="field-input" placeholder="Số nhà">
+            <input type="text" id="customer-crud-street" class="field-input" placeholder="Đường">
+            <input type="text" id="customer-crud-ward" class="field-input" placeholder="Phường/Xã">
+            <input type="text" id="customer-crud-city" class="field-input" placeholder="Thành phố">
+          </div>
+        </div>
+      </div>
+      <div class="demo-modal-footer" style="display:flex; justify-content:flex-end; gap: 8px;">
+        <button class="btn btn-outline" onclick="document.getElementById('customer-crud-modal').style.display='none'">Hủy</button>
+        <button class="btn btn-primary" onclick="saveCustomer()">Lưu lại</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL HỒ SƠ XE -->
+  <div class="modal-overlay" id="vehicle-crud-modal" style="display:none; z-index: 9999;">
+    <div class="demo-modal" style="max-width:500px">
+      <div class="demo-modal-header" style="display:flex;justify-content:space-between;align-items:flex-start">
+        <h3 id="vehicle-modal-title">Tạo Hồ Sơ Xe</h3>
+        <button type="button" class="btn btn-icon btn-sm" onclick="document.getElementById('vehicle-crud-modal').style.display='none'"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div style="padding: 16px;">
+        <input type="hidden" id="vehicle-crud-action" value="create">
+        <div class="form-group" style="margin-bottom: 12px;">
+          <label style="display:block; margin-bottom: 4px; font-weight: bold; font-size: 13px;">Mã Xe *</label>
+          <input type="text" id="vehicle-crud-id" class="field-input" placeholder="Ví dụ: VEH-001">
+        </div>
+        <div class="form-group" style="margin-bottom: 12px;">
+          <label style="display:block; margin-bottom: 4px; font-weight: bold; font-size: 13px;">Số VIN</label>
+          <input type="text" id="vehicle-crud-vin" class="field-input" placeholder="Số VIN xe">
+        </div>
+        <div class="form-group" style="margin-bottom: 12px;">
+          <label style="display:block; margin-bottom: 4px; font-weight: bold; font-size: 13px;">Dòng xe</label>
+          <input type="text" id="vehicle-crud-model" class="field-input" placeholder="Mã dòng xe (VD: RX350)">
+        </div>
+        <div class="form-group" style="margin-bottom: 12px;">
+          <label style="display:block; margin-bottom: 4px; font-weight: bold; font-size: 13px;">Mã Khách Hàng</label>
+          <input type="text" id="vehicle-crud-customer-id" class="field-input" placeholder="Liên kết với Mã KH">
+        </div>
+      </div>
+      <div class="demo-modal-footer" style="display:flex; justify-content:flex-end; gap: 8px;">
+        <button class="btn btn-outline" onclick="document.getElementById('vehicle-crud-modal').style.display='none'">Hủy</button>
+        <button class="btn btn-primary" onclick="saveVehicle()">Lưu lại</button>
+      </div>
+    </div>
+  </div>
 </footer>
 
 <div id="toast-container"></div>
+<script src="/static/hr.js"></script>
 <script src="/static/workstream_allocation_modal.js"></script>
 <script src="/static/app.js"></script>
 </body>

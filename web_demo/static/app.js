@@ -2358,16 +2358,22 @@ window.moPhieuOcr = async function(draftId) {
   document.getElementById('confidence-fill').style.width = `${conf}%`;
   document.getElementById('confidence-pct').textContent = `${conf}%`;
 
+  const services = d.extracted_services || 'PPF,WINDOW_FILM';
+  const hasWF = services.includes('WINDOW_FILM');
+  const hasPPF = services.includes('PPF');
+
   const fields = [
     { key: 'dealer_name',    label: 'Đại lý',                  val: d.extracted_dealer_name, conf: d.confidence_dealer },
     { key: 'customer_name',  label: 'Khách hàng',               val: d.extracted_customer_name, conf: d.confidence_customer },
     { key: 'vehicle_model',  label: 'Dòng xe',                  val: d.extracted_vehicle_model, conf: d.confidence_vehicle },
     { key: 'vin',            label: 'Số VIN',                   val: d.extracted_vin, conf: 0.99 },
-    { key: 'film_type',      label: 'Loại phim yêu cầu',        val: d.extracted_film_type, conf: 0.95 },
-    { key: 'ppf_type',       label: 'Loại PPF (T-TYPE/M-TYPE)', val: d.extracted_ppf_type || 'T-TYPE', conf: 0.92 },
-    { key: 'services',       label: 'Dịch vụ',                  val: d.extracted_services || 'PPF,WINDOW_FILM', conf: 0.97 },
-    { key: 'delivery_time',  label: 'Hạn giao xe',              val: d.extracted_delivery_time ? fmtDt(d.extracted_delivery_time) : '', conf: 0.88 },
   ];
+  if (hasWF) fields.push({ key: 'film_type', label: 'Loại phim yêu cầu', val: d.extracted_film_type, conf: 0.95 });
+  if (hasPPF) fields.push({ key: 'ppf_type', label: 'Loại PPF (T-TYPE/M-TYPE)', val: d.extracted_ppf_type || 'T-TYPE', conf: 0.92 });
+  
+  fields.push({ key: 'services', label: 'Dịch vụ', val: services, conf: 0.97 });
+  fields.push({ key: 'delivery_time', label: 'Hạn giao xe', val: d.extracted_delivery_time ? fmtDt(d.extracted_delivery_time) : '', conf: 0.88 });
+
   const readonly = ['CONFIRMED','CANCELLED'].includes(d.review_status);
   document.getElementById('ocr-fields-form').innerHTML = fields.map(f => {
     const pct = Math.round((f.conf || 0) * 100);
@@ -2378,13 +2384,19 @@ window.moPhieuOcr = async function(draftId) {
     </div>`;
   }).join('');
 
-  const services = d.extracted_services || 'PPF,WINDOW_FILM';
   const svcBox = document.getElementById('ocr-services-box');
-  if (services.includes('PPF') && services.includes('WINDOW_FILM')) {
+  const titleEl = document.getElementById('ocr-services-title');
+  if (hasPPF && hasWF) {
+    if (titleEl) titleEl.textContent = 'Phát hiện đa dịch vụ';
     document.getElementById('ocr-services-text').textContent = 'Phiếu yêu cầu cả PPF + Phim cách nhiệt. Hệ thống sẽ tự động tạo 2 luồng thi công: Đội PPF và Đội Cách Nhiệt.';
     svcBox.style.display = 'block';
-  } else if (services.includes('WINDOW_FILM')) {
+  } else if (hasWF) {
+    if (titleEl) titleEl.textContent = 'Phát hiện 1 dịch vụ';
     document.getElementById('ocr-services-text').textContent = 'Phiếu chỉ có phim cách nhiệt. Sau khi xác nhận, hệ thống tạo một luồng WINDOW_FILM_INSTALLATION (không PPF).';
+    svcBox.style.display = 'block';
+  } else if (hasPPF) {
+    if (titleEl) titleEl.textContent = 'Phát hiện 1 dịch vụ';
+    document.getElementById('ocr-services-text').textContent = 'Phiếu chỉ có PPF. Sau khi xác nhận, hệ thống tạo một luồng PPF_INSTALLATION (không Phim cách nhiệt).';
     svcBox.style.display = 'block';
   } else { svcBox.style.display = 'none'; }
 
