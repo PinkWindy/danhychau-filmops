@@ -1562,7 +1562,10 @@ window.moFormDealer = async function(id) {
     `
 <div class="dyc-modal-form">
   ${reasonBox}
-  <div class="dyc-field"><label>Tên khách hàng / đại lý</label><input id="ed-d-name" value="${_esc(d.customer_name || d.dealer_name || '')}" /></div>
+  <div class="dyc-form-row-2">
+    <div class="dyc-field"><label>Tên khách hàng / đại lý</label><input id="ed-d-name" value="${_esc(d.customer_name || d.dealer_name || '')}" /></div>
+    <div class="dyc-field"><label>Nhóm đại lý</label><input id="ed-d-group" list="dyc-dealer-group-datalist" value="${_esc(d.dealer_group || '')}" /></div>
+  </div>
   <div class="dyc-form-row-2">
     <div class="dyc-field"><label>MST</label><input id="ed-d-tax" value="${_esc(d.tax_code || '')}" /></div>
     <div class="dyc-field"><label>SĐT</label><input id="ed-d-phone" value="${_esc(d.phone || '')}" /></div>
@@ -1727,6 +1730,7 @@ document.getElementById('modal-quick-ok')?.addEventListener('click', async () =>
       if (!reason) { toast('warning', 'Thiếu reason', ''); return; }
       const body = {
         dealer_name: document.getElementById('ed-d-name').value.trim(),
+        dealer_group: document.getElementById('ed-d-group').value.trim() || null,
         tax_code: document.getElementById('ed-d-tax').value.trim() || null,
         phone: document.getElementById('ed-d-phone').value.trim() || null,
         address_no: document.getElementById('ed-d-ano').value.trim() || null,
