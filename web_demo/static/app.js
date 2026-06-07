@@ -3769,13 +3769,7 @@ async function xemNhanhDonThiCong(requestId, workstreamId) {
     }
     const ws = await fetch('/api/workstreams/' + workstreamId).then(r => r.json()).catch(() => ({}));
     
-    // fetch staff list to get phone number
-    let staffs = [];
-    try {
-      staffs = await fetch('/api/staff').then(r => r.json());
-    } catch(e) { }
-    const techId = ws.technician_id || req.technician_id;
-    const tech = staffs.find(s => s.staff_id === techId) || {};
+    const techId = ws.technician_id || req.technician_id || '—';
 
     document.getElementById('quick-req-id').textContent = req.request_id || '';
     document.getElementById('quick-req-status').innerHTML = trangThaiBadge(req.status);
@@ -3790,8 +3784,8 @@ async function xemNhanhDonThiCong(requestId, workstreamId) {
     
     document.getElementById('quick-req-manager').textContent = ws.approved_by || '—';
     document.getElementById('quick-req-manager-time').textContent = ws.approved_at ? fmtDt(ws.approved_at) : '—';
-    document.getElementById('quick-req-tech').textContent = ws.assigned_technician_name || tech.full_name || techId || '—';
-    document.getElementById('quick-req-tech-phone').textContent = tech.phone || '—';
+    document.getElementById('quick-req-tech').textContent = ws.assigned_technician_name || techId;
+    document.getElementById('quick-req-tech-phone').textContent = '—';
     document.getElementById('quick-req-tech-time').textContent = ws.completed_at ? fmtDt(ws.completed_at) : '—';
     
     document.getElementById('quick-req-source').textContent = req.source_channel || '—';
