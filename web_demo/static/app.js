@@ -2905,43 +2905,23 @@ async function hienThiTheLuong(requestId) {
   container.innerHTML = wss.map(ws => {
     const isPpf = ws.workstream_type === 'PPF_INSTALLATION';
     const typeClass = isPpf ? 'ppf' : 'wf';
-    const icon = isPpf ? 'fa-shield-film' : 'fa-window-restore';
-    const tenLoai = isPpf ? 'Dán Phim PPF' : 'Dán Phim Cách Nhiệt';
-    const matPlan = ws.material_plan ? (Array.isArray(ws.material_plan) ? ws.material_plan : JSON.parse(ws.material_plan || '[]')) : [];
     const progress = { 'PENDING_APPROVAL':0,'PENDING_TECH_PREFLIGHT':12,'APPROVED':30,'IN_PROGRESS':60,'ACTUAL_CONFIRMATION_REQUIRED':75,'COMPLETED':90,'CLOSED':100 }[ws.status] || 0;
     const tenPhim = { 'T-TYPE':'T-TYPE (Trong suốt)', 'M-TYPE':'M-TYPE (Mờ)', 'JB20':'JB20 (Cách nhiệt)', 'RT40':'RT40 (Kính lái)' };
 
-    const ppfTypeCode =
-      isPpf && ws.ppf_allocation && ws.ppf_allocation.ppf_type
-        ? ws.ppf_allocation.ppf_type
-        : ws.selected_material_code;
-    const ppfFilmLabel = isPpf ? tenPhim[ppfTypeCode] || ppfTypeCode || '—' : '';
-    let ppfBlockDisplay = ws.planned_cut_block || '—';
-    let ppfLenDisplay = ws.planned_deduction_length_m;
+    const ppfFilmLabel = isPpf ? tenPhim[ws.ppf_allocation?.ppf_type || ws.selected_material_code] || ws.ppf_allocation?.ppf_type || ws.selected_material_code || '—' : '';
     let ppfSourceBlock = `<div class="ws-info-row"><span class="ws-label">Nguồn vật tư</span><span class="ws-value">${ws.allocated_source_type || '—'}: ${ws.allocated_source_id || '—'}</span></div>`;
     if (isPpf && ws.ppf_allocation) {
       const pa = ws.ppf_allocation;
       const fullIt = (pa.items || []).find((x) => x.item_code === 'FULL_VEHICLE_PPF');
-      if (fullIt) {
-        if (fullIt.planned_cut_block) ppfBlockDisplay = fullIt.planned_cut_block;
-        if (fullIt.required_length_m != null) ppfLenDisplay = fullIt.required_length_m;
-      }
       const srcLines = (fullIt && fullIt.sources) || [];
       const tot = srcLines.reduce((s, x) => s + (parseFloat(x.allocated_length_m) || 0), 0);
       const reqM = fullIt && fullIt.required_length_m != null ? Number(fullIt.required_length_m) : 13;
       const nSrc = srcLines.filter((s) => (s.source_id || '').trim()).length;
-      const splitBadge =
-        nSrc > 1
-          ? ' <span style="margin-left:4px;padding:2px 7px;border-radius:6px;background:rgba(0,188,212,0.2);color:var(--teal-light);font-weight:700;font-size:9px">Chia nguồn</span>'
-          : '';
+      const splitBadge = nSrc > 1 ? ' <span style="margin-left:4px;padding:2px 7px;border-radius:6px;background:rgba(0,188,212,0.2);color:var(--teal-light);font-weight:700;font-size:9px">Chia nguồn</span>' : '';
       const ok = tot + 1e-6 >= reqM;
       const stLabel = ok ? 'Đủ vật tư' : 'Thiếu vật tư';
       const stColor = ok ? 'var(--teal-light)' : 'var(--amber)';
-      const lines =
-        srcLines
-          .filter((s) => (s.source_id || '').trim())
-          .map((s) => `${s.source_id}: ${s.allocated_length_m}m`)
-          .join('<br>') || '—';
+      const lines = srcLines.filter((s) => (s.source_id || '').trim()).map((s) => `${s.source_id}: ${s.allocated_length_m}m`).join('<br>') || '—';
       ppfSourceBlock = `<div class="ws-info-row"><span class="ws-label">Hạng mục</span><span class="ws-value">Full xe</span></div>
         <div class="ws-info-row"><span class="ws-label">Nguồn vật tư</span><span class="ws-value" style="font-size:11px;line-height:1.45">${lines}${splitBadge}</span></div>
         <div class="ws-info-row"><span class="ws-label">Trạng thái phân bổ</span><span class="ws-value"><span style="color:${stColor};font-weight:700">${stLabel}</span> · Yêu cầu ${reqM}m · Đã phân bổ ${tot.toFixed(1)}m</span></div>`;
@@ -3001,8 +2981,6 @@ async function hienThiTheLuong(requestId) {
             ${tenPhim[ws.selected_material_code] || ws.selected_material_code || '—'}
           </span>
         </div>
-        <div class="ws-info-row"><span class="ws-label">Kích thước block</span><span class="ws-value">${ws.planned_cut_block || '—'}</span></div>
-        <div class="ws-info-row"><span class="ws-label">Chiều dài khấu trừ</span><span class="ws-value">${ws.planned_deduction_length_m || '—'} m</span></div>
         `}
 
         ${!isPpf && matPlan.length > 0 ? `<div class="wf-material-plan">
@@ -3107,12 +3085,11 @@ window.moModalDuyetMaPhimWF = async function (wsId) {
     return `<tr>
       <td style="text-align:center;vertical-align:middle"><input type="checkbox" class="wf-appr-chk" id="wf-appr-chk-${ji}" data-ji="${ji}"${chk}></td>
       <td>${_esc(opt.label)}</td>
-      <td><code>${_esc(ji)}</code></td>
-      <td><select class="field-input wf-appr-mc-sel" id="wf-appr-mc-${ji}" style="min-width:200px"${selDis}>${opts}</select></td>
+      <td><select class="field-input wf-appr-mc-sel" id="wf-appr-mc-${ji}" style="min-width:200px; width:100%"${selDis}>${opts}</select></td>
     </tr>`;
   }).join('');
   overlay.innerHTML = `
-    <div class="demo-modal" style="max-width:640px">
+    <div class="demo-modal" style="max-width:640px; width: 100%;">
       <div class="demo-modal-header">
         <i class="fa-solid fa-film" style="color:var(--blue-light)"></i>
         <div>
@@ -3121,15 +3098,15 @@ window.moModalDuyetMaPhimWF = async function (wsId) {
         </div>
       </div>
       <div style="padding:16px 20px">
-        <table class="data-table" style="font-size:12px">
+        <table class="data-table" style="font-size:12px; width: 100%;">
           <thead>
-            <tr><th style="width:44px">Chọn</th><th>Hạng mục</th><th>Mã</th><th>Mã phim thi công</th></tr>
+            <tr><th style="width:44px; text-align:center;">Chọn</th><th>Hạng mục</th><th>Mã phim thi công</th></tr>
           </thead>
           <tbody>${rows}</tbody>
         </table>
-        <div class="field-group" id="wf-appr-reason-group" style="margin-top:14px; display:none;">
+        <div class="field-group" id="wf-appr-reason-group" style="margin-top:14px; display:none; width: 100%;">
           <label>Lý do / xác nhận <span style="color:var(--red-light)">*</span></label>
-          <textarea id="wf-appr-reason" class="field-input" rows="2" placeholder="VD: Đồng ý RT40 kính lái, JB20 các kính còn lại theo đề xuất…"></textarea>
+          <textarea id="wf-appr-reason" class="field-input" rows="2" placeholder="VD: Đồng ý RT40 kính lái, JB20 các kính còn lại theo đề xuất…" style="width: 100%; box-sizing: border-box;"></textarea>
         </div>
       </div>
       <div class="demo-modal-footer" style="display:flex;gap:8px">
