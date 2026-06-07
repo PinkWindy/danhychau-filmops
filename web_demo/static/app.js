@@ -1148,47 +1148,57 @@ async function taiKhachHang() {
   } catch (e) { toast('error', 'Lỗi tab Khách hàng', e.message); }
 }
 
-function renderJsonToReadableHtml(obj, depth = 0) {
-  if (obj === null || obj === undefined) return '<span style="color:#888">Trống</span>';
-  if (typeof obj !== 'object') {
-    if (typeof obj === 'string' && /^\\d{4}-\\d{2}-\\d{2}T/.test(obj)) {
-      return `<span>${fmtDt(obj)}</span>`;
-    }
-    return `<span>${_esc(String(obj))}</span>`;
-  }
-  if (Array.isArray(obj)) {
-    if (obj.length === 0) return '<span style="color:#888">Không có dữ liệu</span>';
-    return `<div style="display:flex; flex-direction:column; gap:4px; margin-top:4px;">
-      ${obj.map(item => `<div style="border-left:2px solid #555; padding-left:8px;">${renderJsonToReadableHtml(item, depth + 1)}</div>`).join('')}
-    </div>`;
-  }
-  
-  const keys = Object.keys(obj).filter(k => !k.toLowerCase().includes('masked'));
-  if (keys.length === 0) return '<span style="color:#888">{}</span>';
-  
-  const fieldNames = {
-    dealer_id: 'Mã đại lý', dealer_name: 'Tên đại lý', address: 'Địa chỉ', phone: 'SĐT',
-    email: 'Email', status: 'Trạng thái', created_at: 'Ngày tạo', updated_at: 'Ngày cập nhật',
-    customer_id: 'Mã KH', customer_name: 'Tên KH', vehicle_id: 'Mã xe', plate_number: 'Biển số',
-    model_name: 'Tên dòng xe', vehicle_model_code: 'Mã dòng xe', job_items: 'Hạng mục dán',
-    request_id: 'Mã yêu cầu', dealer: 'Đại lý', customer: 'Khách hàng', vehicles: 'Danh sách xe',
-    requests: 'Lịch sử yêu cầu', requests_per_month: 'Yêu cầu theo tháng',
-    popular_models: 'Dòng xe phổ biến', completed_count: 'Số đơn hoàn thành',
-    on_time_sla_rate_percent: 'Tỷ lệ đúng hạn SLA (%)', tax_code: 'Mã số thuế',
-    full_address: 'Địa chỉ đầy đủ', amis_customer_code: 'Mã KH AMIS',
-    customer_category: 'Loại KH', contact_phone: 'SĐT liên hệ', note: 'Ghi chú',
-    vin_number: 'Số VIN', model_year: 'Đời xe',
-    street: 'Đường', address_no: 'Số nhà', ward: 'Phường/Xã', city: 'Thành phố'
-  };
+const histPropsConfig = {
+  dealer: [
+    { key: 'dealer_id', label: 'Mã đại lý' },
+    { key: 'dealer_name', label: 'Tên đại lý' },
+    { key: 'tax_code', label: 'Mã số thuế' },
+    { key: 'contact_phone', label: 'Số điện thoại' },
+    { key: 'address_no', label: 'Số nhà' },
+    { key: 'street', label: 'Đường' },
+    { key: 'ward', label: 'Phường/Xã' },
+    { key: 'city', label: 'Tỉnh/Thành phố' },
+    { key: 'full_address', label: 'Địa chỉ đầy đủ' },
+    { key: 'amis_customer_code', label: 'Mã AMIS' },
+    { key: 'status', label: 'Trạng thái' },
+    { key: 'created_at', label: 'Ngày tạo', isDate: true }
+  ],
+  customer: [
+    { key: 'customer_id', label: 'Mã khách hàng' },
+    { key: 'customer_name', label: 'Tên khách hàng' },
+    { key: 'tax_code', label: 'Mã số thuế' },
+    { key: 'contact_phone', label: 'Số điện thoại' },
+    { key: 'address_no', label: 'Số nhà' },
+    { key: 'street', label: 'Đường' },
+    { key: 'ward', label: 'Phường/Xã' },
+    { key: 'city', label: 'Tỉnh/Thành phố' },
+    { key: 'full_address', label: 'Địa chỉ đầy đủ' },
+    { key: 'amis_customer_code', label: 'Mã AMIS' },
+    { key: 'status', label: 'Trạng thái' },
+    { key: 'created_at', label: 'Ngày tạo', isDate: true }
+  ],
+  vehicle: [
+    { key: 'vehicle_id', label: 'Mã xe' },
+    { key: 'vehicle_model_code', label: 'Dòng xe' },
+    { key: 'vin_number', label: 'Số VIN' },
+    { key: 'model_year', label: 'Đời xe' },
+    { key: 'dealer_id', label: 'Mã đại lý' },
+    { key: 'customer_id', label: 'Mã khách hàng' },
+    { key: 'vehicle_status', label: 'Trạng thái xe' },
+    { key: 'created_at', label: 'Ngày tạo', isDate: true }
+  ]
+};
 
-  return `<table style="width:100%; font-size:12px; border-collapse:collapse; margin-top:4px; ${depth === 0 ? 'border:1px solid #3b3b4f;' : ''}">
+function renderPropsToHtml(obj, props) {
+  if (!obj) return '';
+  return `<table style="width:100%; font-size:12px; border-collapse:collapse; margin-top:4px; border:1px solid #3b3b4f;">
     <tbody>
-      ${keys.map(k => {
-        let valHtml = renderJsonToReadableHtml(obj[k], depth + 1);
-        let lbl = fieldNames[k] || k.replace(/_/g, ' ');
+      ${props.map(p => {
+        const val = obj[p.key];
+        const valStr = (val === null || val === undefined || val === '') ? '<span style="color:#888">Trống</span>' : (p.isDate ? fmtDt(val) : _esc(String(val)));
         return `<tr>
-          <td style="width:140px; font-weight:600; background:#2a2a3a; color:#ccc; border:1px solid #3b3b4f; padding:6px 10px; text-transform:capitalize;">${_esc(lbl)}</td>
-          <td style="border:1px solid #3b3b4f; padding:6px 10px; color:#fff; word-break:break-word;">${valHtml}</td>
+          <td style="width:140px; font-weight:600; background:#2a2a3a; color:#ccc; border:1px solid #3b3b4f; padding:6px 10px;">${_esc(p.label)}</td>
+          <td style="border:1px solid #3b3b4f; padding:6px 10px; color:#fff; word-break:break-word;">${valStr}</td>
         </tr>`;
       }).join('')}
     </tbody>
@@ -1218,7 +1228,7 @@ window.moDrawerDealer = async function(id) {
   
   delete h.requests; delete h.vehicles; delete h.customers_from_dealer; delete h.requests_per_month; delete h.popular_models; delete h.completed_count; delete h.on_time_sla_rate_percent; delete h.revenue_placeholder;
   
-  document.getElementById('drawer-body').innerHTML = `<h4 style="margin-bottom:8px;color:#fff;">Thông tin chung</h4>` + renderJsonToReadableHtml(h.dealer || h) + statsHtml;
+  document.getElementById('drawer-body').innerHTML = `<h4 style="margin-bottom:8px;color:#fff;">Thông tin chung</h4>` + renderPropsToHtml(h.dealer || h, histPropsConfig.dealer) + statsHtml;
   ov.style.display = 'flex';
 };
 
@@ -1244,7 +1254,7 @@ window.moDrawerCustomer = async function(id) {
   
   delete h.requests; delete h.vehicles; delete h.requests_per_month; delete h.popular_models; delete h.completed_count; delete h.on_time_sla_rate_percent;
   
-  document.getElementById('drawer-body').innerHTML = `<h4 style="margin-bottom:8px;color:#fff;">Thông tin chung</h4>` + renderJsonToReadableHtml(h.customer || h) + statsHtml;
+  document.getElementById('drawer-body').innerHTML = `<h4 style="margin-bottom:8px;color:#fff;">Thông tin chung</h4>` + renderPropsToHtml(h.customer || h, histPropsConfig.customer) + statsHtml;
   ov.style.display = 'flex';
 };
 
@@ -1271,7 +1281,7 @@ window.moDrawerVehicle = async function(id) {
 
   delete h.requests; delete h.owner_customer; delete h.dealer; delete h.services_completed; delete h.last_delivery_date;
   
-  document.getElementById('drawer-body').innerHTML = `<h4 style="margin-bottom:8px;color:#fff;">Thông tin chung</h4>` + renderJsonToReadableHtml(h.vehicle || h) + statsHtml;
+  document.getElementById('drawer-body').innerHTML = `<h4 style="margin-bottom:8px;color:#fff;">Thông tin chung</h4>` + renderPropsToHtml(h.vehicle || h, histPropsConfig.vehicle) + statsHtml;
   ov.style.display = 'flex';
 };
 
