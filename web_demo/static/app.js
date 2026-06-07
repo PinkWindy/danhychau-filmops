@@ -1163,7 +1163,7 @@ function renderJsonToReadableHtml(obj, depth = 0) {
     </div>`;
   }
   
-  const keys = Object.keys(obj);
+  const keys = Object.keys(obj).filter(k => !k.toLowerCase().includes('masked'));
   if (keys.length === 0) return '<span style="color:#888">{}</span>';
   
   const fieldNames = {
