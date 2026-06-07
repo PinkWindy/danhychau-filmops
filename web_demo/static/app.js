@@ -233,8 +233,10 @@ function normalizeListResponse(data) {
 }
 
 function getFilterValue(id) {
-  const el = document.getElementById(id);
-  return el ? String(el.value ?? '').trim() : '';
+  const els = Array.from(document.querySelectorAll('[id="' + id + '"]'));
+  if (els.length === 0) return '';
+  const visible = els.find(e => e.offsetParent !== null);
+  return String((visible || els[0]).value ?? '').trim();
 }
 
 function buildQuery(params) {
@@ -474,7 +476,11 @@ const __debVehicleQ = debounce(() => {
 }, 300);
 const __debNormQ = debounce(() => {
   applyCustomerFilters('norms');
-  taiKhachHang();
+  if (document.getElementById('tab-norms')?.classList.contains('active')) {
+    taiDinhMucPhim();
+  } else {
+    taiKhachHang();
+  }
 }, 300);
 
 window._quickFormDirty = false;
@@ -792,6 +798,7 @@ window.danhDauDocThongBao = async function(id, el) {
   await fetch(`/api/notifications/${id}/read`, { method: 'POST' });
   el.classList.remove('unread');
   taiThongBao();
+  fillDefaultDateTimes();
 };
 
 document.getElementById('btn-notif-bell').addEventListener('click', () => {
@@ -908,8 +915,6 @@ async function taiKhachHang() {
               </select></div>
           </div>
           <div class="cust-filter-actions">
-            <button type="button" class="btn btn-primary btn-sm" data-flt-act="dealers-apply">Áp dụng lọc</button>
-            <button type="button" class="btn btn-outline btn-sm" data-flt-act="dealers-clear">Xóa lọc</button>
             <button type="button" class="btn btn-outline btn-sm" data-flt-act="dealers-refresh">Làm mới</button>
             <button type="button" class="btn btn-outline btn-sm" data-flt-act="dealers-create">Tạo đại lý</button>
           </div>
@@ -1041,25 +1046,31 @@ async function taiKhachHang() {
       const fv = window._custF.vehicles;
       const fn = window._custF.norms;
       const vehSub = window._custVehSub || 'list';
-      const [vehJson, normJson, dealerPick, custPick] = await Promise.all([
+      const [vehJson, dealerPick, custPick] = await Promise.all([
         fetch(`/api/vehicles${buildQuery({ ...fv, with_meta: '1' })}`).then((r) => r.json()),
-        fetch(`/api/vehicle-norms${buildQuery({ ...fn, with_meta: '1' })}`).then((r) => r.json()).catch(() => []),
         fetch('/api/dealers').then((r) => r.json()),
         fetch('/api/end-customers').then((r) => r.json()),
       ]);
       const { items: rows, total: vTotal } = normalizeListResponse(vehJson);
-      const { items: norms, total: nTotal } = normalizeListResponse(normJson);
       const dealerOpts = normalizeListResponse(dealerPick).items;
       const custOpts = normalizeListResponse(custPick).items;
       const vst = fv.vehicle_status;
+      
+      const activeId = document.activeElement?.id;
+      let activeStart, activeEnd;
+      if (activeId && document.activeElement.tagName === 'INPUT') {
+        activeStart = document.activeElement.selectionStart;
+        activeEnd = document.activeElement.selectionEnd;
+      }
+      
       document.getElementById('cust-pane-vehicles').innerHTML = `
         <div class="kpi-grid kpi-grid-compact" style="margin-bottom:12px">
           <div class="kpi-card" data-color="blue"><div class="kpi-val">${sum.total_vehicles}</div><div class="kpi-label">Tổng xe</div></div>
           <div class="kpi-card" data-color="orange"><div class="kpi-val">${sum.vehicles_without_customer}</div><div class="kpi-label">Chưa gắn KH</div></div>
         </div>
         <div class="cust-subtabs" style="margin-bottom:10px">
-          <button type="button" class="btn btn-sm veh-sub ${vehSub === 'list' ? 'btn-primary' : 'btn-outline'}" data-vehsub="list">Danh sách xe</button>
-          <button type="button" class="btn btn-sm veh-sub ${vehSub === 'norms' ? 'btn-primary' : 'btn-outline'}" data-vehsub="norms">Định mức phim</button>
+          <button class="veh-sub btn btn-sm ${vehSub === 'list' ? 'btn-primary' : 'btn-outline'}" data-vehsub="list">Danh sách xe</button>
+          <button class="veh-sub btn btn-sm ${vehSub === 'norms' ? 'btn-primary' : 'btn-outline'}" data-vehsub="norms">Định mức phim</button>
         </div>
         <div id="cust-veh-list-wrap" style="display:${vehSub === 'list' ? 'block' : 'none'}">
         <div class="cust-filter-bar">
@@ -1097,8 +1108,6 @@ async function taiKhachHang() {
               </select></div>
           </div>
           <div class="cust-filter-actions">
-            <button type="button" class="btn btn-primary btn-sm" data-flt-act="vehicles-apply">Áp dụng lọc</button>
-            <button type="button" class="btn btn-outline btn-sm" data-flt-act="vehicles-clear">Xóa lọc</button>
             <button type="button" class="btn btn-outline btn-sm" data-flt-act="vehicles-refresh">Làm mới</button>
             <button type="button" class="btn btn-outline btn-sm" data-flt-act="vehicles-create">Tạo hồ sơ xe</button>
           </div>
@@ -1118,102 +1127,23 @@ async function taiKhachHang() {
           }).join('')}
           </tbody></table></div>
         </div>
-        <div id="cust-veh-norms-wrap" style="display:${vehSub === 'norms' ? 'block' : 'none'}">
-          <p class="muted" style="font-size:12px;margin-bottom:8px">Định mức phim (dữ liệu chuẩn trong hệ thống — cùng cấu trúc file Excel: Loại phim, Dòng xe, Năm model, các kích thước kính).</p>
-          <div class="cust-filter-bar">
-            <div class="cust-filter-title">Bộ lọc định mức phim</div>
-            <div class="cust-filter-grid">
-              <div class="dyc-field dyc-field-span2"><label>Tìm kiếm</label>
-                <input id="flt-n-q" placeholder="Tìm theo mã định mức, dòng xe, năm model..." value="${_esc(fn.q)}" autocomplete="off" /></div>
-              <div class="dyc-field"><label>Loại phim</label>
-                <select id="flt-n-film">
-                  <option value=""${fn.film_type === '' ? ' selected' : ''}>Tất cả</option>
-                  <option value="Phim cách nhiệt"${fn.film_type === 'Phim cách nhiệt' ? ' selected' : ''}>Phim cách nhiệt</option>
-                  <option value="Phim PPF"${fn.film_type === 'Phim PPF' ? ' selected' : ''}>Phim PPF</option>
-                </select></div>
-              <div class="dyc-field"><label>Dòng xe</label>
-                <input id="flt-n-model" list="dyc-model-datalist" placeholder="Chọn hoặc nhập dòng xe" value="${_esc(fn.vehicle_model_code)}" autocomplete="off" /></div>
-              <div class="dyc-field"><label>Năm model</label>
-                <select id="flt-n-year">${_yearOptionsHtml(fn.model_year)}</select></div>
-              <div class="dyc-field"><label>Trạng thái</label>
-                <select id="flt-n-status">
-                  <option value=""${fn.status === '' ? ' selected' : ''}>Tất cả</option>
-                  <option value="ACTIVE"${fn.status === 'ACTIVE' ? ' selected' : ''}>ACTIVE</option>
-                  <option value="INACTIVE"${fn.status === 'INACTIVE' ? ' selected' : ''}>INACTIVE</option>
-                </select></div>
-              <div class="dyc-field"><label>Có kính lái</label>
-                <select id="flt-n-ws">
-                  <option value=""${fn.has_windshield === '' ? ' selected' : ''}>Tất cả</option>
-                  <option value="true"${fn.has_windshield === 'true' ? ' selected' : ''}>Có</option>
-                  <option value="false"${fn.has_windshield === 'false' ? ' selected' : ''}>Không</option>
-                </select></div>
-              <div class="dyc-field"><label>Có kính trời</label>
-                <select id="flt-n-sun">
-                  <option value=""${fn.has_sunroof === '' ? ' selected' : ''}>Tất cả</option>
-                  <option value="true"${fn.has_sunroof === 'true' ? ' selected' : ''}>Có</option>
-                  <option value="false"${fn.has_sunroof === 'false' ? ' selected' : ''}>Không</option>
-                </select></div>
-              <div class="dyc-field"><label>Sườn sau + tam giác</label>
-                <select id="flt-n-sst">
-                  <option value=""${fn.has_rear_side_triangle === '' ? ' selected' : ''}>Tất cả</option>
-                  <option value="true"${fn.has_rear_side_triangle === 'true' ? ' selected' : ''}>Có</option>
-                  <option value="false"${fn.has_rear_side_triangle === 'false' ? ' selected' : ''}>Không</option>
-                </select></div>
-            </div>
-            <div class="cust-filter-actions">
-              <button type="button" class="btn btn-primary btn-sm" data-flt-act="norms-apply">Áp dụng lọc</button>
-              <button type="button" class="btn btn-outline btn-sm" data-flt-act="norms-clear">Xóa lọc</button>
-              <button type="button" class="btn btn-outline btn-sm" data-flt-act="norms-refresh">Làm mới</button>
-              <button type="button" class="btn btn-primary btn-sm" id="btn-norm-add" data-flt-act="norms-add">Thêm định mức</button>
-            </div>
-            <div class="cust-filter-meta">Tổng số định mức sau lọc: <strong id="flt-n-total">${nTotal}</strong></div>
-            <div class="filter-chips-row" id="flt-n-chips"></div>
-          </div>
-          ${norms.length === 0 ? '<div class="empty-state cust-empty"><p>Chưa có định mức phù hợp với dòng xe đã chọn.</p></div>' : `
-          <div class="table-wrap table-norms-excel-wrap"><table class="data-table table-norms-excel"><thead><tr>
-            <th>Mã định mức</th>
-            <th>Loại phim</th>
-            <th>Dòng xe</th>
-            <th>Năm model</th>
-            <th>Kính lái</th>
-            <th>Kính hậu</th>
-            <th>Sườn trước</th>
-            <th>Sườn sau + TG</th>
-            <th>Kính trời</th>
-            <th>Sườn sau</th>
-            <th>Tam giác</th>
-            <th>TT</th>
-            <th></th>
-          </tr></thead><tbody>
-          ${norms.map(n => `<tr>
-            <td title="${_esc(n.norm_id)}"><strong>${_esc(n.norm_id)}</strong></td>
-            <td title="${_esc(n.film_type)}">${_esc(n.film_type)}</td>
-            <td>${_esc(n.vehicle_model_code)}</td>
-            <td>${_esc(n.model_year_range)}</td>
-            <td>${_normSizeDisplay(n, 'windshield_size', 'windshield_width_cm', 'windshield_length_cm')}</td>
-            <td>${_normSizeDisplay(n, 'rear_window_size', 'rear_window_width_cm', 'rear_window_length_cm')}</td>
-            <td>${_normSizeDisplay(n, 'front_side_size', 'front_side_width_cm', 'front_side_length_cm')}</td>
-            <td>${_normSizeDisplay(n, 'rear_side_triangle_size', 'rear_side_triangle_width_cm', 'rear_side_triangle_length_cm')}</td>
-            <td>${_normSizeDisplay(n, 'sunroof_size', 'sunroof_width_cm', 'sunroof_length_cm')}</td>
-            <td>${_normSizeDisplay(n, 'rear_side_size', 'rear_side_width_cm', 'rear_side_length_cm')}</td>
-            <td>${_normSizeDisplay(n, 'triangle_size', 'triangle_width_cm', 'triangle_length_cm')}</td>
-            <td>${_esc(n.status)}</td>
-            <td style="white-space:nowrap">
-              <button type="button" class="btn btn-outline btn-sm btn-norm-edit" data-norm-id="${_esc(n.norm_id)}">Sửa</button>
-              ${n.status === 'ACTIVE'
-                ? `<button type="button" class="btn btn-outline btn-sm btn-norm-toggle" data-norm-id="${_esc(n.norm_id)}" data-norm-act="deactivate">Inactive</button>`
-                : `<button type="button" class="btn btn-outline btn-sm btn-norm-toggle" data-norm-id="${_esc(n.norm_id)}" data-norm-act="activate">Active</button>`}
-            </td></tr>`).join('')}
-          </tbody></table></div>`}
-        </div>`;
+        `;
+        
+      if (activeId) {
+        const el = document.getElementById(activeId);
+        if (el) {
+          el.focus();
+          if (activeStart !== undefined && el.setSelectionRange) {
+            el.setSelectionRange(activeStart, activeEnd);
+          }
+        }
+      }
+        
       _vehicleFilterChips(fv, (key) => {
         window._custF.vehicles[key] = '';
         taiKhachHang();
       });
-      _normFilterChips(fn, (key) => {
-        window._custF.norms[key] = '';
-        taiKhachHang();
-      });
+
     }
     document.getElementById('cust-pane-dealers').style.display = sub === 'dealers' ? 'block' : 'none';
     document.getElementById('cust-pane-customers').style.display = sub === 'customers' ? 'block' : 'none';
@@ -1260,6 +1190,7 @@ document.getElementById('tab-customers')?.addEventListener('click', (ev) => {
       return;
     }
     if (act === 'dealers-refresh') {
+      clearCustomerFilters('dealers');
       taiKhachHang();
       return;
     }
@@ -1278,6 +1209,7 @@ document.getElementById('tab-customers')?.addEventListener('click', (ev) => {
       return;
     }
     if (act === 'customers-refresh') {
+      clearCustomerFilters('customers');
       taiKhachHang();
       return;
     }
@@ -1296,6 +1228,7 @@ document.getElementById('tab-customers')?.addEventListener('click', (ev) => {
       return;
     }
     if (act === 'vehicles-refresh') {
+      clearCustomerFilters('vehicles');
       taiKhachHang();
       return;
     }
@@ -1303,7 +1236,7 @@ document.getElementById('tab-customers')?.addEventListener('click', (ev) => {
       document.getElementById('mc-btn-quick-veh')?.click();
       return;
     }
-    if (act === 'norms-apply') {
+    if (false) {
       applyCustomerFilters('norms');
       taiKhachHang();
       return;
@@ -1343,27 +1276,35 @@ document.getElementById('tab-customers')?.addEventListener('click', (ev) => {
 document.getElementById('tab-customers')?.addEventListener('input', (ev) => {
   const id = ev.target.id;
   if (id === 'flt-d-city' || id === 'flt-c-city') _fillWardDatalistForCity(ev.target.value);
-  if (id === 'flt-d-q') __debDealerQ();
-  else if (id === 'flt-c-q') __debCustomerQ();
-  else if (id === 'flt-v-q') __debVehicleQ();
-  else if (id === 'flt-n-q') __debNormQ();
+  if (id === 'flt-d-q' || id === 'flt-d-model') __debDealerQ();
+  else if (id === 'flt-c-q' || id === 'flt-c-model') __debCustomerQ();
+  else if (id === 'flt-v-q' || id === 'flt-v-model') __debVehicleQ();
+  else if (id === 'flt-n-q' || id === 'flt-n-model') __debNormQ();
+});
+
+document.getElementById('tab-customers')?.addEventListener('change', (ev) => {
+  const id = ev.target.id;
+  if (id.startsWith('flt-d-')) __debDealerQ();
+  else if (id.startsWith('flt-c-')) __debCustomerQ();
+  else if (id.startsWith('flt-v-')) __debVehicleQ();
+  else if (id.startsWith('flt-n-')) __debNormQ();
 });
 
 document.getElementById('tab-customers')?.addEventListener('keydown', (ev) => {
   if (ev.key !== 'Enter') return;
   const id = ev.target.id;
-  if (!['flt-d-q', 'flt-c-q', 'flt-v-q', 'flt-n-q'].includes(id)) return;
+  if (!id.startsWith('flt-')) return;
   ev.preventDefault();
-  if (id === 'flt-d-q') {
+  if (id.startsWith('flt-d-')) {
     applyCustomerFilters('dealers');
     taiKhachHang();
-  } else if (id === 'flt-c-q') {
+  } else if (id.startsWith('flt-c-')) {
     applyCustomerFilters('customers');
     taiKhachHang();
-  } else if (id === 'flt-v-q') {
+  } else if (id.startsWith('flt-v-')) {
     applyCustomerFilters('vehicles');
     taiKhachHang();
-  } else if (id === 'flt-n-q') {
+  } else if (id.startsWith('flt-n-')) {
     applyCustomerFilters('norms');
     taiKhachHang();
   }
@@ -2150,6 +2091,7 @@ document.getElementById('mc-btn-reset')?.addEventListener('click', () => {
   document.getElementById('mc-plate').value = '';
   document.getElementById('mc-mat-override-reason').value = '';
   document.getElementById('mc-sla-note').value = '';
+    fillDefaultDateTimes();
   toast('info', 'Làm mới form', 'Đã xóa các trường nhập tay (không đổi danh mục đã chọn).');
   mcPreviewNorm();
 });
@@ -2158,6 +2100,7 @@ document.getElementById('mc-btn-reset')?.addEventListener('click', () => {
 const tabLoaders = {
   dashboard: taiTongQuan,
   ocr: taiDanhSachOcr,
+  norms: taiDinhMucPhim,
   manual: taiTaoDonTay,
   customers: taiKhachHang,
   requests: taiDonThiCong,
@@ -2168,6 +2111,7 @@ const tabLoaders = {
   offcuts: taiManhDu,
   monthly: taiBaoCaoThang,
   audit: taiNhatKy,
+  hr: window.taiNhanSu,
 };
 
 document.querySelectorAll('.nav-tab').forEach(tab => {
@@ -3366,6 +3310,7 @@ let _wsEditDirty = false;
 let _wsEditModePpf = false;
 
 window.chiinhSuaWs = async function(wsId) {
+  try {
   currentWsEditId = wsId;
   const ws = await fetch(`/api/workstreams/${wsId}`).then(r => r.json());
   const isPpf = ws.workstream_type === 'PPF_INSTALLATION';
@@ -4047,15 +3992,26 @@ async function loadLots() {
       <td>${l.material_code}</td>
       <td><strong>${l.remaining_length_m}</strong> / ${l.original_length_m ?? '—'}</td>
       <td>${lotStatusChip(e)}</td>
-      <td>${l.is_locked ? '<span class="locked-badge"><i class="fa-solid fa-lock"></i> true</span>' : '—'}</td>
+      <td>${l.is_locked ? '<span class="locked-badge"><i class="fa-solid fa-lock" style="margin-right:4px;"></i>Khóa</span>' : '—'}</td>
       <td><small>${l.storage_location || '—'}</small></td>
+      <td><small>Admin</small></td>
+      <td><small>${l.import_date || '—'}</small></td>
       <td style="white-space:nowrap">
         <button class="btn btn-outline btn-sm" onclick="openManualIssueLotModal('${l.lot_id}')">Xuất</button>
         <button class="btn btn-danger btn-sm" onclick="openClearLotModal('${l.lot_id}')">Clear</button>
         ${l.is_locked ? `<button class="btn btn-outline btn-sm" onclick="openReleaseLockModal('LOT','${l.lot_id}')"><i class="fa-solid fa-unlock"></i> Mở khóa</button>` : ''}
       </td></tr>`;
-  }).join('') : '<tr><td colspan="7" class="text-center muted">Không có LOT.</td></tr>';
+  }).join('') : '<tr><td colspan="9" class="text-center muted">Không có LOT.</td></tr>';
 }
+
+window.resetInvLots = function() {
+  const qEl = document.getElementById('inv-lot-q');
+  const stEl = document.getElementById('inv-lot-status');
+  if (qEl) qEl.value = '';
+  if (stEl) stEl.value = 'IN_USE';
+  loadLots();
+};
+
 
 async function loadOffcuts() {
   const q = new URLSearchParams();
@@ -4076,7 +4032,7 @@ async function loadOffcuts() {
       <td>${o.area_m2}</td>
       <td><span class="status-badge status-new" style="font-size:10px">${q}</span></td>
       <td>${lotStatusChip(e)}</td>
-      <td>${o.is_locked ? '<span class="locked-badge"><i class="fa-solid fa-lock"></i> true</span>' : '—'}</td>
+      <td>${o.is_locked ? '<span class="locked-badge"><i class="fa-solid fa-lock" style="margin-right:4px;"></i>Khóa</span>' : '—'}</td>
       <td><small>${o.storage_location || '—'}</small></td>
       <td style="white-space:nowrap">
         <button class="btn btn-outline btn-sm" onclick="openManualIssueOffcutModal('${o.offcut_id}')">Xuất</button>
@@ -4141,18 +4097,18 @@ function openInvModal(title, innerHtml, footerHtml) {
 window.openImportLotModal = function() {
   openInvModal('Nhập LOT mới', `
     <div class="form-grid">
-      <div class="field-group"><label>lot_id <span class="req">*</span></label><input id="im-lot-id" class="field-input" placeholder="LOT-JB20-004"></div>
-      <div class="field-group"><label>material_code <span class="req">*</span></label><input id="im-mat" class="field-input" value="JB20"></div>
-      <div class="field-group"><label>material_name</label><input id="im-mname" class="field-input"></div>
-      <div class="field-group"><label>film_type</label><input id="im-ft" class="field-input" value="WINDOW_FILM"></div>
-      <div class="field-group"><label>width_m <span class="req">*</span></label><input type="number" id="im-w" class="field-input" value="1.52" step="0.01"></div>
-      <div class="field-group"><label>original_length_m <span class="req">*</span></label><input type="number" id="im-ol" class="field-input" value="30" step="0.01"></div>
-      <div class="field-group"><label>remaining_length_m</label><input type="number" id="im-rl" class="field-input" step="0.01" placeholder="= original nếu để trống"></div>
-      <div class="field-group"><label>storage_location <span class="req">*</span></label><input id="im-loc" class="field-input" value="A-RACK-05"></div>
-      <div class="field-group"><label>supplier</label><input id="im-sup" class="field-input"></div>
-      <div class="field-group"><label>invoice_no</label><input id="im-inv" class="field-input"></div>
-      <div class="field-group"><label>performed_by</label><input id="im-by" class="field-input" value="AD-001"></div>
-      <div class="field-group full-width"><label>note</label><input id="im-note" class="field-input"></div>
+      <div class="field-group"><label>Mã LOT <span class="req">*</span></label><input id="im-lot-id" class="field-input" placeholder="LOT-JB20-004"></div>
+      <div class="field-group"><label>Mã vật tư <span class="req">*</span></label><input id="im-mat" class="field-input" value="JB20"></div>
+      <div class="field-group"><label>Tên vật tư</label><input id="im-mname" class="field-input"></div>
+      <div class="field-group"><label>Loại phim</label><input id="im-ft" class="field-input" value="WINDOW_FILM"></div>
+      <div class="field-group"><label>Chiều rộng (m) <span class="req">*</span></label><input type="number" id="im-w" class="field-input" value="1.52" step="0.01"></div>
+      <div class="field-group"><label>Chiều dài gốc (m) <span class="req">*</span></label><input type="number" id="im-ol" class="field-input" value="30" step="0.01"></div>
+      <div class="field-group"><label>Chiều dài còn lại (m)</label><input type="number" id="im-rl" class="field-input" step="0.01" placeholder="= Dài gốc nếu để trống"></div>
+      <div class="field-group"><label>Vị trí lưu trữ <span class="req">*</span></label><input id="im-loc" class="field-input" value="A-RACK-05"></div>
+      <div class="field-group"><label>Nhà cung cấp</label><input id="im-sup" class="field-input"></div>
+      <div class="field-group"><label>Số hóa đơn</label><input id="im-inv" class="field-input"></div>
+      <div class="field-group"><label>Người nhập</label><input id="im-by" class="field-input" value="Admin"></div>
+      <div class="field-group full-width"><label>Ghi chú</label><input id="im-note" class="field-input"></div>
     </div>`, `<button type="button" class="btn btn-outline" onclick="closeInvModal()">Hủy</button>
     <button type="button" class="btn btn-primary" onclick="submitImportLot()">Lưu nhập kho</button>`);
 };
@@ -4262,13 +4218,13 @@ window.openManualIssueOffcutModal = function(oid) {
   openInvModal('Xuất mảnh dư — ' + oid, `
     <p class="muted" style="font-size:11px">MVP: xuất một phần chỉ khi trùng full chiều rộng hoặc full chiều dài.</p>
     <div class="form-grid">
-      <div class="field-group"><label>issue_width_m</label><input type="number" id="mio-w" class="field-input" step="0.01"></div>
-      <div class="field-group"><label>issue_length_m</label><input type="number" id="mio-l" class="field-input" step="0.01"></div>
-      <div class="field-group full-width"><label>reason <span class="req">*</span></label><input id="mio-reason" class="field-input"></div>
-      <div class="field-group"><label>performed_by</label><input id="mio-by" class="field-input" value="QL-002"></div>
-      <div class="field-group"><label>admin_override</label><select id="mio-ov" class="field-input"><option value="false">Không</option><option value="true">Có</option></select></div>
-      <div class="field-group"><label>clear_remaining_as_scrap</label><select id="mio-scrap" class="field-input"><option value="false">Không</option><option value="true">Có</option></select></div>
-      <div class="field-group full-width"><label>note</label><input id="mio-note" class="field-input"></div>
+      <div class="field-group"><label>Chiều rộng xuất (m)</label><input type="number" id="mio-w" class="field-input" step="0.01"></div>
+      <div class="field-group"><label>Chiều dài xuất (m)</label><input type="number" id="mio-l" class="field-input" step="0.01"></div>
+      <div class="field-group full-width"><label>Lý do <span class="req">*</span></label><input id="mio-reason" class="field-input"></div>
+      <div class="field-group"><label>Thực hiện bởi</label><input id="mio-by" class="field-input" value="QL-002"></div>
+      <div class="field-group"><label>Admin xác nhận</label><select id="mio-ov" class="field-input"><option value="false">Không</option><option value="true">Có</option></select></div>
+      <div class="field-group"><label>Bỏ phần thừa (thành phế liệu)</label><select id="mio-scrap" class="field-input"><option value="false">Không</option><option value="true">Có</option></select></div>
+      <div class="field-group full-width"><label>Ghi chú</label><input id="mio-note" class="field-input"></div>
     </div>`, `<button type="button" class="btn btn-outline" onclick="closeInvModal()">Hủy</button>
     <button type="button" class="btn btn-primary" onclick="submitManualIssueOffcut('${oid}')">Xuất</button>`);
 };
@@ -4298,17 +4254,17 @@ window.openClearLotModal = function(lotId) {
   openInvModal('Clear LOT — ' + lotId, `
     <div class="danger-zone"><i class="fa-solid fa-triangle-exclamation"></i> Thao tác nguy hiểm — cần lý do hợp lệ.</div>
     <div class="form-grid">
-      <div class="field-group full-width"><label>clear_mode</label>
+      <div class="field-group full-width"><label>Chế độ clear</label>
         <select id="cl-mode" class="field-input">
           <option value="WRITE_OFF_TO_ZERO">WRITE_OFF_TO_ZERO → CLEARED</option>
           <option value="MARK_AS_SCRAPPED">MARK_AS_SCRAPPED → SCRAPPED</option>
           <option value="CLOSE_DEPLETED">CLOSE_DEPLETED → CLOSED</option>
           <option value="LOST_IN_STOCKTAKE">LOST_IN_STOCKTAKE → CLEARED</option>
         </select></div>
-      <div class="field-group full-width"><label>reason <span class="req">*</span></label><input id="cl-reason" class="field-input"></div>
-      <div class="field-group"><label>performed_by</label><input id="cl-by" class="field-input" value="QL-002"></div>
-      <div class="field-group"><label>admin_override</label><select id="cl-ov" class="field-input"><option value="false">Không</option><option value="true">Có</option></select></div>
-      <div class="field-group full-width"><label>note</label><input id="cl-note" class="field-input"></div>
+      <div class="field-group full-width"><label>Lý do <span class="req">*</span></label><input id="cl-reason" class="field-input"></div>
+      <div class="field-group"><label>Thực hiện bởi</label><input id="cl-by" class="field-input" value="QL-002"></div>
+      <div class="field-group"><label>Admin xác nhận</label><select id="cl-ov" class="field-input"><option value="false">Không</option><option value="true">Có</option></select></div>
+      <div class="field-group full-width"><label>Ghi chú</label><input id="cl-note" class="field-input"></div>
     </div>`, `<button type="button" class="btn btn-outline" onclick="closeInvModal()">Hủy</button>
     <button type="button" class="btn btn-danger" onclick="submitClearLot('${lotId}')">Clear kho</button>`);
 };
@@ -4336,17 +4292,17 @@ window.openClearOffcutModal = function(oid) {
   openInvModal('Clear mảnh dư — ' + oid, `
     <div class="danger-zone"><i class="fa-solid fa-triangle-exclamation"></i> Clear mảnh dư</div>
     <div class="form-grid">
-      <div class="field-group full-width"><label>clear_mode</label>
+      <div class="field-group full-width"><label>Chế độ clear</label>
         <select id="co-mode" class="field-input">
-          <option value="QUALITY_FAILED">QUALITY_FAILED</option>
-          <option value="WRITE_OFF_TO_ZERO">WRITE_OFF_TO_ZERO → CLEARED</option>
-          <option value="MARK_AS_SCRAPPED">MARK_AS_SCRAPPED</option>
-          <option value="LOST_IN_STOCKTAKE">LOST_IN_STOCKTAKE</option>
-          <option value="TOO_SMALL_TO_USE">TOO_SMALL_TO_USE → SCRAPPED</option>
+          <option value="QUALITY_FAILED">Lỗi chất lượng (QUALITY_FAILED)</option>
+          <option value="WRITE_OFF_TO_ZERO">Sử dụng hết (WRITE_OFF_TO_ZERO → CLEARED)</option>
+          <option value="MARK_AS_SCRAPPED">Đánh dấu phế liệu (MARK_AS_SCRAPPED)</option>
+          <option value="LOST_IN_STOCKTAKE">Thất lạc (LOST_IN_STOCKTAKE)</option>
+          <option value="TOO_SMALL_TO_USE">Quá nhỏ không thể dùng (TOO_SMALL_TO_USE → SCRAPPED)</option>
         </select></div>
-      <div class="field-group full-width"><label>reason <span class="req">*</span></label><input id="co-reason" class="field-input"></div>
-      <div class="field-group"><label>performed_by</label><input id="co-by" class="field-input" value="QL-002"></div>
-      <div class="field-group"><label>admin_override</label><select id="co-ov" class="field-input"><option value="false">Không</option><option value="true">Có</option></select></div>
+      <div class="field-group full-width"><label>Lý do <span class="req">*</span></label><input id="co-reason" class="field-input"></div>
+      <div class="field-group"><label>Thực hiện bởi</label><input id="co-by" class="field-input" value="QL-002"></div>
+      <div class="field-group"><label>Admin xác nhận</label><select id="co-ov" class="field-input"><option value="false">Không</option><option value="true">Có</option></select></div>
     </div>`, `<button type="button" class="btn btn-outline" onclick="closeInvModal()">Hủy</button>
     <button type="button" class="btn btn-danger" onclick="submitClearOffcut('${oid}')">Clear</button>`);
 };
@@ -4378,7 +4334,7 @@ window.openReleaseLockModal = function(st, sid) {
         <select id="rl-st" class="field-input"><option value="LOT" ${_rlType==='LOT'?'selected':''}>LOT</option><option value="OFFCUT" ${_rlType==='OFFCUT'?'selected':''}>OFFCUT</option></select></div>
       <div class="field-group"><label>Mã nguồn <span class="req">*</span></label><input id="rl-sid" class="field-input" value="${_rlId}"></div>
       <div class="field-group full-width"><label>Lý do <span class="req">*</span></label><input id="rl-reason" class="field-input"></div>
-      <div class="field-group"><label>Thực hiện bởi</label><input id="rl-by" class="field-input" value="QL-002"></div>
+      <div class="field-group"><label>Thực hiện bởi</label><input id="rl-by" class="field-input" value="Admin"></div>
       <div class="field-group"><label>Mã yêu cầu liên quan</label><input id="rl-rid" class="field-input" placeholder="REQ-..."></div>
     </div>`, `<button type="button" class="btn btn-outline" onclick="closeInvModal()">Hủy</button>
     <button type="button" class="btn btn-primary" onclick="submitReleaseLock()">Mở khóa</button>`);
@@ -4406,9 +4362,33 @@ window.submitReleaseLock = async function() {
 // KHO LOT & MẢNH DƯ
 // ═══════════════════════════════════════════════════════════════════════════════
 async function taiKhoLot() {
-  const lots = await fetch('/api/lots').then(r => r.json());
+  const allLots = await fetch('/api/lots').then(r => r.json());
+  
+  const matEl = document.getElementById('kl-mat');
+  const stEl = document.getElementById('kl-status');
+  const filterMat = (matEl ? matEl.value : '').toLowerCase().trim();
+  const filterSt = stEl ? stEl.value : '';
+
+  allLots.forEach(l => {
+    let eff = l.status || 'ACTIVE';
+    if (l.remaining_length_m <= 0 && eff === 'ACTIVE') {
+      eff = 'DEPLETED';
+    }
+    l._eff_status = eff;
+  });
+
+  const lots = allLots.filter(l => {
+    if (filterMat && !(l.material_code || '').toLowerCase().includes(filterMat)) return false;
+    if (filterSt === 'ACTIVE') {
+      if (l._eff_status !== 'ACTIVE') return false;
+    } else if (filterSt === 'DEPLETED') {
+      if (l._eff_status === 'ACTIVE') return false;
+    }
+    return true;
+  });
+
   document.getElementById('table-lots-body').innerHTML = lots.length === 0
-    ? '<tr><td colspan="9" class="text-center muted" style="padding:20px">Không có cuộn LOT nào.</td></tr>'
+    ? '<tr><td colspan="10" class="text-center muted" style="padding:20px">Không có cuộn LOT nào.</td></tr>'
     : lots.map(l => `<tr>
         <td><strong>${l.lot_id}</strong></td>
         <td>${l.material_code}</td>
@@ -4417,10 +4397,19 @@ async function taiKhoLot() {
         <td><strong style="color:${l.remaining_length_m < 2 ? 'var(--red-light)' : 'var(--green-light)'}">${l.remaining_length_m} m</strong></td>
         <td>${l.is_opened ? '<span style="color:var(--orange-light)">Đang dùng</span>' : '<span style="color:var(--green-light)">Nguyên</span>'}</td>
         <td>${l.is_locked ? '<span style="color:var(--red-light)"><i class="fa-solid fa-lock"></i> Đang khóa</span>' : '<span style="color:var(--text-muted)">Khả dụng</span>'}</td>
+        <td><small>Admin</small></td>
         <td>${l.import_date}</td>
-        <td>${trangThaiBadge(l.status)}</td>
+        <td>${trangThaiBadge(l._eff_status)}</td>
       </tr>`).join('');
 }
+
+window.resetKhoLot = function() {
+  const matEl = document.getElementById('kl-mat');
+  const stEl = document.getElementById('kl-status');
+  if (matEl) matEl.value = '';
+  if (stEl) stEl.value = '';
+  taiKhoLot();
+};
 
 async function taiManhDu() {
   let offcuts = await fetch('/api/offcuts').then(r => r.json());
@@ -4445,7 +4434,7 @@ async function taiManhDu() {
   }
 
   const tbody = document.getElementById('table-offcuts-body');
-  if (offcuts.length === 0) { tbody.innerHTML = '<tr><td colspan="10" class="text-center muted" style="padding:20px">Không có mảnh dư nào.</td></tr>'; return; }
+  if (offcuts.length === 0) { tbody.innerHTML = '<tr><td colspan="11" class="text-center muted" style="padding:20px">Không có mảnh dư nào.</td></tr>'; return; }
   tbody.innerHTML = offcuts.map(o => `<tr>
     <td><strong>${o.offcut_id}</strong></td>
     <td>${o.parent_lot_id || '—'}</td>
@@ -4453,12 +4442,21 @@ async function taiManhDu() {
     <td>${o.width_m} m</td>
     <td>${o.length_m} m</td>
     <td>${o.area_m2} m²</td>
-    <td>${o.is_locked ? '<span style="color:var(--red-light)"><i class="fa-solid fa-lock"></i></span>' : '<span style="color:var(--text-muted)">—</span>'}</td>
-    <td>${o.storage_location}</td>
-    <td>${o.import_date}</td>
+    <td>${o.is_locked ? '<span style="color:var(--red-light)"><i class="fa-solid fa-lock" style="margin-right:4px;"></i>Khóa</span>' : '<span style="color:var(--text-muted)">—</span>'}</td>
+    <td>${o.storage_location || '—'}</td>
+    <td>Admin</td>
+    <td>${o.import_date || '—'}</td>
     <td>${trangThaiBadge(o._eff_status)}</td>
   </tr>`).join('');
 }
+
+window.resetFilterOffcuts = function() {
+  const qEl = document.getElementById('oc-q');
+  const stEl = document.getElementById('oc-status');
+  if (qEl) qEl.value = '';
+  if (stEl) stEl.value = '';
+  taiManhDu();
+};
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // BÁO CÁO THÁNG
@@ -4588,5 +4586,171 @@ document.addEventListener('DOMContentLoaded', () => {
   taiTongQuan();
   taiThongBao();
   setInterval(taiThongBao, 30000);
+  document.getElementById('tab-norms')?.addEventListener('click', (ev) => {
+    const fa = ev.target.closest('[data-flt-act]');
+    if (fa) {
+      const act = fa.getAttribute('data-flt-act');
+      if (act === 'norms-apply') { applyCustomerFilters('norms'); taiDinhMucPhim(); return; }
+      if (act === 'norms-clear') { clearCustomerFilters('norms'); taiDinhMucPhim(); return; }
+      if (act === 'norms-refresh') { clearCustomerFilters('norms'); taiDinhMucPhim(); return; }
+      if (act === 'norms-add') { window.moFormNorm(''); return; }
+    }
+  });
+  document.getElementById('tab-norms')?.addEventListener('input', (ev) => {
+    if (ev.target.id === 'flt-n-q' || ev.target.id === 'flt-n-model') __debNormQ();
+  });
+  document.getElementById('tab-norms')?.addEventListener('change', (ev) => {
+    if (ev.target.id.startsWith('flt-n-')) __debNormQ();
+  });
+  document.getElementById('tab-norms')?.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter') {
+      const id = ev.target.id;
+      if (id.startsWith('flt-n-')) {
+        ev.preventDefault();
+        applyCustomerFilters('norms');
+        taiDinhMucPhim();
+      }
+    }
+  });
+
   _wireReasonModalOnce();
 });
+
+
+
+async function taiDinhMucPhim() {
+  ensureCustFilters();
+  _ensureModelDatalist();
+  await refreshModelDatalistFromApi();
+  const fn = window._custF.norms;
+  try {
+    const res = await fetch('/api/vehicle-norms' + buildQuery({ ...fn, with_meta: '1' }));
+    const data = await res.json();
+    const norms = (data.items || data.norms || []);
+    const nTotal = data.total || norms.length;
+    
+    let html = `
+      <div class="cust-filter-bar">
+        <div class="cust-filter-grid">
+          <div class="dyc-field dyc-field-span2"><label>Tìm kiếm</label>
+            <input id="flt-n-q" placeholder="Tìm theo mã định mức, dòng xe, năm model..." value="${_esc(fn.q)}" autocomplete="off" /></div>
+          <div class="dyc-field"><label>Loại phim</label>
+            <select id="flt-n-film">
+              <option value=""${fn.film_type === '' ? ' selected' : ''}>Tất cả</option>
+              <option value="Phim cách nhiệt"${fn.film_type === 'Phim cách nhiệt' ? ' selected' : ''}>Phim cách nhiệt</option>
+              <option value="Phim PPF"${fn.film_type === 'Phim PPF' ? ' selected' : ''}>Phim PPF</option>
+            </select></div>
+          <div class="dyc-field"><label>Dòng xe</label>
+            <input id="flt-n-model" list="dyc-model-datalist" placeholder="Chọn hoặc nhập dòng xe" value="${_esc(fn.vehicle_model_code)}" autocomplete="off" /></div>
+          <div class="dyc-field"><label>Năm model</label>
+            <select id="flt-n-year">${_yearOptionsHtml(fn.model_year)}</select></div>
+          <div class="dyc-field"><label>Trạng thái</label>
+            <select id="flt-n-status">
+              <option value=""${fn.status === '' ? ' selected' : ''}>Tất cả</option>
+              <option value="ACTIVE"${fn.status === 'ACTIVE' ? ' selected' : ''}>ACTIVE</option>
+              <option value="INACTIVE"${fn.status === 'INACTIVE' ? ' selected' : ''}>INACTIVE</option>
+            </select></div>
+          <div class="dyc-field"><label>Có kính lái</label>
+            <select id="flt-n-ws">
+              <option value=""${fn.has_windshield === '' ? ' selected' : ''}>Tất cả</option>
+              <option value="true"${fn.has_windshield === 'true' ? ' selected' : ''}>Có</option>
+              <option value="false"${fn.has_windshield === 'false' ? ' selected' : ''}>Không</option>
+            </select></div>
+          <div class="dyc-field"><label>Có kính trời</label>
+            <select id="flt-n-sun">
+              <option value=""${fn.has_sunroof === '' ? ' selected' : ''}>Tất cả</option>
+              <option value="true"${fn.has_sunroof === 'true' ? ' selected' : ''}>Có</option>
+              <option value="false"${fn.has_sunroof === 'false' ? ' selected' : ''}>Không</option>
+            </select></div>
+          <div class="dyc-field"><label>Sườn sau + tam giác</label>
+            <select id="flt-n-sst">
+              <option value=""${fn.has_rear_side_triangle === '' ? ' selected' : ''}>Tất cả</option>
+              <option value="true"${fn.has_rear_side_triangle === 'true' ? ' selected' : ''}>Có</option>
+              <option value="false"${fn.has_rear_side_triangle === 'false' ? ' selected' : ''}>Không</option>
+            </select></div>
+        </div>
+        <div class="cust-filter-actions">
+          <button type="button" class="btn btn-outline btn-sm" data-flt-act="norms-refresh">Làm mới</button>
+          <button type="button" class="btn btn-primary btn-sm" id="btn-norm-add" data-flt-act="norms-add">Thêm định mức</button>
+        </div>
+        <div class="cust-filter-meta">Tổng số định mức sau lọc: <strong id="flt-n-total">${nTotal}</strong></div>
+        <div class="filter-chips-row" id="flt-n-chips"></div>
+      </div>
+      ${norms.length === 0 ? '<div class="empty-state cust-empty"><p>Chưa có định mức phù hợp với dòng xe đã chọn.</p></div>' : `
+      <div class="table-wrap table-norms-excel-wrap"><table class="data-table table-norms-excel"><thead><tr>
+        <th>Mã định mức</th>
+        <th>Loại phim</th>
+        <th>Dòng xe</th>
+        <th>Năm model</th>
+        <th>Kính lái</th>
+        <th>Kính hậu</th>
+        <th>Sườn trước</th>
+        <th>Sườn sau + TG</th>
+        <th>Kính trời</th>
+        <th>Sườn sau</th>
+        <th>Tam giác</th>
+        <th>TT</th>
+        <th></th>
+      </tr></thead><tbody>
+      ${norms.map(n => `<tr>
+        <td><strong>${_esc(n.norm_id)}</strong></td>
+        <td>${_esc(n.film_type)}</td>
+        <td>${_esc(n.vehicle_model_code)}</td>
+        <td>${_esc(n.model_year_range || 'ALL')}</td>
+        <td>${_normSizeDisplay(n, 'windshield_size', 'windshield_width_cm', 'windshield_length_cm')}</td>
+        <td>${_normSizeDisplay(n, 'rear_window_size', 'rear_window_width_cm', 'rear_window_length_cm')}</td>
+        <td>${_normSizeDisplay(n, 'front_side_size', 'front_side_width_cm', 'front_side_length_cm')}</td>
+        <td>${_normSizeDisplay(n, 'rear_side_triangle_size', 'rear_side_triangle_width_cm', 'rear_side_triangle_length_cm')}</td>
+        <td>${_normSizeDisplay(n, 'sunroof_size', 'sunroof_width_cm', 'sunroof_length_cm')}</td>
+        <td>${_normSizeDisplay(n, 'rear_side_size', 'rear_side_width_cm', 'rear_side_length_cm')}</td>
+        <td>${_normSizeDisplay(n, 'triangle_size', 'triangle_width_cm', 'triangle_length_cm')}</td>
+        <td>${_esc(n.status)}</td>
+        <td style="white-space:nowrap">
+          <button type="button" class="btn btn-outline btn-sm" onclick="moFormNorm('${n.norm_id}')">Sửa</button>
+          ${n.status === 'ACTIVE'
+            ? `<button type="button" class="btn btn-outline btn-sm" onclick="moToggleNorm('${n.norm_id}','deactivate')">Inactive</button>`
+            : `<button type="button" class="btn btn-outline btn-sm" onclick="moToggleNorm('${n.norm_id}','activate')">Active</button>`}
+        </td>
+      </tr>`).join('')}
+      </tbody></table></div>`}
+    `;
+    
+    const activeId = document.activeElement?.id;
+    let activeStart, activeEnd;
+    if (activeId && document.activeElement.tagName === 'INPUT') {
+      activeStart = document.activeElement.selectionStart;
+      activeEnd = document.activeElement.selectionEnd;
+    }
+    
+    document.getElementById('norms-container').innerHTML = html;
+    
+    if (activeId) {
+      const el = document.getElementById(activeId);
+      if (el) {
+        el.focus();
+        if (activeStart !== undefined && el.setSelectionRange) {
+          el.setSelectionRange(activeStart, activeEnd);
+        }
+      }
+    }
+    
+    _normFilterChips(fn, (key) => {
+      window._custF.norms[key] = '';
+      taiDinhMucPhim();
+    });
+
+  } catch (err) {
+    console.error(err);
+    document.getElementById('norms-container').innerHTML = '<div class="alert error">Lỗi tải dữ liệu định mức phim</div>';
+  }
+};
+
+function fillDefaultDateTimes() {
+  const now = new Date();
+  const pad = n => n.toString().padStart(2, '0');
+  const str = `${pad(now.getHours())}:${pad(now.getMinutes())} ${pad(now.getDate())}/${pad(now.getMonth()+1)}/${now.getFullYear()}`;
+  const rd = document.getElementById('mc-req-date');
+  const dd = document.getElementById('mc-deliv-date');
+  if (rd && !rd.value) rd.value = str;
+  if (dd && !dd.value) dd.value = str;
+}

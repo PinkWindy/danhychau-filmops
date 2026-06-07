@@ -352,14 +352,56 @@
       <div class="edit-section" id="wa-summary-box"><div class="edit-section-title"><i class="fa-solid fa-scale-balanced" style="color:var(--teal-light)"></i> Kiểm tra (Full xe)</div>
         <div id="wa-alloc-summary"></div><div id="wa-alloc-warn" style="display:none;margin-top:8px;padding:8px;border-radius:8px;background:rgba(255,152,0,0.12);color:var(--amber);font-size:12px;font-weight:600"></div></div>
       <input type="hidden" id="wa-ppf-req-total" value="${alloc.required_total_length_m != null ? alloc.required_total_length_m : 13}">
-      ${teamBlock(ws)}`;
+      ${teamBlock(ctx)}`;
   }
 
-  function teamBlock(ws) {
+  function teamBlock(ctx) {
+    const ws = ctx.ws || {};
+    const isPpf = ws.workstream_type === 'PPF_INSTALLATION';
+    const tgtType = isPpf ? 'PPF' : 'Phim cách nhiệt';
+    
+    let defaultTeam = ws.technician_team || '';
+    let defaultTechName = ws.assigned_technician_name || '';
+    
+    const availTeams = (ctx.hrTeams || []).filter(t => t.team_type === tgtType || !t.team_type);
+    if (!defaultTeam && availTeams.length > 0) {
+      defaultTeam = availTeams[0].team_name;
+    }
+    
+    let teamOpts = '<option value="">-- Chọn Đội --</option>';
+    if (availTeams.length > 0) {
+      availTeams.forEach(t => {
+        const sel = t.team_name === defaultTeam ? 'selected' : '';
+        teamOpts += `<option value="${esc(t.team_name)}" data-id="${t.team_id}" ${sel}>${esc(t.team_name)}</option>`;
+      });
+    } else {
+      teamOpts += `<option value="${esc(defaultTeam)}" selected>${esc(defaultTeam)}</option>`;
+    }
+
+    let availTechs = [];
+    const selT = availTeams.find(t => t.team_name === defaultTeam);
+    if (selT && selT.members) {
+      availTechs = selT.members;
+    }
+    if (!defaultTechName && availTechs.length > 0) {
+      const leader = availTechs.find(m => m.role === 'LEADER') || availTechs[0];
+      if (leader) defaultTechName = leader.full_name;
+    }
+    
+    let techOpts = '<option value="">-- Chọn KTV --</option>';
+    if (availTechs.length > 0) {
+      availTechs.forEach(m => {
+        const sel = m.full_name === defaultTechName ? 'selected' : '';
+        techOpts += `<option value="${esc(m.full_name)}" data-id="${m.staff_id}" ${sel}>${esc(m.full_name)}</option>`;
+      });
+    } else {
+      techOpts += `<option value="${esc(defaultTechName)}" selected>${esc(defaultTechName)}</option>`;
+    }
+
     return `<div class="edit-section"><div class="edit-section-title"><i class="fa-solid fa-users"></i> Đội KTV</div>
-      <div class="form-grid" style="gap:12px"><div class="field-group"><label>Tên đội</label>
-        <input type="text" id="wa-edit-team" class="field-input" value="${esc(ws.technician_team || '')}"></div>
-      <div class="field-group"><label>KTV</label><input type="text" id="wa-edit-tech" class="field-input" value="${esc(ws.assigned_technician_name || '')}"></div></div></div>`;
+      <div class="form-grid" style="gap:12px"><div class="field-group"><label>Tên Đội</label>
+        <select id="wa-edit-team" class="field-input">${teamOpts}</select></div>
+      <div class="field-group"><label>KTV</label><select id="wa-edit-tech" class="field-input">${techOpts}</select></div></div></div>`;
   }
 
   function wfSourceStackHtml(it, rowOpts) {
@@ -388,6 +430,39 @@
 
   function renderWfBody(ctx) {
     const { alloc, lots, offcuts, ws } = ctx;
+
+    // --- RECALCULATE required_length_m ---
+    const items = (alloc.items || []).filter(x => x && x.item_code);
+    const byCode = {};
+    items.forEach(x => byCode[x.item_code] = x);
+
+    items.forEach(it => {
+      const w = parseFloat(it.required_width_cm) || 0;
+      const l = parseFloat(it.required_length_cm) || 0;
+      if (w > 0 && l > 0) {
+        it.required_length_m = Math.round(Math.min(w, l)) / 100;
+      }
+    });
+
+    const r = byCode.REAR_WINDOW;
+    const f = byCode.FRONT_SIDE;
+    if (r && f && r.is_selected && f.is_selected) {
+      const mcR = String(r.material_code || '').trim().toUpperCase();
+      const mcF = String(f.material_code || '').trim().toUpperCase();
+      if (mcR && mcR === mcF) {
+        const rw = parseFloat(r.required_width_cm) || 0;
+        const rl = parseFloat(r.required_length_cm) || 0;
+        const fw = parseFloat(f.required_width_cm) || 0;
+        const fl = parseFloat(f.required_length_cm) || 0;
+        if (rw > 0 && rl > 0 && fw > 0 && fl > 0 && Math.abs(rl - fl) <= 1 && (rw + fw) <= 152) {
+          const commonL = Math.max(rl, fl) / 100;
+          r.required_length_m = Math.round((commonL / 2) * 100) / 100;
+          f.required_length_m = commonL - r.required_length_m;
+        }
+      }
+    }
+    // -------------------------------------
+
     const rowOpts = ctx.wfRowOpts || {};
     const nm = ctx.normMeta || {};
     const nid = (nm.norm_id && String(nm.norm_id)) || '';
@@ -436,7 +511,7 @@
         </tr></thead><tbody>${rows}</tbody></table></div></div>
       <div class="edit-section" id="wa-summary-box"><div class="edit-section-title"><i class="fa-solid fa-scale-balanced" style="color:var(--teal-light)"></i> Kiểm tra từng hạng mục</div>
         <div id="wa-alloc-summary"></div><div id="wa-alloc-warn" style="display:none;margin-top:8px;padding:8px;border-radius:8px;background:rgba(255,152,0,0.12);color:var(--amber);font-size:12px;font-weight:600"></div></div>
-      ${teamBlock(ws)}`;
+      ${teamBlock(ctx)}`;
   }
 
   function computeWfRollCutSummary(alloc) {
@@ -558,33 +633,73 @@
         w.textContent = ok ? '' : `PPF Full xe cần ${req}m — nguồn chưa đủ.`;
       }
     } else {
-      const sum = computeWfRollCutSummary(a);
       let matBad = false;
-      html +=
-        '<div style="margin-bottom:10px;padding:10px;background:rgba(0,60,120,0.22);border-radius:8px;font-size:12px;line-height:1.45"><div style="font-weight:700;margin-bottom:6px">Gộp khổ → tổng mét trừ LOT (theo mã vật tư)</div>' +
-        (sum.lines_html || '') +
-        '<div class="edit-hint" style="margin-top:6px">Tổng mét nhập theo từng hạng mục cùng mã vật tư phải ≥ tổng mét gộp khổ ở trên.</div></div>';
-      const by = sum.by_material || {};
-      Object.keys(by)
-        .sort()
-        .forEach((mc) => {
-          const need = parseFloat(by[mc].total_roll_strip_m) || 0;
-          let got = 0;
-          (a.items || []).forEach((it) => {
-            if (!it.is_selected || String(it.material_code || '').trim().toUpperCase() !== mc) return;
-            (it.sources || []).forEach((s) => {
-              got += parseFloat(s.allocated_length_m) || 0;
-            });
-          });
-          const ok = need <= 1e-9 || got + 1e-6 >= need;
-          if (!ok) matBad = true;
-          const label = need <= 1e-9 ? '—' : ok ? 'Đủ' : 'Thiếu';
-          const col = need <= 1e-9 ? 'var(--text-secondary)' : ok ? 'var(--teal-light)' : 'var(--amber)';
-          html += `${esc(mc)}: gộp khổ cần <strong>${need.toFixed(2)}m</strong> (${Math.round(need * 100)} cm chạy cuộn) — đã phân <strong>${got.toFixed(2)}m</strong> — <span style="color:${col}">${label}</span><br>`;
+      const byLot = {};
+      
+      let tableHtml = `<table class="data-table" style="width:100%;font-size:12px;margin-bottom:12px">
+        <thead>
+          <tr style="text-align:left;background:rgba(255,255,255,0.05)">
+            <th>Hạng mục</th>
+            <th>Nguồn (LOT/Mảnh)</th>
+            <th>Yêu cầu cắt gộp (m)</th>
+            <th>Số mét cắt (m)</th>
+            <th>Kết quả</th>
+          </tr>
+        </thead>
+        <tbody>`;
+
+      (a.items || []).forEach((it) => {
+        if (!it.is_selected) return;
+        const reqM = parseFloat(it.required_length_m) || 0;
+        let gotM = 0;
+        let sourcesArr = [];
+
+        (it.sources || []).forEach((s) => {
+          const len = parseFloat(s.allocated_length_m) || 0;
+          gotM += len;
+          if (len > 0) {
+            const sid = (s.source_id || 'Chưa chọn LOT').toUpperCase();
+            sourcesArr.push(sid);
+            if (!byLot[sid]) byLot[sid] = 0;
+            byLot[sid] += len;
+          }
         });
+
+        const ok = Math.abs(reqM - gotM) <= 0.001;
+        if (!ok && reqM > 0) matBad = true;
+
+        const label = ok ? 'Đủ' : 'Thiếu';
+        const col = ok ? 'var(--teal-light)' : 'var(--amber)';
+        const sourcesStr = sourcesArr.length > 0 ? sourcesArr.join(', ') : '—';
+
+        tableHtml += `<tr>
+          <td><strong>${esc(it.item_name)}</strong></td>
+          <td>${esc(sourcesStr)}</td>
+          <td>${reqM.toFixed(2)}</td>
+          <td>${gotM.toFixed(2)}</td>
+          <td style="color:${col};font-weight:600">${label}</td>
+        </tr>`;
+      });
+      
+      tableHtml += `</tbody></table>`;
+
+      html += tableHtml;
+      
+      html += '<div style="margin-bottom:10px;padding:10px;background:rgba(0,60,120,0.22);border-radius:8px;font-size:12px;line-height:1.45"><div style="font-weight:700;margin-bottom:6px">Tổng hợp cắt khổ (152cm) theo LOT</div>';
+      
+      const lotKeys = Object.keys(byLot).sort();
+      if (lotKeys.length > 0) {
+        lotKeys.forEach(sid => {
+          html += `<div style="margin-bottom:4px"><strong>LOT ${esc(sid)}</strong>: Tổng chiều dài cắt là <strong>${byLot[sid].toFixed(2)}m</strong> x 152cm</div>`;
+        });
+      } else {
+        html += `<div>Chưa có dữ liệu phân bổ theo LOT</div>`;
+      }
+      html += '</div>';
+
       if (w) {
         w.style.display = matBad ? 'block' : 'none';
-        w.textContent = matBad ? 'Tổng mét theo mã vật tư chưa đạt mức gộp khổ cần trừ LOT.' : '';
+        w.textContent = matBad ? 'Vui lòng nhập số mét cắt khớp với Yêu cầu cắt gộp cho mỗi hạng mục.' : '';
       }
     }
     el.innerHTML = html;
