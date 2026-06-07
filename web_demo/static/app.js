@@ -1764,7 +1764,7 @@ document.getElementById('modal-quick-ok')?.addEventListener('click', async () =>
         legal_name: document.getElementById('qc-dealer-legal').value.trim() || null,
         dealer_group: document.getElementById('qc-dealer-group').value.trim() || null,
         address: document.getElementById('qc-dealer-addr').value.trim() || null,
-        phone_masked: document.getElementById('qc-dealer-phone').value.trim() || null,
+        phone: document.getElementById('qc-dealer-phone').value.trim() || null,
         created_by: actor,
         note: document.getElementById('qc-dealer-note').value.trim() || null,
       };
@@ -1775,9 +1775,9 @@ document.getElementById('modal-quick-ok')?.addEventListener('click', async () =>
     } else if (_mcQuickMode === 'customer') {
       const body = {
         customer_id: document.getElementById('qc-cust-id').value.trim(),
-        customer_masked: document.getElementById('qc-cust-mask').value.trim(),
-        phone_masked: document.getElementById('qc-cust-phone').value.trim() || null,
-        address_masked: document.getElementById('qc-cust-addr').value.trim() || null,
+        customer_name: document.getElementById('qc-cust-mask').value.trim(),
+        phone: document.getElementById('qc-cust-phone').value.trim() || null,
+        address: document.getElementById('qc-cust-addr').value.trim() || null,
         source_dealer_id: document.getElementById('mc-dealer-select').value || null,
         source_channel: 'DEALER',
         created_by: actor,
@@ -1794,7 +1794,7 @@ document.getElementById('modal-quick-ok')?.addEventListener('click', async () =>
         dealer_id: document.getElementById('mc-dealer-select').value || null,
         vehicle_model_code: document.getElementById('qc-veh-code').value.trim(),
         model_name: document.getElementById('qc-veh-model').value.trim(),
-        vin_masked: document.getElementById('qc-veh-vin').value.trim(),
+        vin_number: document.getElementById('qc-veh-vin').value.trim(),
         delivery_date: document.getElementById('qc-veh-deliv').value || null,
         created_by: actor,
         note: document.getElementById('qc-veh-note').value.trim() || null,
@@ -1821,17 +1821,17 @@ document.getElementById('mc-btn-quick-dealer')?.addEventListener('click', () => 
     'Tạo đại lý nhanh',
     `
 <div class="dyc-modal-form">
-  <div class="dyc-field"><label>dealer_id</label><input id="qc-dealer-id" value="${sug}" /></div>
-  <div class="dyc-field"><label>dealer_name</label><input id="qc-dealer-name" /></div>
+  <div class="dyc-field"><label>Mã đại lý</label><input id="qc-dealer-id" value="${sug}" /></div>
+  <div class="dyc-field"><label>Tên đại lý</label><input id="qc-dealer-name" /></div>
   <div class="dyc-form-row-2">
-    <div class="dyc-field"><label>legal_name</label><input id="qc-dealer-legal" /></div>
-    <div class="dyc-field"><label>dealer_group</label><input id="qc-dealer-group" /></div>
+    <div class="dyc-field"><label>Tên pháp lý</label><input id="qc-dealer-legal" /></div>
+    <div class="dyc-field"><label>Nhóm đại lý</label><input id="qc-dealer-group" /></div>
   </div>
   <div class="dyc-form-row-2">
-    <div class="dyc-field"><label>address_masked</label><input id="qc-dealer-addr" value="ADDRESS_MASKED" /></div>
-    <div class="dyc-field"><label>phone_masked</label><input id="qc-dealer-phone" value="PHONE_MASKED" /></div>
+    <div class="dyc-field"><label>Địa chỉ</label><input id="qc-dealer-addr" /></div>
+    <div class="dyc-field"><label>Số điện thoại</label><input id="qc-dealer-phone" /></div>
   </div>
-  <div class="dyc-field"><label>note</label><input id="qc-dealer-note" /></div>
+  <div class="dyc-field"><label>Ghi chú</label><input id="qc-dealer-note" /></div>
 </div>`,
     { wide: true },
   );
@@ -1843,13 +1843,13 @@ document.getElementById('mc-btn-quick-cust')?.addEventListener('click', () => {
     'Tạo khách hàng nhanh',
     `
 <div class="dyc-modal-form">
-  <div class="dyc-field"><label>customer_id</label><input id="qc-cust-id" value="${sug}" /></div>
-  <div class="dyc-field"><label>customer_masked</label><input id="qc-cust-mask" value="KH_MASKED_Q" /></div>
+  <div class="dyc-field"><label>Mã khách hàng</label><input id="qc-cust-id" value="${sug}" /></div>
+  <div class="dyc-field"><label>Tên khách hàng</label><input id="qc-cust-mask" /></div>
   <div class="dyc-form-row-2">
-    <div class="dyc-field"><label>phone_masked</label><input id="qc-cust-phone" /></div>
-    <div class="dyc-field"><label>address_masked</label><input id="qc-cust-addr" /></div>
+    <div class="dyc-field"><label>Số điện thoại</label><input id="qc-cust-phone" /></div>
+    <div class="dyc-field"><label>Địa chỉ</label><input id="qc-cust-addr" /></div>
   </div>
-  <div class="dyc-field"><label>note</label><input id="qc-cust-note" /></div>
+  <div class="dyc-field"><label>Ghi chú</label><input id="qc-cust-note" /></div>
 </div>`,
     { wide: true },
   );
@@ -1861,16 +1861,16 @@ document.getElementById('mc-btn-quick-veh')?.addEventListener('click', () => {
     'Tạo xe nhanh',
     `
 <div class="dyc-modal-form">
-  <div class="dyc-field"><label>vehicle_id</label><input id="qc-veh-id" value="${sug}" /></div>
+  <div class="dyc-field"><label>Mã xe</label><input id="qc-veh-id" value="${sug}" /></div>
   <div class="dyc-form-row-2">
-    <div class="dyc-field"><label>vehicle_model_code</label><input id="qc-veh-code" value="LEXUS_RX350" /></div>
-    <div class="dyc-field"><label>model_name</label><input id="qc-veh-model" value="Lexus RX350" /></div>
+    <div class="dyc-field"><label>Mã dòng xe</label><input id="qc-veh-code" value="LEXUS_RX350" /></div>
+    <div class="dyc-field"><label>Tên dòng xe</label><input id="qc-veh-model" value="Lexus RX350" /></div>
   </div>
   <div class="dyc-form-row-2">
-    <div class="dyc-field"><label>vin_masked</label><input id="qc-veh-vin" value="VIN_MASKED_Q" /></div>
-    <div class="dyc-field"><label>delivery_date</label><input id="qc-veh-deliv" type="date" /></div>
+    <div class="dyc-field"><label>Số VIN</label><input id="qc-veh-vin" /></div>
+    <div class="dyc-field"><label>Ngày giao xe</label><input id="qc-veh-deliv" type="date" /></div>
   </div>
-  <div class="dyc-field"><label>note</label><input id="qc-veh-note" /></div>
+  <div class="dyc-field"><label>Ghi chú</label><input id="qc-veh-note" /></div>
 </div>`,
     { wide: true },
   );
@@ -4062,7 +4062,10 @@ async function loadOffcuts() {
   const qq = document.getElementById('inv-oc-q')?.value?.trim();
   if (qq) q.set('q', qq);
   const rows = await fetch('/api/inventory/offcuts?' + q.toString()).then(r => r.json());
-  const eff = (o) => o.offcut_status || o.status || 'AVAILABLE';
+  const eff = (o) => {
+    if ((o.area_m2 || 0) <= 0 || (o.length_m || 0) <= 0 || (o.width_m || 0) <= 0) return 'CLEARED';
+    return o.offcut_status || o.status || 'AVAILABLE';
+  };
   document.getElementById('inv-table-offcuts').innerHTML = rows.length ? rows.map(o => {
     const e = eff(o);
     const q = o.quality_status || '—';
@@ -4229,11 +4232,11 @@ window.submitImportOffcut = async function() {
 window.openManualIssueLotModal = function(lotId) {
   openInvModal('Xuất LOT thủ công — ' + lotId, `
     <div class="form-grid">
-      <div class="field-group"><label>issue_length_m <span class="req">*</span></label><input type="number" id="mil-len" class="field-input" step="0.01" min="0.01"></div>
-      <div class="field-group full-width"><label>reason <span class="req">*</span></label><input id="mil-reason" class="field-input"></div>
-      <div class="field-group"><label>performed_by</label><input id="mil-by" class="field-input" value="QL-002"></div>
-      <div class="field-group"><label>admin_override</label><select id="mil-ov" class="field-input"><option value="false">Không</option><option value="true">Có</option></select></div>
-      <div class="field-group full-width"><label>note</label><input id="mil-note" class="field-input"></div>
+      <div class="field-group"><label>Chiều dài xuất (m) <span class="req">*</span></label><input type="number" id="mil-len" class="field-input" step="0.01" min="0.01"></div>
+      <div class="field-group full-width"><label>Lý do <span class="req">*</span></label><input id="mil-reason" class="field-input"></div>
+      <div class="field-group"><label>Thực hiện bởi</label><input id="mil-by" class="field-input" value="QL-002"></div>
+      <div class="field-group"><label>Admin xác nhận</label><select id="mil-ov" class="field-input"><option value="false">Không</option><option value="true">Có</option></select></div>
+      <div class="field-group full-width"><label>Ghi chú</label><input id="mil-note" class="field-input"></div>
     </div>`, `<button type="button" class="btn btn-outline" onclick="closeInvModal()">Hủy</button>
     <button type="button" class="btn btn-primary" onclick="submitManualIssueLot('${lotId}')">Xuất kho</button>`);
 };
@@ -4371,12 +4374,12 @@ window.openReleaseLockModal = function(st, sid) {
   _rlId = sid || '';
   openInvModal('Mở khóa Soft Lock', `
     <div class="form-grid">
-      <div class="field-group"><label>source_type</label>
+      <div class="field-group"><label>Loại nguồn</label>
         <select id="rl-st" class="field-input"><option value="LOT" ${_rlType==='LOT'?'selected':''}>LOT</option><option value="OFFCUT" ${_rlType==='OFFCUT'?'selected':''}>OFFCUT</option></select></div>
-      <div class="field-group"><label>source_id <span class="req">*</span></label><input id="rl-sid" class="field-input" value="${_rlId}"></div>
-      <div class="field-group full-width"><label>reason <span class="req">*</span></label><input id="rl-reason" class="field-input"></div>
-      <div class="field-group"><label>performed_by</label><input id="rl-by" class="field-input" value="QL-002"></div>
-      <div class="field-group"><label>related_request_id</label><input id="rl-rid" class="field-input" placeholder="REQ-..."></div>
+      <div class="field-group"><label>Mã nguồn <span class="req">*</span></label><input id="rl-sid" class="field-input" value="${_rlId}"></div>
+      <div class="field-group full-width"><label>Lý do <span class="req">*</span></label><input id="rl-reason" class="field-input"></div>
+      <div class="field-group"><label>Thực hiện bởi</label><input id="rl-by" class="field-input" value="QL-002"></div>
+      <div class="field-group"><label>Mã yêu cầu liên quan</label><input id="rl-rid" class="field-input" placeholder="REQ-..."></div>
     </div>`, `<button type="button" class="btn btn-outline" onclick="closeInvModal()">Hủy</button>
     <button type="button" class="btn btn-primary" onclick="submitReleaseLock()">Mở khóa</button>`);
 };
@@ -4420,7 +4423,27 @@ async function taiKhoLot() {
 }
 
 async function taiManhDu() {
-  const offcuts = await fetch('/api/offcuts').then(r => r.json());
+  let offcuts = await fetch('/api/offcuts').then(r => r.json());
+  
+  const statusEl = document.getElementById('oc-status');
+  const filterStatus = statusEl ? statusEl.value : '';
+
+  offcuts.forEach(o => {
+    let eff = (o.offcut_status || o.status || 'AVAILABLE').toUpperCase();
+    if (eff === 'ACTIVE') eff = 'AVAILABLE';
+    if ((o.area_m2 <= 0 || o.area_m2 === "0.0") && (eff === 'AVAILABLE' || eff === 'ACTIVE')) {
+      eff = 'USED';
+    }
+    o._eff_status = eff;
+  });
+
+  if (filterStatus === '') {
+    // Mặc định: Đang hoạt động (AVAILABLE, IN_USE, NEW...)
+    offcuts = offcuts.filter(o => o._eff_status === 'AVAILABLE' || o._eff_status === 'ACTIVE' || o._eff_status === 'PARTIALLY_USED');
+  } else if (filterStatus !== 'ALL') {
+    offcuts = offcuts.filter(o => o._eff_status === filterStatus);
+  }
+
   const tbody = document.getElementById('table-offcuts-body');
   if (offcuts.length === 0) { tbody.innerHTML = '<tr><td colspan="10" class="text-center muted" style="padding:20px">Không có mảnh dư nào.</td></tr>'; return; }
   tbody.innerHTML = offcuts.map(o => `<tr>
@@ -4433,7 +4456,7 @@ async function taiManhDu() {
     <td>${o.is_locked ? '<span style="color:var(--red-light)"><i class="fa-solid fa-lock"></i></span>' : '<span style="color:var(--text-muted)">—</span>'}</td>
     <td>${o.storage_location}</td>
     <td>${o.import_date}</td>
-    <td>${trangThaiBadge(o.status)}</td>
+    <td>${trangThaiBadge(o._eff_status)}</td>
   </tr>`).join('');
 }
 

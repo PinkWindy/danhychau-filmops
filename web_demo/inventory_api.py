@@ -50,6 +50,12 @@ def _norm_lot_status(lot: DbLotInventory) -> str:
 
 
 def _norm_offcut_status(o: DbOffcutInventory) -> str:
+    if (o.area_m2 or 0) <= 0 or (o.length_m or 0) <= 0 or (o.width_m or 0) <= 0:
+        s = (o.offcut_status or o.status or "CLEARED").upper()
+        if s in ("ACTIVE", "AVAILABLE", "USED"):
+            return "CLEARED"
+        return s
+
     s = (o.offcut_status or o.status or "AVAILABLE").upper()
     if s == "ACTIVE":
         return "AVAILABLE"
@@ -716,13 +722,13 @@ def register_inventory_routes(app, get_db):
             oc.width_m = 0.0
             oc.length_m = 0.0
             oc.area_m2 = 0.0
-            oc.offcut_status = "USED"
+            oc.offcut_status = "CLEARED"
 
         issued_area = round(issue_w * issue_l, 3)
 
         if abs(issue_w - w0) < eps and abs(issue_l - l0) < eps:
             consume_full()
-            new_status = "USED"
+            new_status = "CLEARED"
         elif abs(issue_w - w0) < eps:
             new_len = round(l0 - issue_l, 3)
             if new_len < -eps:
