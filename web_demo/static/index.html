@@ -1421,8 +1421,16 @@
           <input type="text" id="dealer-crud-id" class="field-input" placeholder="Ví dụ: DL-001">
         </div>
         <div class="form-group" style="margin-bottom: 12px;">
-          <label style="display:block; margin-bottom: 4px; font-weight: bold; font-size: 13px;">Tên Đại Lý *</label>
-          <input type="text" id="dealer-crud-name" class="field-input" placeholder="Ví dụ: Đại lý A">
+          <div style="display:flex; gap: 8px;">
+            <div style="flex:1">
+              <label style="display:block; margin-bottom: 4px; font-weight: bold; font-size: 13px;">Tên Đại Lý *</label>
+              <input type="text" id="dealer-crud-name" class="field-input" placeholder="Ví dụ: Đại lý A">
+            </div>
+            <div style="flex:1">
+              <label style="display:block; margin-bottom: 4px; font-weight: bold; font-size: 13px;">Nhóm đại lý</label>
+              <input type="text" id="dealer-crud-group" class="field-input" placeholder="Nhóm đại lý" list="dyc-dealer-group-datalist">
+            </div>
+          </div>
         </div>
         <div class="form-group" style="margin-bottom: 12px;">
           <label style="display:block; margin-bottom: 4px; font-weight: bold; font-size: 13px;">SĐT / MST / AMIS</label>

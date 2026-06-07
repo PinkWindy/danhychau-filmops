@@ -1152,6 +1152,7 @@ const histPropsConfig = {
   dealer: [
     { key: 'dealer_id', label: 'Mã đại lý' },
     { key: 'dealer_name', label: 'Tên đại lý' },
+    { key: 'dealer_group', label: 'Nhóm đại lý' },
     { key: 'tax_code', label: 'Mã số thuế' },
     { key: 'contact_phone', label: 'Số điện thoại' },
     { key: 'address_no', label: 'Số nhà' },
@@ -1238,10 +1239,11 @@ window.moDrawerCustomer = async function(id) {
   document.getElementById('drawer-title').textContent = 'Khách hàng — ' + id;
   
   let statsHtml = '';
-  if (h.requests_per_month || h.popular_models || h.completed_count !== undefined) {
+  if (h.requests_per_month || h.popular_models || h.completed_count !== undefined || h.vehicles || h.requests) {
      statsHtml = `<div style="margin-top:20px; padding-top:10px; border-top:1px solid #3b3b4f;"><h4 style="margin-bottom:12px;color:#fff;">Thống kê hoạt động</h4>`;
      statsHtml += `<div class="kpi-grid kpi-grid-compact" style="margin-bottom:12px;">
-        <div class="kpi-card" data-color="blue"><div class="kpi-val">${h.completed_count || 0}</div><div class="kpi-label">Số đơn hoàn thành</div></div>
+        <div class="kpi-card" data-color="blue"><div class="kpi-val">${h.completed_count || (h.requests ? h.requests.length : 0)}</div><div class="kpi-label">Số lần sử dụng dịch vụ</div></div>
+        <div class="kpi-card" data-color="purple"><div class="kpi-val">${h.vehicles ? h.vehicles.length : 0}</div><div class="kpi-label">Số lượng xe</div></div>
      </div>`;
      if (h.popular_models && h.popular_models.length > 0) {
        statsHtml += `<div style="margin-top:10px;font-size:12px;"><strong style="color:#aaa;">Dòng xe phổ biến:</strong> <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px;">${h.popular_models.map(m => `<span style="background:#2a2a3a;padding:2px 6px;border-radius:4px;border:1px solid #3b3b4f;">${_esc(m.model)} (${m.count})</span>`).join('')}</div></div>`;
