@@ -3745,9 +3745,9 @@ async function taiBangLuong() {
         <td><small>${fmtDt(w.completed_at)}</small></td>
         <td style="white-space:nowrap">
           ${w.status === 'PENDING_APPROVAL' && w.workstream_type === 'WINDOW_FILM_INSTALLATION' ? `<button class="btn btn-green btn-sm" onclick="moModalDuyetMaPhimWF('${w.workstream_id}')">Duyệt mã phim</button>` : ''}
-          ${w.status === 'PENDING_APPROVAL' && w.workstream_type !== 'WINDOW_FILM_INSTALLATION' ? `<button class="btn btn-green btn-sm" onclick="pheDuyetNhanhWs('${w.workstream_id}')">Duyệt</button>` : ''}
         </td>
         <td style="white-space:nowrap">
+          ${w.status === 'PENDING_APPROVAL' && w.workstream_type !== 'WINDOW_FILM_INSTALLATION' ? `<button class="btn btn-green btn-sm" onclick="pheDuyetNhanhWs('${w.workstream_id}')">Duyệt</button>` : ''}
           ${w.status === 'PENDING_TECH_PREFLIGHT' && w.workstream_type === 'WINDOW_FILM_INSTALLATION' ? `<button class="btn btn-outline btn-sm" onclick="chiinhSuaWs('${w.workstream_id}')">LOT</button><button class="btn btn-green btn-sm" style="margin-left:4px" onclick="pheDuyetNhanhWs('${w.workstream_id}')">Chốt</button>` : ''}
           ${w.status === 'APPROVED' ? `<button class="btn btn-blue btn-sm" onclick="batDauWs('${w.workstream_id}')">Bắt đầu</button>` : ''}
           ${w.status === 'IN_PROGRESS' ? `<button class="btn btn-primary btn-sm" onclick="moFormXacNhan('${w.workstream_id}')">Hoàn tất</button>` : ''}
@@ -3767,7 +3767,7 @@ async function xemNhanhDonThiCong(requestId, workstreamId) {
       alert('Không tìm thấy đơn');
       return;
     }
-    const ws = wss.find(x => x.workstream_id === workstreamId) || {};
+    const ws = await fetch('/api/workstreams/' + workstreamId).then(r => r.json()).catch(() => ({}));
     
     // fetch staff list to get phone number
     let staffs = [];
