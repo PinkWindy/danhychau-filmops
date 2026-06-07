@@ -2905,6 +2905,9 @@ async function hienThiTheLuong(requestId) {
   container.innerHTML = wss.map(ws => {
     const isPpf = ws.workstream_type === 'PPF_INSTALLATION';
     const typeClass = isPpf ? 'ppf' : 'wf';
+    const icon = isPpf ? 'fa-shield-film' : 'fa-window-restore';
+    const tenLoai = isPpf ? 'Dán Phim PPF' : 'Dán Phim Cách Nhiệt';
+    const matPlan = ws.material_plan ? (Array.isArray(ws.material_plan) ? ws.material_plan : JSON.parse(ws.material_plan || '[]')) : [];
     const progress = { 'PENDING_APPROVAL':0,'PENDING_TECH_PREFLIGHT':12,'APPROVED':30,'IN_PROGRESS':60,'ACTUAL_CONFIRMATION_REQUIRED':75,'COMPLETED':90,'CLOSED':100 }[ws.status] || 0;
     const tenPhim = { 'T-TYPE':'T-TYPE (Trong suốt)', 'M-TYPE':'M-TYPE (Mờ)', 'JB20':'JB20 (Cách nhiệt)', 'RT40':'RT40 (Kính lái)' };
 
