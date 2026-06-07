@@ -3127,31 +3127,72 @@ window.moModalDuyetMaPhimWF = async function (wsId) {
           </thead>
           <tbody>${rows}</tbody>
         </table>
-        <div class="field-group" style="margin-top:14px">
+        <div class="field-group" id="wf-appr-reason-group" style="margin-top:14px; display:none;">
           <label>Lý do / xác nhận <span style="color:var(--red-light)">*</span></label>
           <textarea id="wf-appr-reason" class="field-input" rows="2" placeholder="VD: Đồng ý RT40 kính lái, JB20 các kính còn lại theo đề xuất…"></textarea>
         </div>
       </div>
       <div class="demo-modal-footer" style="display:flex;gap:8px">
         <button type="button" class="btn btn-outline" onclick="document.getElementById('wf-material-approve-modal')?.remove()">Hủy</button>
-        <button type="button" class="btn btn-green" id="wf-appr-submit"><i class="fa-solid fa-check"></i> Xác nhận duyệt mã phim</button>
+        <button type="button" class="btn btn-green" id="wf-appr-submit"><i class="fa-solid fa-check"></i> Đồng ý (Giữ nguyên đề xuất)</button>
       </div>
     </div>`;
   document.body.appendChild(overlay);
+
+  const initialState = WF_MATERIAL_APPROVE_SCREEN1_JOBS.map((opt) => {
+    const p = planBy[opt.job_item] || {};
+    return {
+      ji: opt.job_item,
+      checked: !!opt.defaultOn,
+      mc: (p.material_code || 'JB20').trim()
+    };
+  });
+
+  const checkChanges = () => {
+    let hasChanges = false;
+    for (const st of initialState) {
+      const cb = document.getElementById(`wf-appr-chk-${st.ji}`);
+      const sel = document.getElementById(`wf-appr-mc-${st.ji}`);
+      if (!cb || !sel) continue;
+      if (cb.checked !== st.checked) { hasChanges = true; break; }
+      if (cb.checked && sel.value !== st.mc) { hasChanges = true; break; }
+    }
+    const reasonGroup = document.getElementById('wf-appr-reason-group');
+    const btn = document.getElementById('wf-appr-submit');
+    if (reasonGroup) reasonGroup.style.display = hasChanges ? 'block' : 'none';
+    if (btn) {
+      if (hasChanges) {
+        btn.innerHTML = '<i class="fa-solid fa-check"></i> Xác nhận duyệt mã phim';
+      } else {
+        btn.innerHTML = '<i class="fa-solid fa-check"></i> Đồng ý (Giữ nguyên đề xuất)';
+      }
+    }
+    return hasChanges;
+  };
+
   overlay.querySelectorAll('.wf-appr-chk').forEach((cb) => {
     cb.addEventListener('change', () => {
       const ji = cb.getAttribute('data-ji');
       const sel = document.getElementById(`wf-appr-mc-${ji}`);
       if (sel) sel.disabled = !cb.checked;
+      checkChanges();
     });
   });
+  overlay.querySelectorAll('.wf-appr-mc-sel').forEach((sel) => {
+    sel.addEventListener('change', checkChanges);
+  });
+
   const btn = document.getElementById('wf-appr-submit');
   if (!btn) return;
   btn.onclick = async () => {
-    const reason = (document.getElementById('wf-appr-reason')?.value || '').trim();
-    if (!reason) {
-      toast('warning', 'Thiếu lý do', 'Vui lòng nhập lý do xác nhận.');
+    const hasChanges = checkChanges();
+    let reason = (document.getElementById('wf-appr-reason')?.value || '').trim();
+    if (hasChanges && !reason) {
+      toast('warning', 'Thiếu lý do', 'Vui lòng nhập lý do xác nhận do có thay đổi.');
       return;
+    }
+    if (!hasChanges) {
+      reason = 'Duyệt theo đề xuất hệ thống (Không thay đổi)';
     }
     const outPlan = [];
     for (const opt of WF_MATERIAL_APPROVE_SCREEN1_JOBS) {
