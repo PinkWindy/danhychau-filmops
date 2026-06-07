@@ -1066,9 +1066,8 @@ async function taiKhachHang() {
           <div class="kpi-card" data-color="blue"><div class="kpi-val">${sum.total_vehicles}</div><div class="kpi-label">Tổng xe</div></div>
           <div class="kpi-card" data-color="orange"><div class="kpi-val">${sum.vehicles_without_customer}</div><div class="kpi-label">Chưa gắn KH</div></div>
         </div>
-        <div class="cust-subtabs" style="margin-bottom:10px">
-          <button class="veh-sub btn btn-sm ${vehSub === 'list' ? 'btn-primary' : 'btn-outline'}" data-vehsub="list">Danh sách xe</button>
-          <button class="veh-sub btn btn-sm ${vehSub === 'norms' ? 'btn-primary' : 'btn-outline'}" data-vehsub="norms">Định mức phim</button>
+        <div class="cust-subtabs" style="margin-bottom:10px; display:none;">
+          <button class="veh-sub btn btn-sm btn-primary" data-vehsub="list">Danh sách xe</button>
         </div>
         <div id="cust-veh-list-wrap" style="display:${vehSub === 'list' ? 'block' : 'none'}">
         <div class="cust-filter-bar">
@@ -1149,25 +1148,72 @@ async function taiKhachHang() {
   } catch (e) { toast('error', 'Lỗi tab Khách hàng', e.message); }
 }
 
+function renderJsonToReadableHtml(obj, depth = 0) {
+  if (obj === null || obj === undefined) return '<span style="color:#888">Trống</span>';
+  if (typeof obj !== 'object') {
+    if (typeof obj === 'string' && /^\\d{4}-\\d{2}-\\d{2}T/.test(obj)) {
+      return `<span>${fmtDt(obj)}</span>`;
+    }
+    return `<span>${_esc(String(obj))}</span>`;
+  }
+  if (Array.isArray(obj)) {
+    if (obj.length === 0) return '<span style="color:#888">Không có dữ liệu</span>';
+    return `<div style="display:flex; flex-direction:column; gap:4px; margin-top:4px;">
+      ${obj.map(item => `<div style="border-left:2px solid #555; padding-left:8px;">${renderJsonToReadableHtml(item, depth + 1)}</div>`).join('')}
+    </div>`;
+  }
+  
+  const keys = Object.keys(obj);
+  if (keys.length === 0) return '<span style="color:#888">{}</span>';
+  
+  const fieldNames = {
+    dealer_id: 'Mã đại lý', dealer_name: 'Tên đại lý', address: 'Địa chỉ', phone: 'SĐT',
+    email: 'Email', status: 'Trạng thái', created_at: 'Ngày tạo', updated_at: 'Ngày cập nhật',
+    customer_id: 'Mã KH', customer_name: 'Tên KH', vehicle_id: 'Mã xe', plate_number: 'Biển số',
+    model_name: 'Tên dòng xe', vehicle_model_code: 'Mã dòng xe', job_items: 'Hạng mục dán',
+    request_id: 'Mã yêu cầu', dealer: 'Đại lý', customer: 'Khách hàng', vehicles: 'Danh sách xe',
+    requests: 'Lịch sử yêu cầu', requests_per_month: 'Yêu cầu theo tháng',
+    popular_models: 'Dòng xe phổ biến', completed_count: 'Số đơn hoàn thành',
+    on_time_sla_rate_percent: 'Tỷ lệ đúng hạn SLA (%)', tax_code: 'Mã số thuế',
+    full_address: 'Địa chỉ đầy đủ', amis_customer_code: 'Mã KH AMIS',
+    customer_category: 'Loại KH', contact_phone: 'SĐT liên hệ', note: 'Ghi chú',
+    vin_number: 'Số VIN', model_year: 'Đời xe',
+    street: 'Đường', address_no: 'Số nhà', ward: 'Phường/Xã', city: 'Thành phố'
+  };
+
+  return `<table style="width:100%; font-size:12px; border-collapse:collapse; margin-top:4px; ${depth === 0 ? 'border:1px solid #3b3b4f;' : ''}">
+    <tbody>
+      ${keys.map(k => {
+        let valHtml = renderJsonToReadableHtml(obj[k], depth + 1);
+        let lbl = fieldNames[k] || k.replace(/_/g, ' ');
+        return `<tr>
+          <td style="width:140px; font-weight:600; background:#2a2a3a; color:#ccc; border:1px solid #3b3b4f; padding:6px 10px; text-transform:capitalize;">${_esc(lbl)}</td>
+          <td style="border:1px solid #3b3b4f; padding:6px 10px; color:#fff; word-break:break-word;">${valHtml}</td>
+        </tr>`;
+      }).join('')}
+    </tbody>
+  </table>`;
+}
+
 window.moDrawerDealer = async function(id) {
   const ov = document.getElementById('modal-drawer-overlay');
   const h = await fetch(`/api/dealers/${encodeURIComponent(id)}/history`).then(r => r.json());
   document.getElementById('drawer-title').textContent = 'Đại lý — ' + id;
-  document.getElementById('drawer-body').innerHTML = `<pre style="white-space:pre-wrap;font-size:12px">${JSON.stringify(h, null, 2)}</pre>`;
+  document.getElementById('drawer-body').innerHTML = renderJsonToReadableHtml(h);
   ov.style.display = 'flex';
 };
 window.moDrawerCustomer = async function(id) {
   const ov = document.getElementById('modal-drawer-overlay');
   const h = await fetch(`/api/customers/${encodeURIComponent(id)}/history`).then(r => r.json());
   document.getElementById('drawer-title').textContent = 'Khách hàng — ' + id;
-  document.getElementById('drawer-body').innerHTML = `<pre style="white-space:pre-wrap;font-size:12px">${JSON.stringify(h, null, 2)}</pre>`;
+  document.getElementById('drawer-body').innerHTML = renderJsonToReadableHtml(h);
   ov.style.display = 'flex';
 };
 window.moDrawerVehicle = async function(id) {
   const ov = document.getElementById('modal-drawer-overlay');
   const h = await fetch(`/api/vehicles/${encodeURIComponent(id)}/history`).then(r => r.json());
   document.getElementById('drawer-title').textContent = 'Xe — ' + id;
-  document.getElementById('drawer-body').innerHTML = `<pre style="white-space:pre-wrap;font-size:12px">${JSON.stringify(h, null, 2)}</pre>`;
+  document.getElementById('drawer-body').innerHTML = renderJsonToReadableHtml(h);
   ov.style.display = 'flex';
 };
 
