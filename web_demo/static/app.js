@@ -1704,7 +1704,11 @@ document.getElementById('modal-quick-ok')?.addEventListener('click', async () =>
         dealer_name: document.getElementById('qc-dealer-name').value.trim(),
         legal_name: document.getElementById('qc-dealer-legal').value.trim() || null,
         dealer_group: document.getElementById('qc-dealer-group').value.trim() || null,
-        address: document.getElementById('qc-dealer-addr').value.trim() || null,
+        address_no: document.getElementById('qc-dealer-ano')?.value.trim() || null,
+        street: document.getElementById('qc-dealer-st')?.value.trim() || null,
+        ward: document.getElementById('qc-dealer-ward')?.value.trim() || null,
+        city: document.getElementById('qc-dealer-city')?.value.trim() || null,
+        full_address: document.getElementById('qc-dealer-full')?.value.trim() || null,
         phone: document.getElementById('qc-dealer-phone').value.trim() || null,
         created_by: actor,
         note: document.getElementById('qc-dealer-note').value.trim() || null,
@@ -1755,8 +1759,9 @@ document.getElementById('modal-quick-ok')?.addEventListener('click', async () =>
   }
 });
 
-document.getElementById('mc-btn-quick-dealer')?.addEventListener('click', () => {
+document.getElementById('mc-btn-quick-dealer')?.addEventListener('click', async () => {
   _mcQuickMode = 'dealer';
+  await ensureLocationProvincesLoaded();
   const sug = 'DEALER-Q-' + Date.now().toString().slice(-6);
   _openQuick(
     'Tạo đại lý nhanh',
@@ -1769,13 +1774,27 @@ document.getElementById('mc-btn-quick-dealer')?.addEventListener('click', () => 
     <div class="dyc-field"><label>Nhóm đại lý</label><input id="qc-dealer-group" /></div>
   </div>
   <div class="dyc-form-row-2">
-    <div class="dyc-field"><label>Địa chỉ</label><input id="qc-dealer-addr" /></div>
     <div class="dyc-field"><label>Số điện thoại</label><input id="qc-dealer-phone" /></div>
+    <div class="dyc-field"><label>Ghi chú</label><input id="qc-dealer-note" /></div>
   </div>
-  <div class="dyc-field"><label>Ghi chú</label><input id="qc-dealer-note" /></div>
+  <div class="dyc-form-row-2">
+    <div class="dyc-field"><label>Số nhà / địa chỉ ngắn</label><input id="qc-dealer-ano" /></div>
+    <div class="dyc-field"><label>Đường</label><input id="qc-dealer-st" /></div>
+  </div>
+  <div class="dyc-form-row-2">
+    <div class="dyc-field"><label>Phường / xã</label><input id="qc-dealer-ward" autocomplete="off" /></div>
+    <div class="dyc-field"><label>Tỉnh / thành phố</label><input id="qc-dealer-city" autocomplete="off" /></div>
+  </div>
+  <div class="dyc-field"><label>Địa chỉ đầy đủ</label>
+    <div class="dyc-inline-row">
+      <input id="qc-dealer-full" class="dyc-grow" />
+      <button type="button" class="btn btn-outline btn-sm" id="qc-dealer-rebuild-full" style="white-space:nowrap">Tự tạo lại</button>
+    </div>
+  </div>
 </div>`,
     { wide: true },
   );
+  setupEditorAddress('qc-dealer');
 });
 document.getElementById('mc-btn-quick-cust')?.addEventListener('click', () => {
   _mcQuickMode = 'customer';
