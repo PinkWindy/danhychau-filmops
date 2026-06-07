@@ -958,9 +958,9 @@ async function taiKhachHang() {
       document.getElementById('cust-pane-customers').innerHTML = `
         <div class="kpi-grid kpi-grid-compact" style="margin-bottom:12px">
           <div class="kpi-card" data-color="blue"><div class="kpi-val">${sum.total_end_customers}</div><div class="kpi-label">Tổng KH</div></div>
-          <div class="kpi-card" data-color="teal"><div class="kpi-val">${sum.verified_customers}</div><div class="kpi-label">Verified</div></div>
-          <div class="kpi-card" data-color="orange"><div class="kpi-val">${sum.pending_customers}</div><div class="kpi-label">Pending</div></div>
-          <div class="kpi-card" data-color="red"><div class="kpi-val">${sum.duplicate_review_count}</div><div class="kpi-label">Duplicate review</div></div>
+          <div class="kpi-card" data-color="teal"><div class="kpi-val">${sum.verified_customers}</div><div class="kpi-label">Đã xác thực</div></div>
+          <div class="kpi-card" data-color="orange"><div class="kpi-val">${sum.pending_customers}</div><div class="kpi-label">Chờ duyệt</div></div>
+          <div class="kpi-card" data-color="red"><div class="kpi-val">${sum.duplicate_review_count}</div><div class="kpi-label">Trùng lặp</div></div>
         </div>
         <div class="cust-filter-bar">
           <div class="cust-filter-title">Bộ lọc khách hàng lẻ</div>
@@ -970,23 +970,23 @@ async function taiKhachHang() {
             <div class="dyc-field"><label>Trạng thái KH</label>
               <select id="flt-c-status">
                 <option value=""${st === '' ? ' selected' : ''}>Tất cả</option>
-                <option value="ACTIVE"${st === 'ACTIVE' ? ' selected' : ''}>ACTIVE</option>
-                <option value="INACTIVE"${st === 'INACTIVE' ? ' selected' : ''}>INACTIVE</option>
+                <option value="ACTIVE"${st === 'ACTIVE' ? ' selected' : ''}>Hoạt động</option>
+                <option value="INACTIVE"${st === 'INACTIVE' ? ' selected' : ''}>Ngừng hoạt động</option>
               </select></div>
             <div class="dyc-field"><label>Trạng thái CRM</label>
               <select id="flt-c-crm">
                 <option value=""${crm === '' ? ' selected' : ''}>Tất cả</option>
-                <option value="NEW_PENDING_VERIFICATION"${crm === 'NEW_PENDING_VERIFICATION' ? ' selected' : ''}>NEW_PENDING_VERIFICATION</option>
-                <option value="VERIFIED"${crm === 'VERIFIED' ? ' selected' : ''}>VERIFIED</option>
-                <option value="DUPLICATE_REVIEW"${crm === 'DUPLICATE_REVIEW' ? ' selected' : ''}>DUPLICATE_REVIEW</option>
-                <option value="ARCHIVED"${crm === 'ARCHIVED' ? ' selected' : ''}>ARCHIVED</option>
+                <option value="NEW_PENDING_VERIFICATION"${crm === 'NEW_PENDING_VERIFICATION' ? ' selected' : ''}>Mới (Chờ xác thực)</option>
+                <option value="VERIFIED"${crm === 'VERIFIED' ? ' selected' : ''}>Đã xác thực</option>
+                <option value="DUPLICATE_REVIEW"${crm === 'DUPLICATE_REVIEW' ? ' selected' : ''}>Chờ kiểm tra trùng lặp</option>
+                <option value="ARCHIVED"${crm === 'ARCHIVED' ? ' selected' : ''}>Đã lưu trữ</option>
               </select></div>
             <div class="dyc-field"><label>Nguồn KH</label>
               <select id="flt-c-ch">
                 <option value=""${ch === '' ? ' selected' : ''}>Tất cả</option>
-                <option value="DEALER"${ch === 'DEALER' ? ' selected' : ''}>DEALER</option>
-                <option value="DIRECT"${ch === 'DIRECT' ? ' selected' : ''}>DIRECT</option>
-                <option value="MANUAL"${ch === 'MANUAL' ? ' selected' : ''}>MANUAL</option>
+                <option value="DEALER"${ch === 'DEALER' ? ' selected' : ''}>Đại lý (DEALER)</option>
+                <option value="DIRECT"${ch === 'DIRECT' ? ' selected' : ''}>Trực tiếp (DIRECT)</option>
+                <option value="MANUAL"${ch === 'MANUAL' ? ' selected' : ''}>Thủ công (MANUAL)</option>
                 <option value="OCR"${ch === 'OCR' ? ' selected' : ''}>OCR</option>
               </select></div>
             <div class="dyc-field"><label>Đại lý nguồn</label>
@@ -1009,10 +1009,8 @@ async function taiKhachHang() {
               </select></div>
           </div>
           <div class="cust-filter-actions">
-            <button type="button" class="btn btn-primary btn-sm" data-flt-act="customers-apply">Áp dụng lọc</button>
-            <button type="button" class="btn btn-outline btn-sm" data-flt-act="customers-clear">Xóa lọc</button>
             <button type="button" class="btn btn-outline btn-sm" data-flt-act="customers-refresh">Làm mới</button>
-            <button type="button" class="btn btn-outline btn-sm" data-flt-act="customers-create">Tạo khách hàng</button>
+            <button type="button" class="btn btn-primary btn-sm" data-flt-act="customers-create">Tạo khách hàng</button>
           </div>
           <div class="cust-filter-meta">Tổng số kết quả sau lọc: <strong id="flt-c-total">${cTotal}</strong></div>
           <div class="filter-chips-row" id="flt-c-chips"></div>
@@ -1022,18 +1020,18 @@ async function taiKhachHang() {
           <th>Loại KH</th><th>Tên</th><th>MST</th><th>SĐT</th><th>Địa chỉ</th><th>Đường</th><th>Phường</th><th>TP</th><th>Full</th><th>AMIS</th><th>TT</th><th></th>
         </tr></thead><tbody>
         ${rows.map(c => `<tr>
-          <td>${_esc(c.customer_category)}</td>
+          <td>${_esc(c.customer_category === 'RETAIL_CUSTOMER' ? 'Khách lẻ' : c.customer_category)}</td>
           <td><strong>${_esc(c.customer_id)}</strong><br/>${_esc(c.customer_name)}</td>
           <td>${_esc(c.tax_code)}</td><td>${_esc(c.phone || c.phone_masked)}</td>
           <td>${_esc(c.address_no)}</td><td>${_esc(c.street)}</td><td>${_esc(c.ward)}</td><td>${_esc(c.city)}</td>
           <td style="max-width:140px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${_esc(c.full_address)}</td>
-          <td>${_esc(c.amis_customer_code)}</td><td>${_esc(c.status)}</td>
+          <td>${_esc(c.amis_customer_code)}</td><td>${_esc(c.status === 'ACTIVE' ? 'Hoạt động' : (c.status === 'INACTIVE' ? 'Ngừng HĐ' : c.status))}</td>
           <td style="white-space:nowrap">
             <button type="button" class="btn btn-outline btn-sm" onclick="moDrawerCustomer('${c.customer_id}')">Lịch sử</button>
             <button type="button" class="btn btn-outline btn-sm" onclick="moFormCustomer('${c.customer_id}')">Sửa</button>
             ${c.status === 'ACTIVE'
-              ? `<button type="button" class="btn btn-outline btn-sm" onclick="moToggleCustomer('${c.customer_id}','deactivate')">Inactive</button>`
-              : `<button type="button" class="btn btn-outline btn-sm" onclick="moToggleCustomer('${c.customer_id}','activate')">Active</button>`}
+              ? `<button type="button" class="btn btn-outline btn-sm" onclick="moToggleCustomer('${c.customer_id}','deactivate')">Ngừng HĐ</button>`
+              : `<button type="button" class="btn btn-outline btn-sm" onclick="moToggleCustomer('${c.customer_id}','activate')">Kích hoạt</button>`}
           </td></tr>`).join('')}
         </tbody></table></div>`}
         `;
@@ -1174,6 +1172,16 @@ window.moDrawerVehicle = async function(id) {
 };
 
 window._custVehSub = window._custVehSub || 'list';
+
+document.getElementById('tab-customers')?.addEventListener('change', (ev) => {
+  const target = ev.target;
+  if (target.id && target.id.startsWith('flt-')) {
+     if (target.id.startsWith('flt-d-')) { applyCustomerFilters('dealers'); taiKhachHang(); }
+     else if (target.id.startsWith('flt-c-')) { applyCustomerFilters('customers'); taiKhachHang(); }
+     else if (target.id.startsWith('flt-v-')) { applyCustomerFilters('vehicles'); taiKhachHang(); }
+     else if (target.id.startsWith('flt-n-')) { applyCustomerFilters('norms'); taiKhachHang(); }
+  }
+});
 
 document.getElementById('tab-customers')?.addEventListener('click', (ev) => {
   const fa = ev.target.closest('[data-flt-act]');
@@ -1722,8 +1730,12 @@ document.getElementById('modal-quick-ok')?.addEventListener('click', async () =>
         customer_id: document.getElementById('qc-cust-id').value.trim(),
         customer_name: document.getElementById('qc-cust-mask').value.trim(),
         phone: document.getElementById('qc-cust-phone').value.trim() || null,
-        address: document.getElementById('qc-cust-addr').value.trim() || null,
-        source_dealer_id: document.getElementById('mc-dealer-select').value || null,
+        address_no: document.getElementById('qc-cust-ano')?.value.trim() || null,
+        street: document.getElementById('qc-cust-st')?.value.trim() || null,
+        ward: document.getElementById('qc-cust-ward')?.value.trim() || null,
+        city: document.getElementById('qc-cust-city')?.value.trim() || null,
+        full_address: document.getElementById('qc-cust-full')?.value.trim() || null,
+        source_dealer_id: document.getElementById('mc-dealer-select')?.value || null,
         source_channel: 'DEALER',
         created_by: actor,
         note: document.getElementById('qc-cust-note').value.trim() || null,
@@ -1731,7 +1743,8 @@ document.getElementById('modal-quick-ok')?.addEventListener('click', async () =>
       const r = await fetch('/api/end-customers', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       if (!r.ok) throw new Error(await r.text());
       toast('success', 'Khách hàng', 'Đã tạo khách hàng');
-      document.getElementById('mc-cust-select').value = body.customer_id;
+      const mcCustSelect = document.getElementById('mc-cust-select');
+      if (mcCustSelect) mcCustSelect.value = body.customer_id;
     } else if (_mcQuickMode === 'vehicle') {
       const body = {
         vehicle_id: document.getElementById('qc-veh-id').value.trim(),
@@ -1796,8 +1809,9 @@ document.getElementById('mc-btn-quick-dealer')?.addEventListener('click', async 
   );
   setupEditorAddress('qc-dealer');
 });
-document.getElementById('mc-btn-quick-cust')?.addEventListener('click', () => {
+document.getElementById('mc-btn-quick-cust')?.addEventListener('click', async () => {
   _mcQuickMode = 'customer';
+  await ensureLocationProvincesLoaded();
   const sug = 'CUS-Q-' + Date.now().toString().slice(-6);
   _openQuick(
     'Tạo khách hàng nhanh',
@@ -1807,12 +1821,26 @@ document.getElementById('mc-btn-quick-cust')?.addEventListener('click', () => {
   <div class="dyc-field"><label>Tên khách hàng</label><input id="qc-cust-mask" /></div>
   <div class="dyc-form-row-2">
     <div class="dyc-field"><label>Số điện thoại</label><input id="qc-cust-phone" /></div>
-    <div class="dyc-field"><label>Địa chỉ</label><input id="qc-cust-addr" /></div>
+    <div class="dyc-field"><label>Ghi chú</label><input id="qc-cust-note" /></div>
   </div>
-  <div class="dyc-field"><label>Ghi chú</label><input id="qc-cust-note" /></div>
+  <div class="dyc-form-row-2">
+    <div class="dyc-field"><label>Số nhà / địa chỉ ngắn</label><input id="qc-cust-ano" /></div>
+    <div class="dyc-field"><label>Đường</label><input id="qc-cust-st" /></div>
+  </div>
+  <div class="dyc-form-row-2">
+    <div class="dyc-field"><label>Phường / xã</label><input id="qc-cust-ward" autocomplete="off" /></div>
+    <div class="dyc-field"><label>Tỉnh / thành phố</label><input id="qc-cust-city" autocomplete="off" /></div>
+  </div>
+  <div class="dyc-field"><label>Địa chỉ đầy đủ</label>
+    <div class="dyc-inline-row">
+      <input id="qc-cust-full" class="dyc-grow" />
+      <button type="button" class="btn btn-outline btn-sm" id="qc-cust-rebuild-full" style="white-space:nowrap">Tự tạo lại</button>
+    </div>
+  </div>
 </div>`,
     { wide: true },
   );
+  setupEditorAddress('qc-cust');
 });
 document.getElementById('mc-btn-quick-veh')?.addEventListener('click', () => {
   _mcQuickMode = 'vehicle';
