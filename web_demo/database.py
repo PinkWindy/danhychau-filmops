@@ -229,6 +229,7 @@ class DbRequest(Base):
     ocr_source_image = Column(String)
     model_name = Column(String)
     sales_consultant = Column(String)
+    sequence_no = Column(String)
 
 
 class DbVehicleFilmNorm(Base):
@@ -432,6 +433,20 @@ class DbOcrDraft(Base):
     extracted_notes = Column(String)
     extracted_ppf_type = Column(String)       # NEW: T-TYPE | M-TYPE
     extracted_services = Column(String)       # NEW: PPF,WINDOW_FILM
+    extracted_dealer_address = Column(String)
+    extracted_dealer_phone = Column(String)
+    extracted_dealer_fax = Column(String)
+    extracted_request_no = Column(String)
+    extracted_request_date = Column(String)
+    extracted_contract_no = Column(String)
+    extracted_customer_address = Column(String)
+    extracted_customer_phone = Column(String)
+    extracted_service_items_json = Column(Text)
+    sequence_no = Column(String)
+    dealer_resolution_status = Column(String, default="PENDING")
+    resolved_dealer_id = Column(String)
+    customer_resolution_status = Column(String, default="PENDING")
+    resolved_customer_id = Column(String)
     confidence_dealer = Column(Float, default=0.0)
     confidence_customer = Column(Float, default=0.0)
     confidence_vehicle = Column(Float, default=0.0)
@@ -490,6 +505,37 @@ class DbNotification(Base):
     team_type = Column(String)             # NEW
     recipient_role = Column(String)
     is_read = Column(Boolean, default=False)
+    created_at = Column(String)
+
+
+class DbStaff(Base):
+    __tablename__ = "staff"
+    staff_id = Column(String, primary_key=True, index=True)
+    full_name = Column(String, nullable=False)
+    title = Column(String)
+    phone_number = Column(String)
+    email = Column(String)
+    join_date = Column(String)
+    skill_level = Column(String)
+    status = Column(String, default="ACTIVE")
+    created_at = Column(String)
+
+
+class DbTeam(Base):
+    __tablename__ = "teams"
+    team_id = Column(String, primary_key=True, index=True)
+    team_name = Column(String, nullable=False)
+    team_type = Column(String)  # PPF, PCN, etc.
+    status = Column(String, default="ACTIVE")
+    created_at = Column(String)
+
+
+class DbTeamMember(Base):
+    __tablename__ = "team_members"
+    id = Column(String, primary_key=True, index=True)
+    team_id = Column(String, index=True)
+    staff_id = Column(String, index=True)
+    role = Column(String, default="MEMBER")
     created_at = Column(String)
 
 
@@ -621,6 +667,19 @@ def init_db():
         ocr_draft_cols = [
             ("extra_payload_json", "TEXT"),
             ("sales_consultant", "TEXT"),
+            ("extracted_dealer_address", "TEXT"),
+            ("extracted_dealer_phone", "TEXT"),
+            ("extracted_dealer_fax", "TEXT"),
+            ("extracted_request_no", "TEXT"),
+            ("extracted_request_date", "TEXT"),
+            ("extracted_contract_no", "TEXT"),
+            ("extracted_customer_address", "TEXT"),
+            ("extracted_customer_phone", "TEXT"),
+            ("extracted_service_items_json", "TEXT"),
+            ("dealer_resolution_status", "TEXT DEFAULT 'PENDING'"),
+            ("resolved_dealer_id", "TEXT"),
+            ("customer_resolution_status", "TEXT DEFAULT 'PENDING'"),
+            ("resolved_customer_id", "TEXT"),
         ]
         for col, col_def in ocr_draft_cols:
             _add_column_if_missing(conn, "ocr_drafts", col, col_def)

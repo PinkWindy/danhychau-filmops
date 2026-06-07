@@ -2557,7 +2557,10 @@ async function hienThiDon(req) {
   const scEl = document.getElementById('det-source-channel');
   if (scEl) scEl.textContent = sc === 'MANUAL' ? 'Thủ công (MANUAL)' : 'OCR';
   const rno = document.getElementById('det-request-no');
-  if (rno) rno.textContent = req.request_no || '—';
+  if (rno) {
+    rno.textContent = req.request_no || '—';
+    if (req.sequence_no) rno.textContent += ` (STT: ${req.sequence_no})`;
+  }
   const cno = document.getElementById('det-contract-no');
   if (cno) cno.textContent = req.contract_no || '—';
   const rdt = document.getElementById('det-request-date');

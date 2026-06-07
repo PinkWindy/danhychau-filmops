@@ -67,41 +67,40 @@ def _lexus_payload(draft_id: str) -> dict:
             "source_channel": "OCR_IMAGE",
             "dealer_id": "DEALER_LEXUS_SG",
             "dealer_name": "LEXUS TRUNG TÂM SÀI GÒN – Công Ty TNHH Ôtô Toyotsu Samco",
-            "request_no": "01.2600115",
-            "request_date": "2026-04-23",
-            "contract_no": "0020/HDKT/2026/RX350H PRE",
-            "customer_name": "Trần Thị Mai Lan",
-            "customer_masked": "Trần Thị Mai Lan",
-            "customer_phone": "0903123456",
-            "customer_address": "45 Nguyễn Huệ, Phường Bến Nghé, Quận 1, TP.HCM",
-            "address_masked": "45 Nguyễn Huệ, Phường Bến Nghé, Quận 1, TP.HCM",
-            "sales_consultant": "Nguyễn Thị Thu Hà",
-            "vehicle_model_code": "RX350",
-            "model_name": "RX350H PREMIUM CE",
-            "vin_number": "JTJBARBZ5N2012345",
-            "vin_masked": "JTJBARBZ5N2012345",
-            "frame_no_masked": "JTJBARBZ5N2012345",
-            "requested_delivery_at": "2026-06-05T15:30:00+07:00",
-            "item_code": "ACCRX00001PK",
-            "item_description": "Phim cách nhiệt Konica xe Lexus RX",
+            "request_no": "01.2600104",
+            "request_date": "2026-04-20",
+            "contract_no": "0844/HDKT/2025/LX600",
+            "customer_name": "LÊ THANH PHƯƠNG",
+            "customer_masked": "LÊ THANH PHƯƠNG",
+            "customer_phone": "",
+            "customer_address": "Ô 1B, DC 19, Khu phố 4, Phường An Phú, Thành phố Hồ Chí Minh.",
+            "address_masked": "Ô 1B, DC 19, Khu phố 4, Phường An Phú, Thành phố Hồ Chí Minh.",
+            "sales_consultant": "NGUYỄN QUANG BẢO",
+            "vehicle_model_code": "LX600",
+            "model_name": "LX600 URBAN",
+            "vin_number": "JTJPB7CX304095170",
+            "vin_masked": "JTJPB7CX304095170",
+            "frame_no_masked": "JTJPB7CX304095170",
+            "requested_delivery_at": "2026-04-27T00:00:00+07:00",
+            "item_code": "PPFLX",
+            "item_description": "Dán phim PPF cho xe lexus lx; Phim cách nhiệt konica xe lx",
             "quantity": 1,
             "unit": "Bộ",
-            "amount": 22734000,
+            "amount": 164376000,
             "service_selection": {
-                "include_ppf": False,
+                "include_ppf": True,
                 "include_window_film": True,
                 "window_film_items": [
                     "WINDSHIELD",
                     "REAR_WINDOW",
                     "FRONT_SIDE",
-                    "REAR_SIDE_TRIANGLE",
-                    "SUNROOF",
+                    "REAR_SIDE",
                 ],
             },
             "review_status": "NEEDS_REVIEW",
             "ocr_status": "COMPLETED",
-            "confidence_score": 0.92,
-            "note": "Phiếu test OCR Lexus 115 — dữ liệu demo đầy đủ (không che).",
+            "confidence_score": 0.96,
+            "note": "Dữ liệu mẫu từ phiếu LÊ THANH PHƯƠNG (LX600).",
         }
     if draft_id == "OCR-DRAFT-LEXUS-117-NEW":
         return {
@@ -156,13 +155,22 @@ def _apply_payload_to_draft_row(draft: DbOcrDraft, payload: dict) -> None:
     draft.image_url = f"/static/test_orders/{payload.get('source_file_name')}"
     draft.ocr_status = payload.get("ocr_status") or "COMPLETED"
     draft.review_status = payload.get("review_status") or "NEEDS_REVIEW"
-    draft.extracted_dealer_name = payload.get("dealer_name")
-    draft.extracted_customer_name = payload.get("customer_name") or payload.get("customer_masked")
+    
+    # 4. Display customer as "Customer Name - KHL-xxx"
+    # 5. Display dealer as "Dealer Name - DL-xxx"
+    draft_id = draft.ocr_draft_id
+    sfx = LEXUS_CUSTOMER_SUFFIX.get(draft_id, "115")
+    dealer_name = payload.get("dealer_name") or "LEXUS TRUNG TÂM SÀI GÒN – Công Ty TNHH Ôtô Toyotsu Samco"
+    draft.extracted_dealer_name = f"{dealer_name} - DL-001"
+    
+    cust = payload.get("customer_name") or payload.get("customer_masked") or ""
+    draft.extracted_customer_name = f"{cust} - KHL-{sfx}"
+    
     draft.extracted_vehicle_model = payload.get("model_name") or payload.get("vehicle_model_code")
     draft.sales_consultant = (payload.get("sales_consultant") or "").strip() or None
     draft.extracted_vin = payload.get("vin_number") or payload.get("vin_masked")
     draft.extracted_plate = ""
-    draft.extracted_film_type = payload.get("item_description") or "Phim cách nhiệt"
+    draft.extracted_film_type = "Phim cách nhiệt Konica xe Lexus RX"
     draft.extracted_job_items = job_items_str
     draft.extracted_delivery_time = payload.get("requested_delivery_at")
     draft.extracted_notes = payload.get("note")
@@ -238,7 +246,7 @@ def confirm_lexus_test_ocr(
     data: Optional[dict],
     actor: str = "ADMIN-001",
 ) -> Dict[str, Any]:
-    """Xác nhận phiếu Lexus test → Request cố định, chỉ WINDOW_FILM, không tự approve."""
+    """Xác nhận phiếu Lexus test → Request động theo format DYC-YYMMDD-{6 cuối số khung}."""
     if not is_lexus_test_draft_id(draft_id):
         raise ValueError("not a lexus test draft")
     draft = db.query(DbOcrDraft).filter(DbOcrDraft.ocr_draft_id == draft_id).first()
@@ -247,11 +255,6 @@ def confirm_lexus_test_ocr(
     if draft.review_status in ("CONFIRMED", "CANCELLED"):
         raise HTTPException(400, "Draft đã xử lý.")
 
-    fixed_req_id = LEXUS_TEST_REQUEST_BY_DRAFT[draft_id]
-    existing_req = db.query(DbRequest).filter(DbRequest.request_id == fixed_req_id).first()
-    if existing_req:
-        raise HTTPException(400, f"Request test {fixed_req_id} đã tồn tại — xóa request cũ để tạo lại.")
-
     payload = _lexus_payload(draft_id)
     if draft.extra_payload_json:
         try:
@@ -259,13 +262,33 @@ def confirm_lexus_test_ocr(
         except json.JSONDecodeError:
             pass
 
+    # Dynamic Request ID generation: DYC-YYMMDD-{6 cuối số khung}
+    vin_m = (data.get("vin") or payload.get("vin_number") or payload.get("vin_masked") or "").strip()
+    req_date_str = (data.get("request_date") or payload.get("request_date") or "").strip()
+    if not req_date_str:
+        req_date_str = datetime.date.today().strftime("%Y-%m-%d")
+    try:
+        dt = datetime.datetime.strptime(req_date_str[:10], "%Y-%m-%d")
+        yymmdd = dt.strftime("%y%m%d")
+    except Exception:
+        yymmdd = datetime.date.today().strftime("%y%m%d")
+    
+    vin_last_6 = vin_m[-6:] if len(vin_m) >= 6 else "000000"
+    fixed_req_id = f"DYC-{yymmdd}-{vin_last_6}"
+
+    existing_req = db.query(DbRequest).filter(DbRequest.request_id == fixed_req_id).first()
+    if existing_req:
+        raise HTTPException(400, f"Request test {fixed_req_id} đã tồn tại — xóa request cũ để tạo lại.")
+
     dealer_id = (payload.get("dealer_id") or "DEALER_LEXUS_SG").strip()
-    dealer_name_disp = "Lexus Trung Tâm Sài Gòn"
+    # Format dealer name display as "Dealer Name - DL-xxx"
+    dealer_name_disp = "Lexus Trung Tâm Sài Gòn - DL-001"
+    
     cust_masked = (
         (data.get("customer_name") or payload.get("customer_name") or payload.get("customer_masked") or "")
         .strip()
     )
-    vin_m = (data.get("vin") or payload.get("vin_number") or payload.get("vin_masked") or "").strip()
+    
     vehicle_model = (data.get("vehicle_model") or payload.get("vehicle_model_code") or "RX350").strip()
     vm_norm = normalize_vehicle_model_code(vehicle_model) or vehicle_model.upper()
     model_year = 2026
@@ -279,11 +302,23 @@ def confirm_lexus_test_ocr(
     svc_sel = payload.get("service_selection") or {}
     wf_codes: List[str] = list(svc_sel.get("window_film_items") or [])
 
+    # Dynamic services selection parsing
+    confirmed_services_str = (data.get("services") or "").strip()
+    if confirmed_services_str:
+        has_ppf = "PPF" in confirmed_services_str.upper()
+        has_wf = "PCN" in confirmed_services_str.upper() or "WINDOW" in confirmed_services_str.upper() or "FILM" in confirmed_services_str.upper()
+    else:
+        has_ppf = bool(svc_sel.get("include_ppf", False))
+        has_wf = bool(svc_sel.get("include_window_film", True))
+
     _ensure_dealer_lexus_sg(db, actor, fixed_req_id)
 
     sfx = LEXUS_CUSTOMER_SUFFIX[draft_id]
     customer_id = f"CUS-TEST-LEXUS-{sfx}"
     vehicle_id = f"VEH-TEST-LEXUS-{sfx}"
+    
+    # Customer name display format: "Customer Name - KHL-xxx"
+    cust_display = f"{cust_masked} - KHL-{sfx}"
 
     cust_row = db.query(DbCustomer).filter(DbCustomer.customer_id == customer_id).first()
     addr_src = (payload.get("customer_address") or payload.get("address_masked") or "").strip()
@@ -326,12 +361,17 @@ def confirm_lexus_test_ocr(
             "CUSTOMER",
             customer_id,
             None,
-            cust_masked,
+            cust_display,
             "Lexus test OCR confirm",
             actor,
         )
 
-    veh_existed = db.query(DbVehicleProfile).filter(DbVehicleProfile.vehicle_id == vehicle_id).first() is not None
+    veh_existed = (
+        db.query(DbVehicleProfile)
+        .filter((DbVehicleProfile.vehicle_id == vehicle_id) | (DbVehicleProfile.vin_number == vin_m))
+        .first()
+        is not None
+    )
     if not veh_existed:
         db.add(
             DbVehicleProfile(
@@ -424,7 +464,7 @@ def confirm_lexus_test_ocr(
     cg = None
     wf_source_type: Optional[str] = None
     wf_source_id: Optional[str] = None
-    if wf_plan:
+    if wf_plan and has_wf:
         wind = next((r for r in wf_plan if r.get("job_item") == "WINDSHIELD"), None)
         primary_wf_mc = ((wind or wf_plan[0]).get("material_code") or "").strip()
         cg = _wf_cut_group(db, vm_norm, primary_wf_mc or None)
@@ -455,13 +495,15 @@ def confirm_lexus_test_ocr(
 
     service_selection_out = {
         **svc_sel,
-        "include_ppf": False,
-        "include_window_film": True,
+        "include_ppf": has_ppf,
+        "include_window_film": has_wf,
         "display_model_name": payload.get("model_name"),
         "dealer_display_name": dealer_name_disp,
     }
 
     job_items_str = ";".join(wf_codes) if wf_codes else ""
+    if has_ppf:
+        job_items_str = (job_items_str + ";PPF_FULL") if job_items_str else "PPF_FULL"
 
     req = DbRequest(
         request_id=fixed_req_id,
@@ -472,7 +514,7 @@ def confirm_lexus_test_ocr(
         dealer_id=dealer_id,
         dealer_name=dealer_name_disp,
         customer_id=customer_id,
-        customer_name=cust_masked,
+        customer_name=cust_display,
         vehicle_id=vehicle_id,
         vin_number=vin_m or None,
         vin_masked=vin_m or None,
@@ -482,11 +524,11 @@ def confirm_lexus_test_ocr(
         status=status,
         is_grouped_cut=bool(cg),
         cut_group_id=cg.cut_group_id if cg else None,
-        planned_cut_block=wf_block,
-        planned_deduction_length_m=wf_len,
-        allocated_source_type=wf_source_type,
-        allocated_source_id=wf_source_id,
-        is_multi_workstream=False,
+        planned_cut_block=wf_block if has_wf else None,
+        planned_deduction_length_m=wf_len if has_wf else None,
+        allocated_source_type=wf_source_type if has_wf else None,
+        allocated_source_id=wf_source_id if has_wf else None,
+        is_multi_workstream=(has_ppf and has_wf),
         requested_delivery_time=payload.get("requested_delivery_at"),
         created_at=_now(),
         source_channel="OCR",
@@ -500,31 +542,80 @@ def confirm_lexus_test_ocr(
     db.add(req)
 
     rid_slug = fixed_req_id.replace("-", "")
-    ws_w = DbWorkstream(
-        workstream_id=f"WS-WF-{rid_slug}",
-        request_id=fixed_req_id,
-        workstream_type="WINDOW_FILM_INSTALLATION",
-        team_type="WINDOW_FILM_TEAM",
-        technician_team="WINDOW_FILM_TEAM_B",
-        assigned_technician_id="KTV-003",
-        assigned_technician_name="Nguyễn Văn An",
-        selected_material_code=primary_wf_mc or None,
-        material_plan=json.dumps(wf_plan, ensure_ascii=False),
-        cut_group_id=cg.cut_group_id if cg else None,
-        planned_cut_block=wf_block,
-        planned_deduction_length_m=wf_len,
-        allocated_source_type=req.allocated_source_type,
-        allocated_source_id=req.allocated_source_id,
-        status="PENDING_APPROVAL",
-        actual_confirmation_status="PENDING",
-        created_at=_now(),
-    )
-    db.add(ws_w)
 
-    db.flush()
-    from wf_allocation_service import build_default_wf_allocation
+    # PPF Workstream Creation
+    if has_ppf:
+        ws_ppf = DbWorkstream(
+            workstream_id=f"WS-PPF-{rid_slug}",
+            request_id=fixed_req_id,
+            workstream_type="PPF_INSTALLATION",
+            team_type="PPF_TEAM",
+            technician_team="PPF_TEAM_A",
+            assigned_technician_id="KTV-PPF-001",
+            assigned_technician_name="Trần Văn Bình",
+            selected_material_code="T-TYPE",
+            material_plan=None,
+            planned_cut_block="152x1300",
+            planned_deduction_length_m=13.0,
+            status="PENDING_APPROVAL",
+            actual_confirmation_status="PENDING",
+            created_at=_now(),
+        )
+        db.add(ws_ppf)
+        from ppf_allocation_service import build_default_ppf_allocation
+        ws_ppf.ppf_allocation_json = json.dumps(build_default_ppf_allocation(ws_ppf), ensure_ascii=False)
+        _audit(
+            db,
+            fixed_req_id,
+            "WORKSTREAM_CREATED",
+            "WORKSTREAM",
+            ws_ppf.workstream_id,
+            None,
+            ws_ppf.workstream_type,
+            "PPF luồng thi công (Lexus test)",
+            actor,
+            ws_ppf.workstream_id,
+            ws_ppf.workstream_type,
+        )
 
-    ws_w.wf_allocation_json = json.dumps(build_default_wf_allocation(db, ws_w), ensure_ascii=False)
+    # Window Film Workstream Creation
+    if has_wf:
+        ws_w = DbWorkstream(
+            workstream_id=f"WS-WF-{rid_slug}",
+            request_id=fixed_req_id,
+            workstream_type="WINDOW_FILM_INSTALLATION",
+            team_type="WINDOW_FILM_TEAM",
+            technician_team="WINDOW_FILM_TEAM_B",
+            assigned_technician_id="KTV-003",
+            assigned_technician_name="Nguyễn Văn An",
+            selected_material_code=primary_wf_mc or None,
+            material_plan=json.dumps(wf_plan, ensure_ascii=False),
+            cut_group_id=cg.cut_group_id if cg else None,
+            planned_cut_block=wf_block,
+            planned_deduction_length_m=wf_len,
+            allocated_source_type=req.allocated_source_type,
+            allocated_source_id=req.allocated_source_id,
+            status="PENDING_APPROVAL",
+            actual_confirmation_status="PENDING",
+            created_at=_now(),
+        )
+        db.add(ws_w)
+        db.flush()
+        from wf_allocation_service import build_default_wf_allocation
+        ws_w.wf_allocation_json = json.dumps(build_default_wf_allocation(db, ws_w), ensure_ascii=False)
+        _audit(
+            db,
+            fixed_req_id,
+            "WORKSTREAM_CREATED",
+            "WORKSTREAM",
+            ws_w.workstream_id,
+            None,
+            ws_w.workstream_type,
+            "WINDOW_FILM luồng thi công (Lexus test)",
+            actor,
+            ws_w.workstream_id,
+            ws_w.workstream_type,
+        )
 
     draft.review_status = "CONFIRMED"
     draft.confirmed_by = actor
@@ -553,24 +644,11 @@ def confirm_lexus_test_ocr(
         "Tạo request từ OCR Lexus test",
         actor,
     )
-    _audit(
-        db,
-        fixed_req_id,
-        "WORKSTREAM_CREATED",
-        "WORKSTREAM",
-        ws_w.workstream_id,
-        None,
-        ws_w.workstream_type,
-        "WINDOW_FILM only (Lexus test)",
-        actor,
-        ws_w.workstream_id,
-        ws_w.workstream_type,
-    )
 
     _add_notif(
         db,
         "📋 Request Lexus test từ OCR",
-        f"{fixed_req_id} — Phim cách nhiệt, chờ Quản lý duyệt.",
+        f"{fixed_req_id} — Chờ Quản lý duyệt.",
         "APPROVAL_NEEDED",
         fixed_req_id,
         "REQUEST",
