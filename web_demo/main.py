@@ -32,6 +32,7 @@ from vehicle_norm_api import register_vehicle_norm_routes
 from location_api import register_location_routes
 from material_preference_api import register_material_preference_routes
 from vehicle_norm_logic import normalize_vehicle_model_code, resolve_vehicle_norm_with_year_fallback
+from hr_api import router as hr_router
 from ocr_lexus_test_data import (
     confirm_lexus_test_ocr,
     is_lexus_test_draft_id,
@@ -149,6 +150,7 @@ register_customer_routes(app, get_db)
 register_vehicle_norm_routes(app, get_db)
 register_material_preference_routes(app, get_db)
 register_location_routes(app)
+app.include_router(hr_router)
 
 def _now():
     return datetime.datetime.utcnow().isoformat() + "Z"
@@ -270,9 +272,9 @@ def _update_request_status_from_workstreams(db: Session, req: DbRequest):
     if not wss:
         return
     statuses = [ws.status for ws in wss]
-    if all(s == "CLOSED" for s in statuses):
+    if all(s in ("CLOSED", "CANCELLED") for s in statuses):
         req.status = "CLOSED"
-    elif all(s in ("CLOSED", "COMPLETED") for s in statuses):
+    elif all(s in ("CLOSED", "COMPLETED", "CANCELLED") for s in statuses):
         req.status = "WAITING_INVENTORY_COMMIT"
     elif any(s == "CLOSED" for s in statuses):
         req.status = "PARTIALLY_COMPLETED"
@@ -1492,6 +1494,49 @@ def submit_actual(ws_id: str, data: dict, db: Session = Depends(get_db)):
     return {"status":"success",
             "detail":f"✅ Xác nhận kích thước thực tế {ws.workstream_type} thành công. Sẵn sàng Complete."}
 
+@app.post("/api/workstreams/{ws_id}/cancel")
+def cancel_workstream(ws_id: str, data: dict = None, db: Session = Depends(get_db)):
+    ws = db.query(DbWorkstream).filter(DbWorkstream.workstream_id == ws_id).first()
+    if not ws: raise HTTPException(404, "Workstream not found")
+    if ws.status in ("CLOSED", "COMPLETED", "CANCELLED"):
+        raise HTTPException(400, f"Không thể hủy luồng ở trạng thái: {ws.status}")
+
+    reason = (data or {}).get("reason", "Hủy theo yêu cầu")
+    actor = (data or {}).get("actor", "QL-002")
+
+    _audit(db, ws.request_id, "WORKSTREAM_CANCELLED", "WORKSTREAM", ws_id,
+           ws.status, "CANCELLED", reason, actor, ws_id, getattr(ws, "workstream_type", ""))
+
+    ws.status = "CANCELLED"
+
+    # Free soft locks
+    from database import DbLotInventory, DbOffcutInventory, DbJobCard
+    lot_locks = db.query(DbLotInventory).filter(DbLotInventory.locked_by_workstream_id == ws_id).all()
+    for l in lot_locks:
+        l.is_locked = False
+        l.locked_by_request_id = None
+        l.locked_by_workstream_id = None
+
+    offcut_locks = db.query(DbOffcutInventory).filter(DbOffcutInventory.locked_by_workstream_id == ws_id).all()
+    for o in offcut_locks:
+        o.is_locked = False
+        o.locked_by_request_id = None
+        o.locked_by_workstream_id = None
+
+    # Update Job Card
+    if ws.job_card_id:
+        jc = db.query(DbJobCard).filter(DbJobCard.job_card_id == ws.job_card_id).first()
+        if jc:
+            jc.status = "CANCELLED"
+
+    # Update Request Status
+    req = db.query(DbRequest).filter(DbRequest.request_id == ws.request_id).first()
+    if req:
+        _update_request_status_from_workstreams(db, req)
+
+    db.commit()
+    return {"status": "success", "detail": "Đã hủy luồng thi công."}
+
 @app.post("/api/workstreams/{ws_id}/complete")
 def complete_workstream(ws_id: str, data: dict = None, db: Session = Depends(get_db)):
     """KTV completes workstream → commit inventory → close workstream → check request closure."""
@@ -1754,6 +1799,18 @@ def _serialize_ocr_draft_row(r: DbOcrDraft) -> dict:
                         out[k] = v
         except Exception:
             pass
+            
+    services = out.get("extracted_services") or r.extracted_services or ""
+    film_type = out.get("extracted_film_type") or r.extracted_film_type or ""
+    item_desc = out.get("item_description") or ""
+    
+    is_konica = "konica" in film_type.lower() or "konica" in item_desc.lower() or "konica" in (r.extracted_film_type or "").lower()
+    
+    if "PPF" in services and ("WINDOW_FILM" in services or "WINDOW" in services) and is_konica:
+        out["extracted_film_type"] = "PPF + Phim cách nhiệt Konica"
+    elif film_type == "Phim cách nhiệt JB20 + PPF T-TYPE":
+        out["extracted_film_type"] = "PPF + Phim cách nhiệt"
+        
     return out
 
 
@@ -1768,19 +1825,84 @@ def post_lexus_test_ocr_drafts(db: Session = Depends(get_db)):
     """Seed / cập nhật 2 OCR draft Lexus test (demo)."""
     return upsert_lexus_ocr_drafts(db)
 
+import hashlib
+import shutil
+
 @app.post("/api/ocr/upload")
 async def upload_image(file: UploadFile = File(...), db: Session = Depends(get_db)):
-    file_id = f"IMG-{_uid()}"; draft_id = f"OCR-{_uid()}"
+    file_id = f"IMG-{_uid()}"
+    draft_id = f"OCR-{_uid()}"
+    
+    # Extract extension
+    filename = file.filename or "uploaded_image.jpg"
+    ext = os.path.splitext(filename)[1].lower()
+    if not ext:
+        ext = ".jpg"
+        
+    save_filename = f"{file_id}{ext}"
+    upload_dir = os.path.join(os.path.dirname(__file__), "static", "uploads")
+    os.makedirs(upload_dir, exist_ok=True)
+    save_path = os.path.join(upload_dir, save_filename)
+    
+    # Save file and calculate hash
+    md5_hash = hashlib.md5()
+    with open(save_path, "wb") as buffer:
+        while chunk := await file.read(8192):
+            buffer.write(chunk)
+            md5_hash.update(chunk)
+            
+    source_image_hash = md5_hash.hexdigest()
+    image_url = f"/static/uploads/{save_filename}"
+    
     draft = DbOcrDraft(
-        ocr_draft_id=draft_id, image_file_id=file_id,
-        image_filename=file.filename, image_url=f"/static/uploads/{file_id}",
-        ocr_status="PENDING", review_status="PENDING", created_at=_now()
+        ocr_draft_id=draft_id, 
+        image_file_id=file_id,
+        image_filename=filename, 
+        image_url=image_url,
+        ocr_status="PENDING", 
+        review_status="PENDING", 
+        created_at=_now(),
+        extra_payload_json=json.dumps({
+            "source_image_hash": source_image_hash,
+            "source_file_id": file_id
+        }, ensure_ascii=False)
     )
     db.add(draft)
-    _add_notif(db, "📷 Ảnh phiếu upload", f"File '{file.filename}' upload xong. Chờ OCR.",
+    _add_notif(db, "📷 Ảnh phiếu upload", f"File '{filename}' upload xong. Chờ OCR.",
                "INFO", draft_id, "REQUEST", "ADMIN")
     db.commit()
     return {"status":"success","ocr_draft_id":draft_id,"detail":f"Upload OK. Draft {draft_id} tạo."}
+@app.post("/api/ocr/debug-raw-text")
+def debug_raw_text(data: dict, db: Session = Depends(get_db)):
+    draft_id = data.get("ocr_draft_id")
+    if not draft_id:
+        raise HTTPException(400, "Missing ocr_draft_id")
+        
+    draft = db.query(DbOcrDraft).filter(DbOcrDraft.ocr_draft_id == draft_id).first()
+    if not draft:
+        raise HTTPException(404, "Draft not found")
+        
+    ep = draft.extra_payload_json or "{}"
+    try:
+        extra = json.loads(ep)
+    except:
+        extra = {}
+        
+    upload_dir = os.path.join(os.path.dirname(__file__), "static", "uploads")
+    filename_on_disk = os.path.basename(draft.image_url) if draft.image_url else ""
+    source_file_path = os.path.join(upload_dir, filename_on_disk)
+    
+    return {
+        "ocr_draft_id": draft_id,
+        "source_file_path": source_file_path,
+        "file_exists": extra.get("file_exists", os.path.exists(source_file_path)),
+        "image_width": extra.get("image_width", 0),
+        "image_height": extra.get("image_height", 0),
+        "raw_text_length": len(extra.get("raw_text", "")),
+        "raw_text": extra.get("raw_text", ""),
+        "ocr_engine": "MOCK (pytesseract/easyocr not installed)",
+        "error": None if extra.get("raw_text") else "No text extracted or unsupported OCR engine."
+    }
 
 @app.post("/api/ocr/{draft_id}/process")
 def process_ocr(draft_id: str, db: Session = Depends(get_db)):
@@ -1790,26 +1912,115 @@ def process_ocr(draft_id: str, db: Session = Depends(get_db)):
     if not draft: raise HTTPException(404, "OCR Draft not found")
     if draft.ocr_status == "COMPLETED":
         return {"status":"info","detail":"OCR đã hoàn thành."}
-    draft.ocr_status = "PROCESSING"; db.commit()
-    # Mock OCR result — multi-service vehicle
-    draft.extracted_dealer_name = "Lexus Sài Gòn"
-    draft.extracted_customer_name = "Phạm Minh Tuấn (demo OCR upload)"
-    draft.extracted_vehicle_model = "LEXUS_RX350"
-    draft.extracted_vin = "JTJBARBZ8N0123456"
-    draft.extracted_plate = "51G-123.45"
-    draft.extracted_film_type = "Phim cách nhiệt JB20 + PPF T-TYPE"
-    draft.extracted_job_items = "WINDSHIELD;REAR_WINDOW;FRONT_SIDE;REAR_SIDE_TRIANGLE;SUNROOF;PPF_FULL"
-    draft.extracted_delivery_time = (datetime.datetime.utcnow() + datetime.timedelta(hours=8)).isoformat() + "Z"
-    draft.extracted_notes = "Yêu cầu cả PPF và phim cách nhiệt. Khách VIP."
-    draft.extracted_ppf_type = "T-TYPE"
-    draft.extracted_services = "PPF,WINDOW_FILM"
-    draft.confidence_dealer = 0.97; draft.confidence_customer = 0.91
-    draft.confidence_vehicle = 0.99; draft.confidence_overall = 0.96
-    draft.ocr_status = "COMPLETED"; draft.review_status = "REVIEWING"
-    _add_notif(db, "🤖 OCR hoàn tất", f"Draft {draft_id} — RX350 PPF+WF. Confidence 96%. Chờ Admin xác nhận.",
+    
+    draft.ocr_status = "PROCESSING"
+    db.commit()
+    
+    # 1. KIỂM TRA UPLOAD FILE VÀ LOG
+    ep = draft.extra_payload_json or "{}"
+    try:
+        extra = json.loads(ep)
+    except:
+        extra = {}
+        
+    source_file_id = extra.get("source_file_id", "UNKNOWN")
+    source_image_hash = extra.get("source_image_hash", "UNKNOWN")
+    
+    # Get physical file
+    upload_dir = os.path.join(os.path.dirname(__file__), "static", "uploads")
+    # Resolve the exact filename from image_url
+    filename_on_disk = os.path.basename(draft.image_url) if draft.image_url else ""
+    source_file_path = os.path.join(upload_dir, filename_on_disk)
+    
+    file_exists = os.path.exists(source_file_path)
+    file_size = os.path.getsize(source_file_path) if file_exists else 0
+    img_width, img_height = 0, 0
+    mime_type = "UNKNOWN"
+    
+    if file_exists:
+        try:
+            import PIL.Image
+            import mimetypes
+            with PIL.Image.open(source_file_path) as img:
+                img_width, img_height = img.size
+            mime_type = mimetypes.guess_type(source_file_path)[0] or "UNKNOWN"
+        except Exception as e:
+            print(f"Error reading image details: {e}")
+            
+    print("\n" + "="*50)
+    print("[UPLOAD FILE CHECK]")
+    print(f"source_file_id:    {source_file_id}")
+    try:
+        print(f"source_file_path:  {source_file_path}".encode("utf-8", "replace").decode("utf-8"))
+    except:
+        pass
+    print(f"source_file_url:   {draft.image_url}")
+    print(f"source_image_hash: {source_image_hash}")
+    print(f"file_exists:       {file_exists}")
+    print(f"file_size:         {file_size} bytes")
+    print(f"image_width:       {img_width}")
+    print(f"image_height:      {img_height}")
+    print(f"mime_type:         {mime_type}")
+    print("="*50)
+    
+        # 2. KIỂM TRA OCR ENGINE VÀ LOG RAW TEXT
+    raw_text = extra.get("raw_text", "")
+    
+    # regex extractors
+    import re
+    def get_match(pattern, text, default=""):
+        m = re.search(pattern, text, re.IGNORECASE)
+        return m.group(1).strip() if m else default
+
+    draft.extracted_dealer_name = get_match(r"(?:Đơn vị|Tên đại lý|Đại lý)[:\-]\s*(.*)", raw_text)
+    draft.extracted_dealer_address = get_match(r"(?:Địa chỉ đơn vị)[:\-]\s*(.*)", raw_text)
+    draft.extracted_dealer_phone = get_match(r"(?:Điện thoại|SĐT đơn vị)[:\-]\s*(.*)", raw_text)
+    draft.extracted_dealer_fax = get_match(r"(?:Fax)[:\-]\s*(.*)", raw_text)
+    draft.extracted_request_no = get_match(r"(?:Số đề nghị|Số yêu cầu)[:\-]\s*(.*)", raw_text)
+    draft.extracted_request_date = get_match(r"(?:Ngày yêu cầu)[:\-]\s*(.*)", raw_text)
+    draft.extracted_contract_no = get_match(r"(?:Số hợp đồng|Số HĐ)[:\-]\s*(.*)", raw_text)
+    
+    draft.extracted_customer_name = get_match(r"(?:Tên khách hàng|Khách hàng)[:\-]\s*(.*)", raw_text)
+    draft.extracted_customer_address = get_match(r"(?:Địa chỉ khách hàng|Địa chỉ)[:\-]\s*(.*)", raw_text)
+    draft.extracted_customer_phone = get_match(r"(?:Số điện thoại khách hàng|Điện thoại khách hàng|SĐT)[:\-]\s*(.*)", raw_text)
+    
+    draft.extracted_vehicle_model = get_match(r"(?:Loại xe|Model)[:\-]\s*(.*)", raw_text)
+    draft.extracted_vin = get_match(r"(?:Số khung|Frame No)[:\-]\s*(.*)", raw_text)
+    draft.extracted_delivery_time = get_match(r"(?:Ngày giao xe|Thời gian giao xe)[:\-]\s*(.*)", raw_text)
+    draft.sales_consultant = get_match(r"(?:Tư vấn bán hàng|TVBH)[:\-]\s*(.*)", raw_text)
+
+    # Clean VIN
+    if draft.extracted_vin:
+        draft.extracted_vin = re.sub(r'[^A-Z0-9]', '', draft.extracted_vin.upper())
+
+    # Entity Resolution (Dealer)
+    draft.dealer_resolution_status = "NOT_FOUND"
+    if draft.extracted_dealer_name:
+        # Simple match logic (in reality we would query DbDealer)
+        # We will let confirm_ocr handle the actual creation. For now, mark as REVIEW_REQUIRED or MATCHED
+        draft.dealer_resolution_status = "REVIEW_REQUIRED"
+
+    # Entity Resolution (Customer)
+    draft.customer_resolution_status = "NOT_FOUND"
+    if draft.extracted_customer_name:
+        draft.customer_resolution_status = "REVIEW_REQUIRED"
+
+    draft.confidence_dealer = 0.85 if draft.extracted_dealer_name else 0.0
+    draft.confidence_customer = 0.85 if draft.extracted_customer_name else 0.0
+    draft.confidence_vehicle = 0.85 if draft.extracted_vin else 0.0
+    draft.confidence_overall = 0.85 if draft.extracted_vin else 0.0
+
+    extra["address"] = draft.extracted_customer_address
+    extra["request_date"] = draft.extracted_request_date
+    draft.extra_payload_json = json.dumps(extra, ensure_ascii=False)
+
+    detail_msg = "✅ OCR xử lý thành công. Cần Review."
+    draft.ocr_status = "COMPLETED"
+    draft.review_status = "REVIEWING"
+    _add_notif(db, "🤖 OCR hoàn tất", f"Draft {draft_id} — {detail_msg}",
                "INFO", draft_id, "REQUEST", "ADMIN")
     db.commit()
-    return {"status":"success","draft":draft,"detail":"✅ OCR OK. Vui lòng review."}
+    return {"status":"success","draft":draft,"detail":detail_msg}
 
 @app.post("/api/ocr/{draft_id}/confirm")
 def confirm_ocr(draft_id: str, data: dict, db: Session = Depends(get_db)):
@@ -1819,96 +2030,149 @@ def confirm_ocr(draft_id: str, data: dict, db: Session = Depends(get_db)):
     if not draft: raise HTTPException(404, "Not found")
     if draft.review_status in ("CONFIRMED","CANCELLED"):
         raise HTTPException(400, "Draft đã xử lý.")
-    today = datetime.date.today()
-    cnt = db.query(DbRequest).filter(
-        DbRequest.request_id.like(f"REQ-{today.strftime('%Y%m%d')}-%")).count()
-    new_req_id = f"REQ-{today.strftime('%Y%m%d')}-{str(cnt+1).zfill(3)}"
-    services = draft.extracted_services or "PPF,WINDOW_FILM"
-    is_multi = "PPF" in services and "WINDOW_FILM" in services
-    vmodel_raw = (data.get("vehicle_model") or draft.extracted_vehicle_model or "LEXUS_RX350").strip()
-    vm_code = normalize_vehicle_model_code(vmodel_raw) or vmodel_raw.upper()
-    my_raw = data.get("model_year")
-    try:
-        model_year = int(my_raw) if my_raw is not None else None
-    except (TypeError, ValueError):
-        model_year = None
-    if model_year is None and draft.extracted_delivery_time:
-        try:
-            model_year = int(str(draft.extracted_delivery_time)[:4])
-        except Exception:
-            model_year = None
-    sales_sc = (data.get("sales_consultant") or getattr(draft, "sales_consultant", None) or "").strip()
-    if not sales_sc and draft.extra_payload_json:
-        try:
-            pl = json.loads(draft.extra_payload_json)
-            if isinstance(pl, dict):
-                sales_sc = (pl.get("sales_consultant") or "").strip()
-        except Exception:
-            pass
-    disp_model = (data.get("model_name") or vmodel_raw).strip()
-    norm_payload = None
-    if "WINDOW_FILM" in services:
-        ft = (data.get("film_type") or "Phim cách nhiệt").strip()
-        res = resolve_vehicle_norm_with_year_fallback(db, vm_code, model_year, ft)
-        norm_payload = {
-            "found": res["found"],
-            "norm_id": res.get("norm_id") or ((res.get("norm") or {}).get("norm_id") if res.get("norm") else None),
-            "norm": res.get("norm"),
-            "applied_items": res.get("auto_fill_items") or [],
-            "source": "AUTO_FROM_VEHICLE_NORM" if res["found"] else "OCR_DEFAULT",
-            "film_type": ft,
-            "vehicle_model_code": vm_code,
-            "vehicle_model_code_raw": res.get("vehicle_model_code_raw"),
-            "vehicle_model_code_requested": res.get("vehicle_model_code_requested"),
-            "model_year": model_year,
-            "model_year_requested": res.get("model_year_requested"),
-            "model_year_resolved": res.get("model_year_resolved"),
-            "resolution_strategy": res.get("resolution_strategy"),
-            "warning": res.get("warning"),
-            "warnings": res.get("warnings") or [],
-        }
-        if not res["found"]:
-            norm_payload["warning"] = norm_payload.get("warning") or (
-                "Chưa có định mức active cho dòng xe/năm model này. "
-                "Vui lòng cập nhật Hồ sơ xe > Định mức phim."
-            )
+
+    # 10. Validate Mandatory fields
+    required = ["dealer_name", "customer_name", "vehicle_model", "vin", "requested_delivery_time"]
+    for req in required:
+        val = data.get(req)
+        if not val or val == "UNKNOWN" or val == "Chưa đọc được - Cần rà soát":
+            raise HTTPException(400, f"Thiếu thông tin bắt buộc: {req}")
+
+    # Dynamic Request ID generation: DYC-YYMMDD-{6 cuối số khung}
+    vin_val = data.get("vin").strip().upper()
+    vin_val = re.sub(r'[^A-Z0-9]', '', vin_val)
+    if len(vin_val) < 6:
+        raise HTTPException(400, "VIN phải có ít nhất 6 ký tự.")
+    vin_last_6 = vin_val[-6:]
+    yymmdd = datetime.datetime.now().strftime("%y%m%d")
+    new_req_id = f"DYC-{yymmdd}-{vin_last_6}"
+
+    # Auto Create Dealer
+    dealer_name = data.get("dealer_name").strip()
+    dealer = db.query(DbDealer).filter(DbDealer.dealer_name.ilike(f"%{dealer_name}%")).first()
+    if dealer:
+        dealer_id = dealer.dealer_id
+        dealer_name_disp = dealer.dealer_name
+        _add_audit_log(db, "DEALER_MATCHED_FROM_MASTER", draft_id, new_req_id, "", dealer_id)
+    else:
+        dealer_id = f"DLR-{_uid()}"
+        dealer_name_disp = dealer_name
+        new_dlr = DbDealer(dealer_id=dealer_id, dealer_name=dealer_name, created_at=_now())
+        db.add(new_dlr)
+        _add_audit_log(db, "DEALER_AUTO_CREATED_FROM_OCR_ON_CONFIRM", draft_id, new_req_id, "", dealer_id)
+
+    # Auto Create Customer
+    customer_name = data.get("customer_name").strip()
+    customer = db.query(DbCustomer).filter(DbCustomer.customer_name.ilike(f"%{customer_name}%")).first()
+    if customer:
+        customer_id = customer.customer_id
+        cust_display = customer.customer_name
+        _add_audit_log(db, "CUSTOMER_MATCHED_FROM_MASTER", draft_id, new_req_id, "", customer_id)
+    else:
+        customer_id = f"KHL-{_uid()}"
+        cust_display = customer_name
+        new_cust = DbCustomer(customer_id=customer_id, customer_name=customer_name, created_at=_now())
+        db.add(new_cust)
+        _add_audit_log(db, "CUSTOMER_AUTO_CREATED_FROM_OCR_ON_CONFIRM", draft_id, new_req_id, "", customer_id)
+
+    services_str = (data.get("services") or "WINDOW_FILM").strip()
+    has_ppf = "PPF" in services_str.upper()
+    has_wf = "PCN" in services_str.upper() or "WINDOW" in services_str.upper() or "FILM" in services_str.upper()
+    is_multi = has_ppf and has_wf
+
+    service_json = {"services": services_str}
+    for k in ["sequence_no", "model_year", "service_1", "film_type_1", "service_2", "film_type_2"]:
+        if data.get(k):
+            service_json[k] = data.get(k)
+
     new_req = DbRequest(
         request_id=new_req_id,
-        dealer_id="DEALER_LEXUS_SG",
-        customer_id="CUST_001",
-        customer_name=data.get("customer_name", draft.extracted_customer_name),
-        vehicle_id="VEH_001",
-        vin_number=data.get("vin", draft.extracted_vin),
-        vehicle_model_code=vm_code,
-        material_code="JB20",
-        job_items=draft.extracted_job_items,
+        dealer_id=dealer_id,
+        dealer_name=dealer_name_disp,
+        customer_id=customer_id,
+        customer_name=cust_display,
+        vehicle_id=f"VEH-{_uid()}",
+        vin_number=vin_val,
+        vehicle_model_code=data.get("vehicle_model"),
+        material_code="JB20", 
+        job_items=data.get("job_items") or "",
         status="DRAFT", is_grouped_cut=False, is_multi_workstream=is_multi,
-        requested_delivery_time=draft.extracted_delivery_time,
+        requested_delivery_time=data.get("requested_delivery_time"),
         created_at=_now(),
         source_channel="OCR",
-        model_name=disp_model,
-        sales_consultant=sales_sc or None,
-        service_selection_json=json.dumps(
-            {"include_ppf": "PPF" in services, "include_window_film": "WINDOW_FILM" in services,
-             "extracted_services": services, "display_model_name": disp_model}, ensure_ascii=False),
-        norm_application_json=json.dumps(norm_payload, ensure_ascii=False) if norm_payload else None,
+        request_no=data.get("request_no"),
+        request_date=data.get("request_date"),
+        model_name=data.get("vehicle_model"),
+        sales_consultant=data.get("sales_consultant"),
+        service_selection_json=json.dumps(service_json, ensure_ascii=False)
     )
     db.add(new_req)
-    draft.review_status = "CONFIRMED"; draft.confirmed_by = "ADMIN-001"
+    draft.review_status = "CONFIRMED"; draft.confirmed_by = "ADMIN"
     draft.confirmed_at = _now(); draft.created_request_id = new_req_id
-    _add_notif(db, "📋 Request multi-workstream tạo từ OCR",
-               f"OCR {draft_id} → Request {new_req_id} (PPF + Window Film). Sẵn sàng WF1→WF7.",
-               "INFO", new_req_id, "REQUEST", "ADMIN")
+    
+    _add_audit_log(db, "OCR_DRAFT_CONFIRMED", draft_id, new_req_id, "", "")
+    _add_audit_log(db, "REQUEST_CREATED_FROM_IMAGE", draft_id, new_req_id, "", "")
+    
+    _add_notif(db, "📋 Request tạo từ OCR", f"OCR {draft_id} → Request {new_req_id}", "INFO", new_req_id, "REQUEST", "ADMIN")
     db.commit()
-    return {"status":"success","request_id":new_req_id,
-            "detail":f"✅ Request {new_req_id} tạo với {services}. Multi-workstream: {is_multi}.",
-            "norm": norm_payload}
+    return {"status":"success","request_id":new_req_id, "detail":f"✅ Request {new_req_id} tạo thành công."}
 
 @app.post("/api/ocr/{draft_id}/cancel")
 def cancel_ocr(draft_id: str, db: Session = Depends(get_db)):
     draft = db.query(DbOcrDraft).filter(DbOcrDraft.ocr_draft_id == draft_id).first()
     if draft: draft.review_status = "CANCELLED"; db.commit()
     return {"status":"success","detail":"Đã hủy OCR Draft."}
+
+@app.post("/api/ocr/{draft_id}/rollback")
+def rollback_ocr_confirmation(draft_id: str, db: Session = Depends(get_db)):
+    draft = db.query(DbOcrDraft).filter(DbOcrDraft.ocr_draft_id == draft_id).first()
+    if not draft:
+        raise HTTPException(404, "Draft not found")
+    if draft.review_status != "CONFIRMED":
+        raise HTTPException(400, "Draft chưa được CONFIRMED.")
+    
+    req_id = draft.created_request_id
+    if not req_id:
+        raise HTTPException(400, "Không tìm thấy request_id liên quan trên draft.")
+        
+    # Delete job cards, workstreams, request, notifications, and audit logs
+    db.query(DbJobCard).filter(DbJobCard.request_id == req_id).delete()
+    db.query(DbWorkstream).filter(DbWorkstream.request_id == req_id).delete()
+    db.query(DbNotification).filter(DbNotification.related_id == req_id).delete()
+    
+    # Release any soft locks on lots or offcuts for these workstreams
+    db.query(DbLotInventory).filter(DbLotInventory.locked_by_request_id == req_id).update({
+        DbLotInventory.is_locked: False,
+        DbLotInventory.locked_by_request_id: None,
+        DbLotInventory.locked_by_workstream_id: None
+    })
+    db.query(DbOffcutInventory).filter(DbOffcutInventory.locked_by_request_id == req_id).update({
+        DbOffcutInventory.is_locked: False,
+        DbOffcutInventory.locked_by_request_id: None,
+        DbOffcutInventory.locked_by_workstream_id: None
+    })
+    
+    # Delete vehicle profiles and customer records created from this request
+    db.query(DbVehicleProfile).filter(DbVehicleProfile.created_from_request_id == req_id).delete()
+    db.query(DbCustomer).filter(DbCustomer.created_from_request_id == req_id).delete()
+    
+    # Delete request itself
+    db.query(DbRequest).filter(DbRequest.request_id == req_id).delete()
+    
+    # Delete audit logs related to this request
+    db.query(DbAuditLog).filter(DbAuditLog.request_id == req_id).delete()
+    
+    # Reset draft review status
+    draft.review_status = "NEEDS_REVIEW"
+    draft.confirmed_by = None
+    draft.confirmed_at = None
+    draft.created_request_id = None
+    
+    db.commit()
+    return {
+        "status": "success",
+        "detail": f"Đã hủy xác nhận (rollback) thành công đơn hàng {req_id}."
+    }
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # NOTIFICATIONS

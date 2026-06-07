@@ -2363,24 +2363,42 @@ window.moPhieuOcr = async function(draftId) {
   const hasPPF = services.includes('PPF');
 
   const fields = [
+    { key: 'request_no',     label: 'Số phiếu/ Số đề nghị',    val: d.extracted_request_no || '', conf: 0.90 },
     { key: 'dealer_name',    label: 'Đại lý',                  val: d.extracted_dealer_name, conf: d.confidence_dealer },
-    { key: 'customer_name',  label: 'Khách hàng',               val: d.extracted_customer_name, conf: d.confidence_customer },
-    { key: 'vehicle_model',  label: 'Dòng xe',                  val: d.extracted_vehicle_model, conf: d.confidence_vehicle },
-    { key: 'vin',            label: 'Số VIN',                   val: d.extracted_vin, conf: 0.99 },
+    { key: 'customer_name',  label: 'Khách hàng',              val: d.extracted_customer_name, conf: d.confidence_customer },
+    { key: 'vehicle_model',  label: 'Dòng xe',                 val: d.extracted_vehicle_model, conf: d.confidence_vehicle },
+    { key: 'model_year',     label: 'Năm Model',               val: new Date().getFullYear(), conf: 0.90 },
+    { key: 'vin',            label: 'Số VIN',                  val: d.extracted_vin, conf: 0.99 },
+    { key: 'sales_consultant', label: 'Tư vấn bán hàng',       val: d.sales_consultant || '', conf: 0.90 },
+    { key: 'sequence_no',    label: 'Số thứ tự',               val: '', conf: 0.90, type: 'number' },
+    { key: 'request_date',   label: 'Ngày yêu cầu',            val: d.extracted_request_date || (d.created_at ? fmtDt(d.created_at) : new Date().toLocaleString('en-GB', {hour: '2-digit', minute:'2-digit', day:'2-digit', month:'2-digit', year:'numeric'}).replace(',', '')), conf: 0.90, placeholder: 'hh:mm dd/mm/yyyy' },
+    { key: 'delivery_time',  label: 'Hạn giao xe',             val: d.extracted_delivery_time ? fmtDt(d.extracted_delivery_time) : '', conf: 0.88, placeholder: 'hh:mm dd/mm/yyyy' },
   ];
-  if (hasWF) fields.push({ key: 'film_type', label: 'Loại phim yêu cầu', val: d.extracted_film_type, conf: 0.95 });
-  if (hasPPF) fields.push({ key: 'ppf_type', label: 'Loại PPF (T-TYPE/M-TYPE)', val: d.extracted_ppf_type || 'T-TYPE', conf: 0.92 });
-  
-  fields.push({ key: 'services', label: 'Dịch vụ', val: services, conf: 0.97 });
-  fields.push({ key: 'delivery_time', label: 'Hạn giao xe', val: d.extracted_delivery_time ? fmtDt(d.extracted_delivery_time) : '', conf: 0.88 });
+
+  if (hasWF && !hasPPF) {
+      fields.push({ key: 'service_1', label: 'Dịch vụ 01', val: 'Phim cách nhiệt', conf: 0.97 });
+      fields.push({ key: 'film_type_1', label: 'Loại phim yêu cầu', val: d.extracted_film_type || '', conf: 0.95 });
+  } else if (hasPPF && !hasWF) {
+      fields.push({ key: 'service_1', label: 'Dịch vụ 01', val: 'Phim PPF', conf: 0.97 });
+      fields.push({ key: 'film_type_1', label: 'Loại phim yêu cầu', val: d.extracted_ppf_type || '', conf: 0.92 });
+  } else {
+      fields.push({ key: 'service_1', label: 'Dịch vụ 01', val: 'Phim cách nhiệt', conf: 0.97 });
+      fields.push({ key: 'film_type_1', label: 'Loại phim yêu cầu', val: d.extracted_film_type || '', conf: 0.95 });
+      fields.push({ key: 'service_2', label: 'Dịch vụ 02', val: 'Phim PPF', conf: 0.97 });
+      fields.push({ key: 'film_type_2', label: 'Loại phim yêu cầu', val: d.extracted_ppf_type || '', conf: 0.92 });
+  }
+
+  // Inject hidden original services string for payload if needed, or we just calculate it in payload
+  fields.push({ key: 'services', type: 'hidden', val: services, conf: 0.97 });
 
   const readonly = ['CONFIRMED','CANCELLED'].includes(d.review_status);
   document.getElementById('ocr-fields-form').innerHTML = fields.map(f => {
+    if (f.type === 'hidden') return `<input type="hidden" id="ocrf-${f.key}" value="${f.val || ''}">`;
     const pct = Math.round((f.conf || 0) * 100);
     const dot = pct >= 90 ? 'conf-high' : pct >= 70 ? 'conf-mid' : 'conf-low';
     return `<div class="ocr-field-group">
       <label><span class="conf-dot ${dot}"></span> ${f.label} (độ chính xác: ${pct}%)</label>
-      <input type="text" id="ocrf-${f.key}" class="field-input" value="${f.val || ''}" ${readonly ? 'readonly' : ''}>
+      <input type="${f.type || 'text'}" id="ocrf-${f.key}" class="field-input" value="${f.val || ''}" placeholder="${f.placeholder || ''}" ${readonly ? 'readonly' : ''}>
     </div>`;
   }).join('');
 
@@ -2425,6 +2443,16 @@ document.getElementById('btn-confirm-ocr').addEventListener('click', async () =>
     vehicle_model: document.getElementById('ocrf-vehicle_model')?.value,
     vin: document.getElementById('ocrf-vin')?.value,
     services: document.getElementById('ocrf-services')?.value,
+    request_no: document.getElementById('ocrf-request_no')?.value,
+    model_year: document.getElementById('ocrf-model_year')?.value,
+    request_date: document.getElementById('ocrf-request_date')?.value,
+    sales_consultant: document.getElementById('ocrf-sales_consultant')?.value,
+    sequence_no: document.getElementById('ocrf-sequence_no')?.value,
+    requested_delivery_time: document.getElementById('ocrf-delivery_time')?.value,
+    service_1: document.getElementById('ocrf-service_1')?.value,
+    film_type_1: document.getElementById('ocrf-film_type_1')?.value,
+    service_2: document.getElementById('ocrf-service_2')?.value,
+    film_type_2: document.getElementById('ocrf-film_type_2')?.value,
   };
   try {
     const data = await fetchJSON(`/api/ocr/${encodeURIComponent(currentOcrDraftId)}/confirm`, {
