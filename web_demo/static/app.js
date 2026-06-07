@@ -1119,7 +1119,7 @@ async function taiKhachHang() {
             const noNorm = v.has_active_norm === false;
             return `<tr><td><strong>${_esc(v.vehicle_id)}</strong></td><td>${_esc(v.vehicle_model_code)}${noNorm ? ' <span class="badge-warn" title="Dòng xe này chưa có định mức active.">!</span>' : ''}</td><td>${_esc(v.vin_masked || '—')}</td>
             <td>${_esc(v.dealer_id || '—')}</td><td>${_esc(v.customer_id || '—')}</td><td>${_esc(v.vehicle_status || v.status)}</td>
-            <td><button type="button" class="btn btn-outline btn-sm" onclick="moDrawerVehicle('${v.vehicle_id}')">Xem</button>
+            <td><button type="button" class="btn btn-outline btn-sm" onclick="moDrawerVehicle('${v.vehicle_id}')">Lịch sử</button>
             <button type="button" class="btn btn-outline btn-sm" onclick="moToggleVehicle('${v.vehicle_id}','${(v.vehicle_status || v.status) === 'ACTIVE' ? 'deactivate' : 'activate'}')">${(v.vehicle_status || v.status) === 'ACTIVE' ? 'Inactive' : 'Active'}</button></td></tr>`;
           }).join('')}
           </tbody></table></div>
@@ -1199,21 +1199,79 @@ window.moDrawerDealer = async function(id) {
   const ov = document.getElementById('modal-drawer-overlay');
   const h = await fetch(`/api/dealers/${encodeURIComponent(id)}/history`).then(r => r.json());
   document.getElementById('drawer-title').textContent = 'Đại lý — ' + id;
-  document.getElementById('drawer-body').innerHTML = renderJsonToReadableHtml(h);
+  
+  let statsHtml = '';
+  if (h.requests_per_month || h.popular_models || h.completed_count !== undefined) {
+     statsHtml = `<div style="margin-top:20px; padding-top:10px; border-top:1px solid #3b3b4f;"><h4 style="margin-bottom:12px;color:#fff;">Thống kê hoạt động</h4>`;
+     statsHtml += `<div class="kpi-grid kpi-grid-compact" style="margin-bottom:12px;">
+        <div class="kpi-card" data-color="blue"><div class="kpi-val">${h.completed_count || 0}</div><div class="kpi-label">Số đơn hoàn thành</div></div>
+        <div class="kpi-card" data-color="teal"><div class="kpi-val">${(h.on_time_sla_rate_percent || 0).toFixed(1)}%</div><div class="kpi-label">Đúng hạn SLA</div></div>
+     </div>`;
+     if (h.popular_models && h.popular_models.length > 0) {
+       statsHtml += `<div style="margin-top:10px;font-size:12px;"><strong style="color:#aaa;">Dòng xe phổ biến:</strong> <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px;">${h.popular_models.map(m => `<span style="background:#2a2a3a;padding:2px 6px;border-radius:4px;border:1px solid #3b3b4f;">${_esc(m.model)} (${m.count})</span>`).join('')}</div></div>`;
+     }
+     if (h.requests_per_month && Object.keys(h.requests_per_month).length > 0) {
+       statsHtml += `<div style="margin-top:10px;font-size:12px;"><strong style="color:#aaa;">Yêu cầu theo tháng:</strong> <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px;">${Object.entries(h.requests_per_month).map(([k,v]) => `<span style="background:#2a2a3a;padding:2px 6px;border-radius:4px;border:1px solid #3b3b4f;">${_esc(k)}: ${v}</span>`).join('')}</div></div>`;
+     }
+     statsHtml += `</div>`;
+  }
+  
+  delete h.requests; delete h.vehicles; delete h.customers_from_dealer; delete h.requests_per_month; delete h.popular_models; delete h.completed_count; delete h.on_time_sla_rate_percent; delete h.revenue_placeholder;
+  
+  document.getElementById('drawer-body').innerHTML = `<h4 style="margin-bottom:8px;color:#fff;">Thông tin chung</h4>` + renderJsonToReadableHtml(h.dealer || h) + statsHtml;
   ov.style.display = 'flex';
 };
+
 window.moDrawerCustomer = async function(id) {
   const ov = document.getElementById('modal-drawer-overlay');
   const h = await fetch(`/api/customers/${encodeURIComponent(id)}/history`).then(r => r.json());
   document.getElementById('drawer-title').textContent = 'Khách hàng — ' + id;
-  document.getElementById('drawer-body').innerHTML = renderJsonToReadableHtml(h);
+  
+  let statsHtml = '';
+  if (h.requests_per_month || h.popular_models || h.completed_count !== undefined) {
+     statsHtml = `<div style="margin-top:20px; padding-top:10px; border-top:1px solid #3b3b4f;"><h4 style="margin-bottom:12px;color:#fff;">Thống kê hoạt động</h4>`;
+     statsHtml += `<div class="kpi-grid kpi-grid-compact" style="margin-bottom:12px;">
+        <div class="kpi-card" data-color="blue"><div class="kpi-val">${h.completed_count || 0}</div><div class="kpi-label">Số đơn hoàn thành</div></div>
+     </div>`;
+     if (h.popular_models && h.popular_models.length > 0) {
+       statsHtml += `<div style="margin-top:10px;font-size:12px;"><strong style="color:#aaa;">Dòng xe phổ biến:</strong> <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px;">${h.popular_models.map(m => `<span style="background:#2a2a3a;padding:2px 6px;border-radius:4px;border:1px solid #3b3b4f;">${_esc(m.model)} (${m.count})</span>`).join('')}</div></div>`;
+     }
+     if (h.requests_per_month && Object.keys(h.requests_per_month).length > 0) {
+       statsHtml += `<div style="margin-top:10px;font-size:12px;"><strong style="color:#aaa;">Yêu cầu theo tháng:</strong> <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px;">${Object.entries(h.requests_per_month).map(([k,v]) => `<span style="background:#2a2a3a;padding:2px 6px;border-radius:4px;border:1px solid #3b3b4f;">${_esc(k)}: ${v}</span>`).join('')}</div></div>`;
+     }
+     statsHtml += `</div>`;
+  }
+  
+  delete h.requests; delete h.vehicles; delete h.requests_per_month; delete h.popular_models; delete h.completed_count; delete h.on_time_sla_rate_percent;
+  
+  document.getElementById('drawer-body').innerHTML = `<h4 style="margin-bottom:8px;color:#fff;">Thông tin chung</h4>` + renderJsonToReadableHtml(h.customer || h) + statsHtml;
   ov.style.display = 'flex';
 };
+
 window.moDrawerVehicle = async function(id) {
   const ov = document.getElementById('modal-drawer-overlay');
   const h = await fetch(`/api/vehicles/${encodeURIComponent(id)}/history`).then(r => r.json());
   document.getElementById('drawer-title').textContent = 'Xe — ' + id;
-  document.getElementById('drawer-body').innerHTML = renderJsonToReadableHtml(h);
+  
+  let statsHtml = '';
+  if (h.requests && h.requests.length > 0) {
+    statsHtml = `<div style="margin-top:20px; padding-top:10px; border-top:1px solid #3b3b4f;"><h4 style="margin-bottom:12px;color:#fff;">Lịch sử thi công</h4>`;
+    statsHtml += `<table class="data-table" style="font-size:12px; width:100%;">
+      <thead><tr><th>Mã yêu cầu</th><th>Ngày tạo</th><th>Trạng thái</th><th>Hạng mục</th></tr></thead>
+      <tbody>
+        ${h.requests.map(r => `<tr>
+          <td>${_esc(r.request_id)}</td>
+          <td>${fmtDt(r.created_at)}</td>
+          <td>${_esc(r.status)}</td>
+          <td><span style="font-size:10px;">${_esc(r.job_items || '').replace(/;/g, ', ')}</span></td>
+        </tr>`).join('')}
+      </tbody>
+    </table></div>`;
+  }
+
+  delete h.requests; delete h.owner_customer; delete h.dealer; delete h.services_completed; delete h.last_delivery_date;
+  
+  document.getElementById('drawer-body').innerHTML = `<h4 style="margin-bottom:8px;color:#fff;">Thông tin chung</h4>` + renderJsonToReadableHtml(h.vehicle || h) + statsHtml;
   ov.style.display = 'flex';
 };
 
