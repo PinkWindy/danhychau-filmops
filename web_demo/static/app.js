@@ -2936,20 +2936,9 @@ async function hienThiTheLuong(requestId) {
       const sel = (wfa.items || []).filter((x) => x.is_selected);
       let nsrc = 0;
       let hasOff = false;
-      const parts = [];
       for (const it of sel) {
         nsrc += (it.sources || []).filter((s) => (s.source_id || '').trim()).length;
         if ((it.sources || []).some((s) => (s.source_type || '').toUpperCase() === 'OFFCUT')) hasOff = true;
-        const tot = (it.sources || []).reduce((s, x) => s + (parseFloat(x.allocated_length_m) || 0), 0);
-        const req = parseFloat(it.required_length_m) || 0;
-        const ok = req <= 0 || tot + 1e-6 >= req;
-        const sl = (it.sources || []).filter((s) => (s.source_id || '').trim()).map((s) => `${s.source_id}: ${s.allocated_length_m}m`).join('<br>');
-        const psz = (it.planned_size || '').trim();
-        const dim = psz ? ` · ${_esc(psz)} cm` : '';
-        const qty = it.quantity != null && it.quantity !== '' ? it.quantity : '—';
-        parts.push(
-          `<div style="margin-bottom:6px"><strong>${it.item_name}</strong> <span class="mat-code">${it.material_code}</span>${dim} — SL <strong>${qty}</strong> — ${ok ? '<span style="color:var(--teal-light)">Đủ</span>' : '<span style="color:var(--amber)">Thiếu</span>'}<div style="font-size:11px;margin-top:2px">${sl || '—'}</div></div>`
-        );
       }
       const splitBadge =
         nsrc > sel.length && sel.length
@@ -2958,7 +2947,70 @@ async function hienThiTheLuong(requestId) {
       const offBadge = hasOff
         ? ' <span style="padding:2px 7px;border-radius:6px;background:rgba(156,39,176,0.25);font-size:9px;font-weight:700">Dùng mảnh dư</span>'
         : '';
-      wfSourceBlock = `<div class="ws-info-row"><span class="ws-label">Phân bổ vật tư WF</span><span class="ws-value" style="font-size:11px">${splitBadge}${offBadge}<div style="margin-top:6px">${parts.join('')}</div>${wfRollCutSummaryHtml(wfa)}</span></div>`;
+
+      let tableHtml = `<table class="data-table" style="width:100%;font-size:12px;margin-bottom:12px">
+        <thead>
+          <tr style="text-align:left;background:rgba(255,255,255,0.05)">
+            <th style="padding:8px">HẠNG MỤC</th>
+            <th style="padding:8px">NGUỒN (LOT/MẢNH)</th>
+            <th style="padding:8px">YÊU CẦU CẮT GỘP (M)</th>
+            <th style="padding:8px">SỐ MÉT CẮT (M)</th>
+            <th style="padding:8px">KẾT QUẢ</th>
+          </tr>
+        </thead>
+        <tbody>`;
+
+      const byLot = {};
+      const blocks = wfa.roll_cut_summary ? (wfa.roll_cut_summary.blocks || []) : [];
+      blocks.forEach((block) => {
+        const reqM = parseFloat(block.roll_strip_m) || 0;
+        let gotM = 0;
+        let sourcesArr = [];
+
+        (wfa.items || []).forEach((it) => {
+          if (!it.is_selected || !(block.item_codes || []).includes(it.item_code)) return;
+          (it.sources || []).forEach((s) => {
+            const len = parseFloat(s.allocated_length_m) || 0;
+            gotM += len;
+            if (len > 0) {
+              const sid = (s.source_id || 'Chưa chọn LOT').toUpperCase();
+              if (!sourcesArr.includes(sid)) sourcesArr.push(sid);
+              if (!byLot[sid]) byLot[sid] = 0;
+              byLot[sid] += len;
+            }
+          });
+        });
+
+        const ok = gotM + 1e-6 >= reqM;
+        const label = reqM <= 1e-9 ? '—' : ok ? 'Đủ' : 'Thiếu';
+        const col = reqM <= 1e-9 ? 'var(--text-secondary)' : ok ? 'var(--teal-light)' : 'var(--amber)';
+        const sourcesStr = sourcesArr.length > 0 ? sourcesArr.join(', ') : '—';
+
+        tableHtml += `<tr>
+          <td style="padding:8px"><strong>${_esc(block.label)}</strong></td>
+          <td style="padding:8px">${_esc(sourcesStr)}</td>
+          <td style="padding:8px">${reqM.toFixed(2)}</td>
+          <td style="padding:8px">${gotM.toFixed(2)}</td>
+          <td style="padding:8px;color:${col};font-weight:600">${label}</td>
+        </tr>`;
+      });
+      tableHtml += `</tbody></table>`;
+
+      let summaryHtml = '<div style="margin-bottom:10px;padding:10px;background:rgba(0,60,120,0.22);border-radius:8px;font-size:12px;line-height:1.45"><div style="font-weight:700;margin-bottom:6px">Tổng hợp cắt khổ (152cm) theo LOT</div>';
+      const lotKeys = Object.keys(byLot).sort();
+      if (lotKeys.length > 0) {
+        lotKeys.forEach(sid => {
+          summaryHtml += `<div style="margin-bottom:4px">LOT <strong>${_esc(sid)}</strong>: Tổng chiều dài cắt là <strong>${byLot[sid].toFixed(2)}m</strong> x 152cm</div>`;
+        });
+      } else {
+        summaryHtml += `<div>Chưa có dữ liệu phân bổ theo LOT</div>`;
+      }
+      summaryHtml += '</div>';
+
+      wfSourceBlock = `<div class="ws-info-row" style="display:block; width:100%;">
+        <span class="ws-label" style="display:inline-block; margin-bottom:10px;"><i class="fa-solid fa-scale-balanced" style="color:var(--teal-light); margin-right:4px;"></i> Kiểm tra từng hạng mục ${splitBadge}${offBadge}</span>
+        <div style="margin-top:6px">${tableHtml}${summaryHtml}</div>
+      </div>`;
     }
 
     return `<div class="ws-card ${typeClass}">
@@ -2978,13 +3030,7 @@ async function hienThiTheLuong(requestId) {
         </div>
         <div class="ws-info-row"><span class="ws-label">Kích thước block</span><span class="ws-value">${ppfBlockDisplay}</span></div>
         <div class="ws-info-row"><span class="ws-label">Chiều dài trừ kho (Full xe)</span><span class="ws-value">${ppfLenDisplay != null && ppfLenDisplay !== '' ? ppfLenDisplay : '—'} m</span></div>
-        ` : `
-        <div class="ws-info-row"><span class="ws-label">Loại phim</span>
-          <span class="ws-value" style="color:var(--blue-light)">
-            ${tenPhim[ws.selected_material_code] || ws.selected_material_code || '—'}
-          </span>
-        </div>
-        `}
+        ` : ''}
 
         ${!isPpf && matPlan.length > 0 ? `<div class="wf-material-plan">
           <div style="font-size:11px;font-weight:700;color:var(--text-secondary);margin-bottom:6px">Kế hoạch vật tư từng kính:</div>
