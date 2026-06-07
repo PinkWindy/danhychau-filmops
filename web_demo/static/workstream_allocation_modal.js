@@ -648,32 +648,35 @@
         </thead>
         <tbody>`;
 
-      (a.items || []).forEach((it) => {
-        if (!it.is_selected) return;
-        const reqM = parseFloat(it.required_length_m) || 0;
+      const sum = computeWfRollCutSummary(a);
+      (sum.blocks || []).forEach((block) => {
+        const reqM = parseFloat(block.roll_strip_m) || 0;
         let gotM = 0;
         let sourcesArr = [];
 
-        (it.sources || []).forEach((s) => {
-          const len = parseFloat(s.allocated_length_m) || 0;
-          gotM += len;
-          if (len > 0) {
-            const sid = (s.source_id || 'Chưa chọn LOT').toUpperCase();
-            sourcesArr.push(sid);
-            if (!byLot[sid]) byLot[sid] = 0;
-            byLot[sid] += len;
-          }
+        (a.items || []).forEach((it) => {
+          if (!it.is_selected || !block.item_codes.includes(it.item_code)) return;
+          (it.sources || []).forEach((s) => {
+            const len = parseFloat(s.allocated_length_m) || 0;
+            gotM += len;
+            if (len > 0) {
+              const sid = (s.source_id || 'Chưa chọn LOT').toUpperCase();
+              if (!sourcesArr.includes(sid)) sourcesArr.push(sid);
+              if (!byLot[sid]) byLot[sid] = 0;
+              byLot[sid] += len;
+            }
+          });
         });
 
-        const ok = Math.abs(reqM - gotM) <= 0.001;
+        const ok = gotM + 1e-6 >= reqM;
         if (!ok && reqM > 0) matBad = true;
 
-        const label = ok ? 'Đủ' : 'Thiếu';
-        const col = ok ? 'var(--teal-light)' : 'var(--amber)';
+        const label = reqM <= 1e-9 ? '—' : ok ? 'Đủ' : 'Thiếu';
+        const col = reqM <= 1e-9 ? 'var(--text-secondary)' : ok ? 'var(--teal-light)' : 'var(--amber)';
         const sourcesStr = sourcesArr.length > 0 ? sourcesArr.join(', ') : '—';
 
         tableHtml += `<tr>
-          <td><strong>${esc(it.item_name)}</strong></td>
+          <td><strong>${esc(block.label)}</strong></td>
           <td>${esc(sourcesStr)}</td>
           <td>${reqM.toFixed(2)}</td>
           <td>${gotM.toFixed(2)}</td>
