@@ -3491,6 +3491,11 @@ window.chiinhSuaWs = async function(wsId) {
 
   document.getElementById('btn-ws-edit-save').onclick = () => luuChinhSuaWs(ws, isPpf);
   document.getElementById('ws-edit-modal').style.display = 'flex';
+  } catch(err) {
+    console.error(err);
+    if (typeof toast === 'function') toast('error', 'Lỗi', err.message);
+    else alert('Lỗi: ' + err.message);
+  }
 };
 
 window.chonLoaiPhim = function(matId, btnEl, groupId, hiddenId) {
