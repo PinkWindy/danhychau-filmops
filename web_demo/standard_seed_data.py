@@ -429,12 +429,12 @@ def seed_vehicle_film_norms(db: Session) -> Dict[str, Any]:
         windshield_size="152x1300",
         windshield_width_cm=152,
         windshield_length_cm=1300,
+        front_side_size="122x165",
+        front_side_width_cm=122,
+        front_side_length_cm=165,
         rear_window_size="",
         rear_window_width_cm=0,
         rear_window_length_cm=0,
-        front_side_size="",
-        front_side_width_cm=0,
-        front_side_length_cm=0,
         rear_side_triangle_size="",
         rear_side_triangle_width_cm=0,
         rear_side_triangle_length_cm=0,
@@ -444,9 +444,9 @@ def seed_vehicle_film_norms(db: Session) -> Dict[str, Any]:
         rear_side_size="",
         rear_side_width_cm=0,
         rear_side_length_cm=0,
-        sunroof_size="",
-        sunroof_width_cm=0,
-        sunroof_length_cm=0,
+        sunroof_size="10x152",
+        sunroof_width_cm=10,
+        sunroof_length_cm=152,
         status="ACTIVE",
         note=json.dumps(
             {"item_code": "FULL_VEHICLE_PPF", "item_name": "Full xe", "planned_size": "152x1300", "required_length_m": 13.0},
@@ -476,6 +476,8 @@ def seed_material_preferences(db: Session) -> None:
         ("MATPREF-SUN", ft_wf, "SUNROOF", "JB20", None, 1),
         ("MATPREF-PPF-T", "PPF", "PPF_BODY", "T-TYPE", "Phim PPF Climax trong", 1),
         ("MATPREF-PPF-M", "PPF", "PPF_BODY", "M-TYPE", "Phim PPF Climax mờ", 2),
+        ("MATPREF-PPF-SUN", "PPF", "PPF_SUNROOF", "S-TYPE", "Phim PPF kính trời S-TYPE", 1),
+        ("MATPREF-PPF-GLASS", "PPF", "PPF_GLASS", "PET-TYPE", "Phim PPF kính lái PET-TYPE", 1),
     ]
     for pid, ft, ji, mc, mn, pr in specs:
         _merge_material_pref(

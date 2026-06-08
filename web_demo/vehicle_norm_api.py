@@ -189,18 +189,28 @@ def register_vehicle_norm_routes(app, get_db):
         return _wrap_norm_list(items, with_meta, applied)
 
     @router.get("/vehicle-norms/model-options")
-    def vehicle_norm_model_options(db: Session = Depends(get_db)):
+    def vehicle_norm_model_options(
+        db: Session = Depends(get_db),
+        source: str = Query(
+            "all",
+            description="`all` = định mức ∪ hồ sơ xe; `norms` = chỉ DISTINCT vehicle_model_code từ bảng định mức phim",
+        ),
+    ):
         codes: set[str] = set()
         for (c,) in db.query(DbVehicleFilmNorm.vehicle_model_code).distinct().all():
             s = (c or "").strip()
             if s:
                 codes.add(s)
-        for (c,) in db.query(DbVehicleProfile.vehicle_model_code).distinct().all():
-            s = (c or "").strip()
-            if s:
-                codes.add(s)
+        src = (source or "all").strip().lower()
+        if src not in ("all", "norms"):
+            raise HTTPException(400, "source phải là all hoặc norms")
+        if src == "all":
+            for (c,) in db.query(DbVehicleProfile.vehicle_model_code).distinct().all():
+                s = (c or "").strip()
+                if s:
+                    codes.add(s)
         items = sorted(codes, key=lambda x: (x.lower(), x))
-        return {"items": items, "total": len(items)}
+        return {"items": items, "total": len(items), "source": src}
 
     @router.get("/vehicle-norms/resolve")
     def resolve_norm(

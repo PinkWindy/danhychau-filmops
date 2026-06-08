@@ -232,7 +232,9 @@ def _query_active_norms_for_models(db: Session, vehicle_model_code: str, film_ty
         .filter(DbVehicleFilmNorm.status == "ACTIVE")
         .filter(DbVehicleFilmNorm.vehicle_model_code.in_(candidates))
     )
-    if ft and not (ft.upper() == "PPF" or "PPF" in ft.upper()):
+    if ft.upper() == "PPF" or "PPF" in ft.upper():
+        q = q.filter(DbVehicleFilmNorm.film_type == "PPF")
+    elif ft:
         q = q.filter(DbVehicleFilmNorm.film_type == ft)
     return (
         q.order_by(

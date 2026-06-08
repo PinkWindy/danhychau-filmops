@@ -25,6 +25,37 @@ function _normSizeDisplay(n, sizeKey, wKey, lKey) {
   return '—';
 }
 
+/** Tab Định mức PPF — BODY: kích thước thân xe từ cặp windshield_* (hiển thị cạnh dài × cạnh ngắn, ví dụ 1300x152). */
+function _ppfBodyDisplay(n) {
+  const w = parseFloat(n.windshield_width_cm) || 0;
+  const l = parseFloat(n.windshield_length_cm) || 0;
+  if (w > 0 && l > 0) {
+    const a = Math.round(Math.max(w, l));
+    const b = Math.round(Math.min(w, l));
+    return _esc(`${a}x${b}`);
+  }
+  const raw = String(n.windshield_size ?? '').trim();
+  if (raw && raw !== '0') return _esc(raw);
+  return '—';
+}
+
+function _normFilmTypeIsPpf(ft) {
+  const v = String(ft ?? '')
+    .trim()
+    .toUpperCase();
+  return v === 'PPF' || v === 'PHIM PPF' || v.includes('PPF');
+}
+
+/** Ẩn/hiện khối kích thước WF vs PPF trong modal định mức. */
+function _normSyncNormSizeMode() {
+  const ft = (document.getElementById('ed-n-ft')?.value || '').trim();
+  const ppf = _normFilmTypeIsPpf(ft);
+  const wfBlk = document.getElementById('ed-n-mode-wf');
+  const ppfBlk = document.getElementById('ed-n-mode-ppf');
+  if (wfBlk) wfBlk.style.display = ppf ? 'none' : '';
+  if (ppfBlk) ppfBlk.style.display = ppf ? '' : 'none';
+}
+
 /** Master địa bàn: load từ GET /api/location (JSON sinh từ CSV/Excel qua location_master_import). */
 window.DYC_LOCATION_MASTER = window.DYC_LOCATION_MASTER || {
   provinces: [],
@@ -258,6 +289,9 @@ function debounce(fn, delay) {
 }
 
 function ensureCustFilters() {
+  if (typeof window._normsSubtab === 'undefined') {
+    window._normsSubtab = 'wf';
+  }
   window._custF ||= {
     dealers: { q: '', status: '', dealer_group: '', city: '', ward: '', has_amis_code: '', has_tax_code: '' },
     customers: {
@@ -372,6 +406,24 @@ async function refreshModelDatalistFromApi() {
   }
   console.warn('[dyc-model-datalist] Using local fallback model list (demo only)');
   dl.innerHTML = DYC_MODEL_CODES.map((m) => `<option value="${_esc(m)}"></option>`).join('');
+}
+
+/** Datalist «Dòng xe» trên form Tạo đơn thủ công: chỉ mã đã có trong Định mức phim (DISTINCT, không trùng). */
+async function refreshMcNormModelDatalistFromApi() {
+  let dl = document.getElementById('dyc-mc-model-datalist');
+  if (!dl) {
+    dl = document.createElement('datalist');
+    dl.id = 'dyc-mc-model-datalist';
+    document.body.appendChild(dl);
+  }
+  try {
+    const j = await fetch('/api/vehicle-norms/model-options?source=norms').then((r) => r.json());
+    const items = (j.items || []).filter((x) => x != null && String(x).trim() !== '');
+    dl.innerHTML = items.map((m) => `<option value="${_esc(String(m))}"></option>`).join('');
+  } catch (e) {
+    console.warn('[dyc-mc-model-datalist] GET model-options?source=norms failed', e);
+    dl.innerHTML = '';
+  }
 }
 
 function _ensureModelDatalist() {
@@ -1186,7 +1238,7 @@ async function taiTaoDonTay() {
 
 function _mcIsoDelivery() {
   const d = document.getElementById('mc-deliv-date').value;
-  const t = document.getElementById('mc-deliv-time').value || '17:30';
+  const t = document.getElementById('mc-deliv-time')?.value || '17:30';
   if (!d) return '';
   return `${d}T${t}:00+07:00`;
 }
@@ -1198,6 +1250,7 @@ async function taiKhachHang() {
   _ensureLocationDatalists();
   _ensureModelDatalist();
   await refreshModelDatalistFromApi();
+  await refreshMcNormModelDatalistFromApi();
   let dlGrp = document.getElementById('dyc-dealer-group-datalist');
   if (!dlGrp) {
     dlGrp = document.createElement('datalist');
@@ -1901,6 +1954,7 @@ window.moToggleNorm = async function(normId, act) {
   }
   toast('success', 'Định mức', 'Đã cập nhật trạng thái');
   taiKhachHang();
+  await taiDinhMucPhim();
 };
 
 window.moFormDealer = async function(id) {
@@ -2000,9 +2054,10 @@ window.moFormNorm = function(normId) {
     <div class="dyc-field"><label>Dòng xe (mã)<span class="req">*</span></label><input id="ed-n-vc" placeholder="VD: RX300" /></div>
   </div>
   <div class="dyc-field"><label>Năm / khoảng model<span class="req">*</span></label><input id="ed-n-myr" placeholder="VD: 2018 hoặc 2013 - 2022" value="2013 - 2022" /></div>
+  <div id="ed-n-mode-wf">
   <div class="dyc-form-section">Kích thước kính (WxL, cm — như Excel)</div>
   <div class="dyc-form-row-2">
-    <div class="dyc-field"><label>Kính lái</label><input id="ed-n-ws" placeholder="VD: 90x152" value="90x152" /></div>
+    <div class="dyc-field"><label>Kính lái (WF)</label><input id="ed-n-ws" placeholder="VD: 90x152" value="90x152" /></div>
     <div class="dyc-field"><label>Kính hậu</label><input id="ed-n-rs" placeholder="VD: 60x130" value="60x130" /></div>
   </div>
   <div class="dyc-form-row-2">
@@ -2014,6 +2069,14 @@ window.moFormNorm = function(normId) {
     <div class="dyc-field"><label>Sườn sau (riêng)</label><input id="ed-n-rside" placeholder="WxL nếu tách khỏi SST" /></div>
   </div>
   <div class="dyc-field"><label>Tam giác (riêng)</label><input id="ed-n-tri" placeholder="WxL nếu tách" /></div>
+  </div>
+  <div id="ed-n-mode-ppf" style="display:none">
+  <div class="dyc-form-section">Kích thước PPF (WxL, cm)</div>
+  <p class="muted" style="font-size:11px;line-height:1.45;margin:0 0 10px">Trong CSDL, BODY dùng trường kỹ thuật <strong>windshield_*</strong> (không dùng cho kính lái WF). Kính lái PPF dùng <strong>front_side_*</strong>. Kính trời dùng <strong>sunroof_*</strong>.</p>
+  <div class="dyc-field"><label>BODY (thân xe)<span class="req">*</span></label><input id="ed-n-p-body" placeholder="VD: 1300x152" autocomplete="off" /></div>
+  <div class="dyc-field"><label>Kính lái (PPF)</label><input id="ed-n-p-ws" placeholder="VD: 122x165" autocomplete="off" /></div>
+  <div class="dyc-field"><label>Kính trời</label><input id="ed-n-p-sun" placeholder="VD: 10x152" autocomplete="off" /></div>
+  </div>
   <div class="dyc-form-row-2">
     <div class="dyc-field"><label>Trạng thái</label><select id="ed-n-status"><option value="ACTIVE">ACTIVE</option><option value="INACTIVE">INACTIVE</option></select></div>
     <div class="dyc-field"><label>Ghi chú</label><input id="ed-n-note" placeholder="Tùy chọn" /></div>
@@ -2023,6 +2086,10 @@ window.moFormNorm = function(normId) {
   );
   window._editNormId = normId;
   _mcQuickMode = isNew ? 'create-norm' : 'edit-norm';
+  const ftEl = document.getElementById('ed-n-ft');
+  ftEl?.addEventListener('input', _normSyncNormSizeMode);
+  ftEl?.addEventListener('change', _normSyncNormSizeMode);
+  _normSyncNormSizeMode();
   if (!isNew) {
     fetch('/api/vehicle-norms')
       .then((r) => r.json())
@@ -2043,6 +2110,13 @@ window.moFormNorm = function(normId) {
         document.getElementById('ed-n-sun').value = n.sunroof_size || '';
         document.getElementById('ed-n-rside').value = n.rear_side_size || '';
         document.getElementById('ed-n-tri').value = n.triangle_size || '';
+        const pb = document.getElementById('ed-n-p-body');
+        const pw = document.getElementById('ed-n-p-ws');
+        const ps = document.getElementById('ed-n-p-sun');
+        if (pb) pb.value = n.windshield_size || '';
+        if (pw) pw.value = n.front_side_size || '';
+        if (ps) ps.value = n.sunroof_size || '';
+        _normSyncNormSizeMode();
         const st = document.getElementById('ed-n-status');
         if (st) st.value = n.status === 'INACTIVE' ? 'INACTIVE' : 'ACTIVE';
         const nt = document.getElementById('ed-n-note');
@@ -2128,22 +2202,34 @@ document.getElementById('modal-quick-ok')?.addEventListener('click', async () =>
       }
       toast('success', 'KH', 'Đã lưu');
     } else if (_mcQuickMode === 'create-norm') {
+      const ft = document.getElementById('ed-n-ft').value.trim();
+      const isPpf = _normFilmTypeIsPpf(ft);
       const body = {
         norm_id: document.getElementById('ed-n-id').value.trim() || undefined,
-        film_type: document.getElementById('ed-n-ft').value.trim(),
+        film_type: ft,
         vehicle_model_code: document.getElementById('ed-n-vc').value.trim(),
         model_year_range: document.getElementById('ed-n-myr').value.trim(),
-        windshield_size: document.getElementById('ed-n-ws').value.trim(),
-        rear_window_size: document.getElementById('ed-n-rs').value.trim(),
-        front_side_size: document.getElementById('ed-n-fs').value.trim(),
-        rear_side_triangle_size: document.getElementById('ed-n-sst').value.trim(),
-        sunroof_size: document.getElementById('ed-n-sun').value.trim(),
-        rear_side_size: document.getElementById('ed-n-rside').value.trim(),
-        triangle_size: document.getElementById('ed-n-tri').value.trim(),
         status: (document.getElementById('ed-n-status')?.value || 'ACTIVE').trim(),
         note: document.getElementById('ed-n-note')?.value.trim() || null,
         created_by: actor,
       };
+      if (isPpf) {
+        body.windshield_size = (document.getElementById('ed-n-p-body')?.value || '').trim();
+        body.front_side_size = (document.getElementById('ed-n-p-ws')?.value || '').trim();
+        body.sunroof_size = (document.getElementById('ed-n-p-sun')?.value || '').trim();
+        body.rear_window_size = '';
+        body.rear_side_triangle_size = '';
+        body.rear_side_size = '';
+        body.triangle_size = '';
+      } else {
+        body.windshield_size = document.getElementById('ed-n-ws').value.trim();
+        body.rear_window_size = document.getElementById('ed-n-rs').value.trim();
+        body.front_side_size = document.getElementById('ed-n-fs').value.trim();
+        body.rear_side_triangle_size = document.getElementById('ed-n-sst').value.trim();
+        body.sunroof_size = document.getElementById('ed-n-sun').value.trim();
+        body.rear_side_size = document.getElementById('ed-n-rside').value.trim();
+        body.triangle_size = document.getElementById('ed-n-tri').value.trim();
+      }
       const url = '/api/vehicle-norms';
       const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       const txt = await r.text();
@@ -2156,22 +2242,34 @@ document.getElementById('modal-quick-ok')?.addEventListener('click', async () =>
       const nid = document.getElementById('ed-n-id').value.trim();
       const reason = (document.getElementById('ed-n-reason').value || '').trim();
       if (!reason) { toast('warning', 'Thiếu reason', ''); return; }
+      const ft = document.getElementById('ed-n-ft').value.trim();
+      const isPpf = _normFilmTypeIsPpf(ft);
       const body = {
-        film_type: document.getElementById('ed-n-ft').value.trim(),
+        film_type: ft,
         vehicle_model_code: document.getElementById('ed-n-vc').value.trim(),
         model_year_range: document.getElementById('ed-n-myr').value.trim(),
-        windshield_size: document.getElementById('ed-n-ws').value.trim(),
-        rear_window_size: document.getElementById('ed-n-rs').value.trim(),
-        front_side_size: document.getElementById('ed-n-fs').value.trim(),
-        rear_side_triangle_size: document.getElementById('ed-n-sst').value.trim(),
-        sunroof_size: document.getElementById('ed-n-sun').value.trim(),
-        rear_side_size: document.getElementById('ed-n-rside').value.trim(),
-        triangle_size: document.getElementById('ed-n-tri').value.trim(),
         status: (document.getElementById('ed-n-status')?.value || 'ACTIVE').trim(),
         note: document.getElementById('ed-n-note')?.value.trim() || null,
         reason,
         updated_by: actor,
       };
+      if (isPpf) {
+        body.windshield_size = (document.getElementById('ed-n-p-body')?.value || '').trim();
+        body.front_side_size = (document.getElementById('ed-n-p-ws')?.value || '').trim();
+        body.sunroof_size = (document.getElementById('ed-n-p-sun')?.value || '').trim();
+        body.rear_window_size = '';
+        body.rear_side_triangle_size = '';
+        body.rear_side_size = '';
+        body.triangle_size = '';
+      } else {
+        body.windshield_size = document.getElementById('ed-n-ws').value.trim();
+        body.rear_window_size = document.getElementById('ed-n-rs').value.trim();
+        body.front_side_size = document.getElementById('ed-n-fs').value.trim();
+        body.rear_side_triangle_size = document.getElementById('ed-n-sst').value.trim();
+        body.sunroof_size = document.getElementById('ed-n-sun').value.trim();
+        body.rear_side_size = document.getElementById('ed-n-rside').value.trim();
+        body.triangle_size = document.getElementById('ed-n-tri').value.trim();
+      }
       const url = `/api/vehicle-norms/${encodeURIComponent(nid)}`;
       const r = await fetch(url, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       const txt = await r.text();
@@ -2240,6 +2338,7 @@ document.getElementById('modal-quick-ok')?.addEventListener('click', async () =>
     _closeQuickModal();
     if (['edit-dealer', 'edit-customer', 'create-norm', 'edit-norm'].includes(doneMode)) taiKhachHang();
     else taiTaoDonTay();
+    if (['create-norm', 'edit-norm'].includes(doneMode)) await taiDinhMucPhim();
   } catch (e) {
     console.error('[modal-quick-ok]', e);
     toast('error', 'Lỗi lưu', e.message || String(e));
@@ -2372,9 +2471,40 @@ const MC_JOB_LABEL_VI = {
   TRIANGLE: 'Tam giác',
   REAR_SIDE: 'Sườn sau',
   SUNROOF: 'Kính trời',
+  PPF_BODY: 'BODY',
+  PPF_SUNROOF: 'Sunroof',
+  PPF_GLASS: 'Kính lái',
 };
 
 window._mcWfDefaults = window._mcWfDefaults || {};
+window._mcPpfDefaults = window._mcPpfDefaults || {};
+
+function _mcPpfNormSlice(norm, ji) {
+  if (!norm) return { w: '', h: '', sz: '' };
+  if (ji === 'PPF_BODY') {
+    return { w: norm.windshield_width_cm, h: norm.windshield_length_cm, sz: norm.windshield_size };
+  }
+  if (ji === 'PPF_SUNROOF') {
+    return { w: norm.sunroof_width_cm, h: norm.sunroof_length_cm, sz: norm.sunroof_size };
+  }
+  if (ji === 'PPF_GLASS') {
+    return { w: norm.front_side_width_cm, h: norm.front_side_length_cm, sz: norm.front_side_size };
+  }
+  return { w: '', h: '', sz: '' };
+}
+
+function _mcPpfFmtDims(w, h, sz) {
+  const wf = parseFloat(w);
+  const hf = parseFloat(h);
+  if (Number.isFinite(wf) && Number.isFinite(hf) && wf > 0 && hf > 0) {
+    const a = wf === Math.floor(wf) ? String(Math.floor(wf)) : String(wf);
+    const b = hf === Math.floor(hf) ? String(Math.floor(hf)) : String(hf);
+    const raw = (sz && String(sz).trim()) || '';
+    const display = raw || `${a} × ${b} cm`;
+    return { display, w: wf, h: hf, rawSz: raw };
+  }
+  return { display: '—', w: '', h: '', rawSz: '' };
+}
 
 async function mcRebuildWfDetail() {
   const wrap = document.getElementById('mc-wf-detail-wrap');
@@ -2464,46 +2594,132 @@ async function mcRebuildWfDetail() {
   }
 }
 
-async function mcPreviewNorm() {
-  const box = document.getElementById('mc-norm-preview');
-  if (!box) return;
-  if (!document.getElementById('mc-svc-wf')?.checked) {
-    box.innerHTML = '';
-    await mcRebuildWfDetail();
+async function mcRebuildPpfDetail() {
+  const wrap = document.getElementById('mc-ppf-detail-wrap');
+  const warnEl = document.getElementById('mc-ppf-warn');
+  if (!wrap) return;
+  window._mcPpfDefaults = {};
+  if (!document.getElementById('mc-svc-ppf')?.checked) {
+    wrap.innerHTML = '';
+    if (warnEl) {
+      warnEl.style.display = 'none';
+      warnEl.textContent = '';
+    }
+    return;
+  }
+  const checked = [...document.querySelectorAll('.mc-ppf-item:checked')].map((x) => x.value);
+  if (!checked.length) {
+    wrap.innerHTML = '<p class="muted" style="margin:0">Chọn ít nhất một hạng mục PPF.</p>';
+    if (warnEl) warnEl.style.display = 'none';
     return;
   }
   const vmRaw = (document.getElementById('mc-veh-model')?.value || '').trim();
   const vm = (window.normalizeVehicleModelCode && window.normalizeVehicleModelCode(vmRaw)) || vmRaw;
-  if (!vm) {
-    box.innerHTML = '';
-    await mcRebuildWfDetail();
-    return;
-  }
   const my = (document.getElementById('mc-model-year')?.value || '').trim();
-  const ft = (document.getElementById('mc-film-type')?.value || 'Phim cách nhiệt').trim();
-  let q = `vehicle_model_code=${encodeURIComponent(vm)}&film_type=${encodeURIComponent(ft)}`;
-  if (my) q += `&model_year=${encodeURIComponent(my)}`;
-  try {
-    const res = await fetch(`/api/vehicle-norms/resolve?${q}`).then(r => r.json());
-    if (res.found) {
-      const rows = (res.auto_fill_items || []).map((i) => {
-        const src = i.material_source
-          ? ` <small class="muted">(${_esc(materialSourceVi(i.material_source))})</small>`
-          : '';
-        return `${_esc(_wfJobLabelVi(i.job_item))} ${_esc(i.material_code || '—')} ${_esc(i.size || '')}${src}`;
-      }).join('<br/>');
-      box.innerHTML = `<strong>Định mức &amp; vật tư gợi ý</strong> (${_esc(res.norm_id || res.norm?.norm_id || '')})<br/>${rows}`;
-    } else {
-      box.innerHTML = '<span style="color:var(--orange)">Chưa có định mức ACTIVE. Cập nhật tại Khách hàng → Hồ sơ xe → Định mức phim.</span>';
+  const ppfMat = (document.getElementById('mc-ppf-type')?.value || 'T-TYPE').trim();
+  let norm = null;
+  if (vm) {
+    try {
+      let q = `vehicle_model_code=${encodeURIComponent(vm)}&film_type=${encodeURIComponent('PPF')}`;
+      if (my) q += `&model_year=${encodeURIComponent(my)}`;
+      const res = await fetch(`/api/vehicle-norms/resolve?${q}`).then((r) => r.json());
+      if (res.found && res.norm) norm = res.norm;
+    } catch (e) {
+      console.warn('[mcRebuildPpfDetail] norm resolve', e);
     }
-  } catch (err) {
-    box.textContent = 'Không gọi được API resolve.';
-    console.warn(err);
+  }
+  let anyMiss = false;
+  const rows = await Promise.all(
+    checked.map(async (ji) => {
+      const sl = _mcPpfNormSlice(norm, ji);
+      const dim = _mcPpfFmtDims(sl.w, sl.h, sl.sz);
+      let pr = {};
+      try {
+        const ps = new URLSearchParams({ film_type: 'PPF', job_item: ji });
+        if (ji === 'PPF_BODY' && ppfMat) ps.set('ppf_material', ppfMat);
+        pr = await fetch(`/api/material-preferences/resolve?${ps}`).then((r) => r.json());
+      } catch (e) {
+        console.warn('[mcRebuildPpfDetail] material resolve', ji, e);
+      }
+      const defMc = ((pr.preferred_material_code || '').trim() || '');
+      window._mcPpfDefaults[ji] = defMc;
+      const opts = new Set((pr.options || []).map((o) => o.material_code).filter(Boolean));
+      if (defMc) opts.add(defMc);
+      ['T-TYPE', 'M-TYPE', 'S-TYPE', 'PET-TYPE', 'TPU-TYPE'].forEach((c) => opts.add(c));
+      const optHtml = [...opts]
+        .filter(Boolean)
+        .map((c) => `<option value="${_esc(c)}"${c === defMc ? ' selected' : ''}>${_esc(c)}</option>`)
+        .join('');
+      const src = (pr.found ? 'MATERIAL_PREFERENCE' : 'MISSING_PREFERENCE').trim();
+      if (!pr.found && !defMc) anyMiss = true;
+      const lab = MC_JOB_LABEL_VI[ji] || ji;
+      return `<tr data-job-item="${_esc(ji)}">
+        <td><strong>${_esc(lab)}</strong><br/><small class="muted">${_esc(ji)}</small></td>
+        <td>${_esc(String(dim.display))}
+          <input type="hidden" class="mc-ppf-size" value="${_esc(String(dim.rawSz || dim.display || ''))}" />
+          <input type="hidden" class="mc-ppf-w" value="${_esc(String(dim.w === '' ? '' : dim.w))}" />
+          <input type="hidden" class="mc-ppf-h" value="${_esc(String(dim.h === '' ? '' : dim.h))}" /></td>
+        <td><select class="mc-ppf-mat field-input" data-default="${_esc(defMc)}" style="font-size:11px;max-width:140px">${optHtml}</select></td>
+        <td><span class="mc-ppf-src">${_esc(src)}</span></td>
+        <td><input type="text" class="mc-ppf-note field-input" placeholder="Ghi chú nếu đổi mã" style="font-size:11px;width:100%;min-width:100px" /></td>
+      </tr>`;
+    }),
+  );
+  wrap.innerHTML = `<div style="overflow-x:auto"><table class="data-table" style="font-size:11px"><thead><tr>
+    <th>Hạng mục</th><th>Kích thước định mức</th><th>Mã vật tư</th><th>Nguồn</th><th>Ghi chú đổi mã</th>
+  </tr></thead><tbody>${rows.join('')}</tbody></table></div>`;
+  if (warnEl) {
+    if (anyMiss) {
+      warnEl.style.display = 'block';
+      warnEl.textContent =
+        'Chưa cấu hình vật tư ưu tiên PPF cho một số hạng mục — vui lòng cập nhật Quản lý kho → Vật tư ưu tiên, hoặc chọn mã thủ công.';
+    } else {
+      warnEl.style.display = 'none';
+      warnEl.textContent = '';
+    }
+  }
+}
+
+async function mcPreviewNorm() {
+  const box = document.getElementById('mc-norm-preview');
+  if (!document.getElementById('mc-svc-wf')?.checked) {
+    if (box) box.innerHTML = '';
+  } else {
+    const vmRaw = (document.getElementById('mc-veh-model')?.value || '').trim();
+    const vm = (window.normalizeVehicleModelCode && window.normalizeVehicleModelCode(vmRaw)) || vmRaw;
+    if (!vm) {
+      if (box) box.innerHTML = '';
+    } else {
+      const my = (document.getElementById('mc-model-year')?.value || '').trim();
+      const ft = (document.getElementById('mc-film-type')?.value || 'Phim cách nhiệt').trim();
+      let q = `vehicle_model_code=${encodeURIComponent(vm)}&film_type=${encodeURIComponent(ft)}`;
+      if (my) q += `&model_year=${encodeURIComponent(my)}`;
+      if (box) {
+        try {
+          const res = await fetch(`/api/vehicle-norms/resolve?${q}`).then(r => r.json());
+          if (res.found) {
+            const rows = (res.auto_fill_items || []).map((i) => {
+              const src = i.material_source
+                ? ` <small class="muted">(${_esc(materialSourceVi(i.material_source))})</small>`
+                : '';
+              return `${_esc(_wfJobLabelVi(i.job_item))} ${_esc(i.material_code || '—')} ${_esc(i.size || '')}${src}`;
+            }).join('<br/>');
+            box.innerHTML = `<strong>Định mức &amp; vật tư gợi ý</strong> (${_esc(res.norm_id || res.norm?.norm_id || '')})<br/>${rows}`;
+          } else {
+            box.innerHTML = '<span style="color:var(--orange)">Chưa có định mức ACTIVE. Cập nhật tại Khách hàng → Hồ sơ xe → Định mức phim.</span>';
+          }
+        } catch (err) {
+          box.textContent = 'Không gọi được API resolve.';
+          console.warn(err);
+        }
+      }
+    }
   }
   await mcRebuildWfDetail();
+  await mcRebuildPpfDetail();
 }
 window.mcPreviewNorm = mcPreviewNorm;
-['mc-veh-model', 'mc-model-year', 'mc-film-type', 'mc-svc-wf'].forEach(id => {
+['mc-veh-model', 'mc-model-year', 'mc-film-type', 'mc-svc-wf', 'mc-ppf-type'].forEach(id => {
   document.getElementById(id)?.addEventListener('change', () => mcPreviewNorm());
   document.getElementById(id)?.addEventListener('input', () => { clearTimeout(window._mcNormT); window._mcNormT = setTimeout(mcPreviewNorm, 400); });
 });
@@ -2556,6 +2772,36 @@ document.getElementById('mc-btn-submit')?.addEventListener('click', async () => 
       }
     }
   }
+  let ppfFilmItems = undefined;
+  if (ppf) {
+    const ppfChk = [...document.querySelectorAll('.mc-ppf-item:checked')].map((x) => x.value);
+    if (!ppfChk.length) {
+      toast('warning', 'PPF', 'Chọn ít nhất một hạng mục PPF (BODY / Sunroof / Kính lái).');
+      return;
+    }
+    ppfFilmItems = [];
+    document.querySelectorAll('#mc-ppf-detail-wrap tr[data-job-item]').forEach((tr) => {
+      const ji = tr.getAttribute('data-job-item');
+      const sel = tr.querySelector('.mc-ppf-mat');
+      const mc = (sel?.value || '').trim();
+      const rowNote = (tr.querySelector('.mc-ppf-note')?.value || '').trim();
+      const wRaw = (tr.querySelector('.mc-ppf-w')?.value || '').trim();
+      const hRaw = (tr.querySelector('.mc-ppf-h')?.value || '').trim();
+      const w = wRaw === '' ? undefined : parseFloat(wRaw);
+      const h = hRaw === '' ? undefined : parseFloat(hRaw);
+      const sz = (tr.querySelector('.mc-ppf-size')?.value || '').trim();
+      const src = (tr.querySelector('.mc-ppf-src')?.textContent || '').trim() || 'MATERIAL_PREFERENCE';
+      ppfFilmItems.push({
+        job_item: ji,
+        size: sz || undefined,
+        width_cm: Number.isFinite(w) ? w : undefined,
+        length_cm: Number.isFinite(h) ? h : undefined,
+        material_code: mc || undefined,
+        material_source: src,
+        code_change_note: rowNote || undefined,
+      });
+    });
+  }
   const sla = (document.getElementById('mc-sla-note')?.value || '').trim();
   const baseNote = document.getElementById('mc-note').value.trim();
   const noteMerged = [baseNote, sla ? `SLA: ${sla}` : ''].filter(Boolean).join(' | ') || undefined;
@@ -2576,6 +2822,7 @@ document.getElementById('mc-btn-submit')?.addEventListener('click', async () => 
       include_window_film: wf,
       window_film_items: windowFilmItems,
       film_type: document.getElementById('mc-film-type')?.value || 'Phim cách nhiệt',
+      ...(Array.isArray(ppfFilmItems) && ppfFilmItems.length ? { ppf_film_items: ppfFilmItems } : {}),
     },
     model_year: (() => {
       const v = document.getElementById('mc-model-year')?.value;
@@ -2583,7 +2830,7 @@ document.getElementById('mc-btn-submit')?.addEventListener('click', async () => 
       return Number.isFinite(n) ? n : undefined;
     })(),
     film_type: document.getElementById('mc-film-type')?.value || undefined,
-    continue_without_norm: document.getElementById('mc-continue-no-norm')?.checked || false,
+    continue_without_norm: false,
     material_overrides: Object.keys(material_overrides).length ? material_overrides : undefined,
     material_override_reason: gReason || undefined,
     assigned_teams: {
@@ -6772,6 +7019,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('tab-manual')?.addEventListener('change', (ev) => {
     const t = ev.target;
     if (t && t.classList && t.classList.contains('mc-wf-item')) mcPreviewNorm();
+    if (t && t.classList && t.classList.contains('mc-ppf-item')) mcPreviewNorm();
     if (t && (t.id === 'mc-svc-wf' || t.id === 'mc-svc-ppf')) mcPreviewNorm();
   });
   document.querySelectorAll('#inv-subtabs .inv-subtab').forEach(btn => {
@@ -6791,6 +7039,25 @@ document.addEventListener('DOMContentLoaded', () => {
   taiThongBao();
   setInterval(taiThongBao, 30000);
   document.getElementById('tab-norms')?.addEventListener('click', (ev) => {
+    const subBtn = ev.target.closest('[data-norms-sub]');
+    if (subBtn) {
+      window._normsSubtab = subBtn.getAttribute('data-norms-sub') || 'wf';
+      if (window._normsSubtab === 'ppf') {
+        ensureCustFilters();
+        window._custF.norms.has_windshield = '';
+        window._custF.norms.has_sunroof = '';
+        window._custF.norms.has_rear_side_triangle = '';
+      }
+      document.querySelectorAll('#tab-norms [data-norms-sub]').forEach((b) => {
+        const on = b === subBtn;
+        b.classList.toggle('active', on);
+        b.classList.toggle('btn-primary', on);
+        b.classList.toggle('btn-outline', !on);
+        b.setAttribute('aria-selected', on ? 'true' : 'false');
+      });
+      taiDinhMucPhim();
+      return;
+    }
     const fa = ev.target.closest('[data-flt-act]');
     if (fa) {
       const act = fa.getAttribute('data-flt-act');
@@ -6830,16 +7097,32 @@ document.addEventListener('DOMContentLoaded', () => {
 
 async function taiDinhMucPhim() {
   ensureCustFilters();
+  if (window._normsSubtab !== 'wf' && window._normsSubtab !== 'ppf') {
+    window._normsSubtab = 'wf';
+  }
   _ensureModelDatalist();
   await refreshModelDatalistFromApi();
+  await refreshMcNormModelDatalistFromApi();
   const fn = window._custF.norms;
+  const isPpf = window._normsSubtab === 'ppf';
+  const qParams = { ...fn, with_meta: '1' };
+  if (isPpf) {
+    qParams.film_type = 'PPF';
+    qParams.has_windshield = '';
+    qParams.has_sunroof = '';
+    qParams.has_rear_side_triangle = '';
+  } else if (!fn.film_type) {
+    qParams.film_type = 'Phim cách nhiệt';
+  }
   try {
-    const res = await fetch('/api/vehicle-norms' + buildQuery({ ...fn, with_meta: '1' }));
+    const res = await fetch('/api/vehicle-norms' + buildQuery(qParams));
     const data = await res.json();
     const norms = (data.items || data.norms || []);
-    const nTotal = data.total || norms.length;
+    const nTotal = data.total != null ? data.total : norms.length;
     
-    let html = `
+    let html;
+    if (!isPpf) {
+    html = `
       <div class="cust-filter-bar">
         <div class="cust-filter-grid">
           <div class="dyc-field dyc-field-span2"><label>Tìm kiếm</label>
@@ -6848,7 +7131,7 @@ async function taiDinhMucPhim() {
             <select id="flt-n-film">
               <option value=""${fn.film_type === '' ? ' selected' : ''}>Tất cả</option>
               <option value="Phim cách nhiệt"${fn.film_type === 'Phim cách nhiệt' ? ' selected' : ''}>Phim cách nhiệt</option>
-              <option value="Phim PPF"${fn.film_type === 'Phim PPF' ? ' selected' : ''}>Phim PPF</option>
+              <option value="PPF"${fn.film_type === 'PPF' || fn.film_type === 'Phim PPF' ? ' selected' : ''}>Phim PPF</option>
             </select></div>
           <div class="dyc-field"><label>Dòng xe</label>
             <input id="flt-n-model" list="dyc-model-datalist" placeholder="Chọn hoặc nhập dòng xe" value="${_esc(fn.vehicle_model_code)}" autocomplete="off" /></div>
@@ -6924,6 +7207,64 @@ async function taiDinhMucPhim() {
       </tr>`).join('')}
       </tbody></table></div>`}
     `;
+    } else {
+      html = `
+      <div class="cust-filter-bar">
+        <div class="cust-filter-grid">
+          <div class="dyc-field dyc-field-span2"><label>Tìm kiếm</label>
+            <input id="flt-n-q" placeholder="Mã định mức, dòng xe, năm model..." value="${_esc(fn.q)}" autocomplete="off" /></div>
+          <div class="dyc-field"><label>Loại phim</label>
+            <select id="flt-n-film" disabled style="opacity:0.92"><option value="PPF" selected>PPF</option></select></div>
+          <div class="dyc-field"><label>Dòng xe</label>
+            <input id="flt-n-model" list="dyc-model-datalist" placeholder="ALL hoặc mã dòng xe" value="${_esc(fn.vehicle_model_code)}" autocomplete="off" /></div>
+          <div class="dyc-field"><label>Năm model</label>
+            <select id="flt-n-year">${_yearOptionsHtml(fn.model_year)}</select></div>
+          <div class="dyc-field"><label>Trạng thái</label>
+            <select id="flt-n-status">
+              <option value=""${fn.status === '' ? ' selected' : ''}>Tất cả</option>
+              <option value="ACTIVE"${fn.status === 'ACTIVE' ? ' selected' : ''}>ACTIVE</option>
+              <option value="INACTIVE"${fn.status === 'INACTIVE' ? ' selected' : ''}>INACTIVE</option>
+            </select></div>
+        </div>
+        <div class="cust-filter-actions">
+          <button type="button" class="btn btn-outline btn-sm" data-flt-act="norms-refresh">Làm mới</button>
+          <button type="button" class="btn btn-primary btn-sm" id="btn-norm-add" data-flt-act="norms-add">Thêm định mức</button>
+        </div>
+        <div class="cust-filter-meta">Tổng định mức PPF sau lọc: <strong id="flt-n-total">${nTotal}</strong></div>
+        <p class="cust-filter-meta" style="margin-top:6px;font-size:11px;line-height:1.45;color:var(--text-secondary)">Quy ước CSDL: <strong>BODY</strong> lưu tại trường kỹ thuật <strong>windshield_*</strong> (kích thước thân xe, ví dụ 1300×152). <strong>Kính lái</strong> PPF lưu tại <strong>front_side_*</strong> (122×165). <strong>Kính trời</strong> lưu tại <strong>sunroof_*</strong> (10×152). Trong form sửa, chọn loại phim PPF để nhập đúng ba ô này.</p>
+        <div class="filter-chips-row" id="flt-n-chips"></div>
+      </div>
+      ${norms.length === 0 ? '<div class="empty-state cust-empty"><p>Chưa có định mức PPF.</p></div>' : `
+      <div class="table-wrap"><table class="data-table table-norms-ppf"><thead><tr>
+        <th>Mã định mức</th>
+        <th>Loại phim</th>
+        <th>Dòng xe</th>
+        <th>Năm model</th>
+        <th>BODY</th>
+        <th>Kính lái</th>
+        <th>Kính trời</th>
+        <th>TT</th>
+        <th></th>
+      </tr></thead><tbody>
+      ${norms.map(n => `<tr>
+        <td><strong>${_esc(n.norm_id)}</strong></td>
+        <td>${_esc(n.film_type)}</td>
+        <td>${_esc(n.vehicle_model_code)}</td>
+        <td>${_esc(n.model_year_range || 'ALL')}</td>
+        <td>${_ppfBodyDisplay(n)}</td>
+        <td>${_normSizeDisplay(n, 'front_side_size', 'front_side_width_cm', 'front_side_length_cm')}</td>
+        <td>${_normSizeDisplay(n, 'sunroof_size', 'sunroof_width_cm', 'sunroof_length_cm')}</td>
+        <td>${_esc(n.status)}</td>
+        <td style="white-space:nowrap">
+          <button type="button" class="btn btn-outline btn-sm" onclick="moFormNorm('${n.norm_id}')">Sửa</button>
+          ${n.status === 'ACTIVE'
+            ? `<button type="button" class="btn btn-outline btn-sm" onclick="moToggleNorm('${n.norm_id}','deactivate')">Inactive</button>`
+            : `<button type="button" class="btn btn-outline btn-sm" onclick="moToggleNorm('${n.norm_id}','activate')">Active</button>`}
+        </td>
+      </tr>`).join('')}
+      </tbody></table></div>`}
+    `;
+    }
     
     const activeId = document.activeElement?.id;
     let activeStart, activeEnd;

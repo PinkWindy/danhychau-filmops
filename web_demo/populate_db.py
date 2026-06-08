@@ -179,6 +179,8 @@ def _seed_material_preferences(db):
         ("MATPREF-SUN", "Phim cách nhiệt", "SUNROOF", "JB20", "Phim cách nhiệt JB20", 1),
         ("MATPREF-PPF-T", "PPF", "PPF_BODY", "T-TYPE", "PPF trong T-TYPE", 1),
         ("MATPREF-PPF-M", "PPF", "PPF_BODY", "M-TYPE", "PPF mờ M-TYPE", 2),
+        ("MATPREF-PPF-SUN", "PPF", "PPF_SUNROOF", "S-TYPE", "PPF kính trời S-TYPE", 1),
+        ("MATPREF-PPF-GLASS", "PPF", "PPF_GLASS", "PET-TYPE", "PPF kính lái PET-TYPE", 1),
     ]
     for pid, ft, ji, mc, mname, pr in seeds:
         if db.query(DbMaterialPreference).filter(DbMaterialPreference.preference_id == pid).first():
