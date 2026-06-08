@@ -230,6 +230,8 @@ class DbRequest(Base):
     model_name = Column(String)
     sales_consultant = Column(String)
     sequence_no = Column(String)
+    # STT xe trong tháng (đếm từ đầu tháng, tăng theo đơn) — bổ sung sau sequence_no năm
+    sequence_no_month = Column(String)
 
 
 class DbVehicleFilmNorm(Base):
@@ -337,10 +339,15 @@ class DbWorkstream(Base):
     offcut_length_m = Column(Float)
     offcut_quality_status = Column(String)
     offcut_storage_location = Column(String)
+    offcut_material_code = Column(String)  # Mã vật tư mảnh dư KTV chọn khi hoàn tất (optional; mặc định theo luồng)
     created_offcut_id = Column(String)
     has_scrap = Column(Boolean, default=False)
     scrap_area_m2 = Column(Float, default=0.0)
     technician_note = Column(Text)
+    extra_cut_requested = Column(Boolean, default=False)
+    extra_cut_reason = Column(Text)
+    extra_cut_wf_allocation_json = Column(Text)  # JSON: phân bổ cắt thêm WF (cùng schema wf_allocation items)
+    extra_cut_history_json = Column(Text)  # JSON array: mỗi lần đề xuất (thời điểm, KTV, lý do, wf_allocation)
     # Approval
     approved_by = Column(String)
     approved_at = Column(String)
@@ -376,6 +383,8 @@ class DbJobCard(Base):
     delay_minutes = Column(Integer, default=0)
     created_at = Column(String)
     notes = Column(Text)
+    # JSON array of URL strings (e.g. /static/uploads/COMP-xxx.jpg) — ảnh chứng minh hoàn thành thi công
+    completion_photos_json = Column(Text)
 
 
 class DbAuditLog(Base):
@@ -660,6 +669,7 @@ def init_db():
             ("ocr_source_image", "TEXT"),
             ("model_name", "TEXT"),
             ("sales_consultant", "TEXT"),
+            ("sequence_no_month", "TEXT"),
         ]
         for col, col_def in request_more_cols:
             _add_column_if_missing(conn, "requests", col, col_def)
@@ -687,9 +697,20 @@ def init_db():
         workstream_new_cols = [
             ("ppf_allocation_json", "TEXT"),
             ("wf_allocation_json", "TEXT"),
+            ("offcut_material_code", "TEXT"),
+            ("extra_cut_requested", "BOOLEAN DEFAULT 0"),
+            ("extra_cut_reason", "TEXT"),
+            ("extra_cut_wf_allocation_json", "TEXT"),
+            ("extra_cut_history_json", "TEXT"),
         ]
         for col, col_def in workstream_new_cols:
             _add_column_if_missing(conn, "workstreams", col, col_def)
+
+        job_card_new_cols = [
+            ("completion_photos_json", "TEXT"),
+        ]
+        for col, col_def in job_card_new_cols:
+            _add_column_if_missing(conn, "job_cards", col, col_def)
 
         # Gỡ định mức demo tự tạo cũ — định mức phim cách nhiệt chỉ do người dùng nhập / import thủ công.
         try:

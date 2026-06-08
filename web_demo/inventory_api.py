@@ -15,6 +15,7 @@ from database import (
     DbInventoryTransaction,
     DbAuditLog,
     DbWorkstream,
+    DbMaterialPreference,
 )
 
 router = APIRouter(prefix="/api/inventory", tags=["inventory"])
@@ -321,6 +322,126 @@ def _add_inv_txn(
     )
 
 
+def create_offcut_from_workstream_return(
+    db: Session,
+    *,
+    offcut_id: str,
+    material_code: str,
+    width_m: float,
+    length_m: float,
+    quality_status: str,
+    storage_location: str,
+    request_id: str,
+    workstream_id: str,
+    job_card_id: Optional[str],
+    performed_by: str,
+    note: Optional[str],
+    parent_lot_id: Optional[str],
+    parent_offcut_id: Optional[str],
+    film_type: str,
+) -> DbOffcutInventory:
+    """
+    Ghi mảnh dư khi KTV hoàn tất luồng — cùng các cột chính với nhập thủ công (/offcuts/import),
+    thêm bút toán kho + audit (IMPORT_OFFCUT_WORKSTREAM).
+    """
+    area_m2 = round(float(width_m) * float(length_m), 3)
+    qs = (quality_status or "NORMAL").strip().upper()
+    if qs not in ("GOOD", "NORMAL", "POOR"):
+        qs = "NORMAL"
+    ft = (film_type or "WINDOW_FILM").strip() or "WINDOW_FILM"
+    pl = (parent_lot_id or "").strip() or None
+    po = (parent_offcut_id or "").strip() or None
+    oc = DbOffcutInventory(
+        offcut_id=offcut_id,
+        parent_lot_id=pl,
+        parent_offcut_id=po,
+        material_code=(material_code or "JB20").strip(),
+        film_type=ft,
+        width_m=float(width_m),
+        length_m=float(length_m),
+        area_m2=area_m2,
+        quality_status=qs,
+        offcut_status="AVAILABLE",
+        is_locked=False,
+        storage_location=(storage_location or "OFFCUT-RACK-C").strip(),
+        created_from_request_id=(request_id or "").strip() or None,
+        created_reason=f"Mảnh dư khi hoàn tất luồng {workstream_id}",
+        import_date=datetime.date.today().isoformat(),
+        status="ACTIVE",
+        note=(note or "").strip() or None,
+    )
+    db.add(oc)
+    reason = f"Mảnh dư sau hoàn tất luồng {workstream_id}"
+    _add_inv_txn(
+        db,
+        transaction_type="IMPORT_OFFCUT_WORKSTREAM",
+        source_type="OFFCUT",
+        source_id=offcut_id,
+        material_code=oc.material_code,
+        material_name=oc.material_name,
+        width_m=width_m,
+        length_m=length_m,
+        area_m2=area_m2,
+        quantity_m=area_m2,
+        balance_unit="SQUARE_METER",
+        before_balance=0.0,
+        after_balance=area_m2,
+        before_status=None,
+        after_status="AVAILABLE",
+        reason=reason,
+        related_request_id=request_id,
+        related_workstream_id=workstream_id,
+        related_job_card_id=job_card_id,
+        parent_lot_id=pl,
+        parent_offcut_id=po,
+        performed_by=performed_by or "KTV-003",
+        performed_role="TECHNICIAN",
+        note=note,
+    )
+    _audit_inv(
+        db,
+        event_type="OFFCUT_IMPORTED_WORKSTREAM",
+        source_type="OFFCUT",
+        source_id=offcut_id,
+        before_value="None",
+        after_value=f"{area_m2}m²",
+        reason=reason,
+        actor=performed_by or "KTV-003",
+        request_id=request_id,
+        workstream_id=workstream_id,
+    )
+    return oc
+
+
+def _first_import_actor_by_source(db: Session, source_ids: list, txn_types: tuple) -> dict:
+    """Dòng sổ nhập kho đầu tiên theo source_id → người thực hiện & thời điểm ghi nhận."""
+    if not source_ids:
+        return {}
+    rows = (
+        db.query(DbInventoryTransaction)
+        .filter(DbInventoryTransaction.source_id.in_(source_ids))
+        .filter(DbInventoryTransaction.transaction_type.in_(txn_types))
+        .order_by(DbInventoryTransaction.performed_at.asc())
+        .all()
+    )
+    meta = {}
+    for r in rows:
+        sid = (r.source_id or "").strip()
+        if sid and sid not in meta:
+            meta[sid] = {
+                "import_performed_by": (r.performed_by or "").strip(),
+                "import_performed_at": (r.performed_at or "").strip(),
+            }
+    return meta
+
+
+def _orm_columns_dict(obj) -> dict:
+    """Chuyển một dòng ORM SQLAlchemy thành dict (chỉ cột bảng) — dùng cho JSON API."""
+    from sqlalchemy.inspection import inspect as sa_inspect
+
+    return {c.key: getattr(obj, c.key, None) for c in sa_inspect(obj).mapper.column_attrs}
+
+
 def register_inventory_routes(app, get_db):
     """Call from main.py: register_inventory_routes(app, get_db)"""
 
@@ -362,6 +483,24 @@ def register_inventory_routes(app, get_db):
             "total_material_remaining_m": round(total_material_remaining_m, 3),
             "total_offcut_area_m2": round(total_offcut_area_m2, 3),
         }
+
+    @router.get("/material-codes")
+    def inventory_material_codes(db: Session = Depends(get_db)):
+        """Mã vật tư đang có trong kho (LOT + mảnh dư) và cấu hình ưu tiên vật tư."""
+        codes = set()
+        for (mc,) in db.query(DbLotInventory.material_code).distinct().all():
+            s = (mc or "").strip()
+            if s:
+                codes.add(s)
+        for (mc,) in db.query(DbOffcutInventory.material_code).distinct().all():
+            s = (mc or "").strip()
+            if s:
+                codes.add(s)
+        for (mc,) in db.query(DbMaterialPreference.preferred_material_code).distinct().all():
+            s = (mc or "").strip()
+            if s:
+                codes.add(s)
+        return sorted(codes)
 
     def _filter_lots(q, material_code, lot_status, is_locked, storage_location, qq):
         if material_code:
@@ -432,7 +571,68 @@ def register_inventory_routes(app, get_db):
         qq: Optional[str] = QueryParam(None, alias="q"),
     ):
         qry = db.query(DbOffcutInventory)
-        return _filter_offcuts(qry, material_code, offcut_status, quality_status, is_locked, storage_location, qq)
+        rows = _filter_offcuts(qry, material_code, offcut_status, quality_status, is_locked, storage_location, qq)
+        ids = [o.offcut_id for o in rows]
+        meta = _first_import_actor_by_source(db, ids, ("IMPORT_OFFCUT_MANUAL", "IMPORT_OFFCUT_WORKSTREAM"))
+        out = []
+        for o in rows:
+            d = _orm_columns_dict(o)
+            m = meta.get(o.offcut_id) or {}
+            d["import_performed_by"] = m.get("import_performed_by") or ""
+            d["import_performed_at"] = m.get("import_performed_at") or ""
+            out.append(d)
+        return out
+
+    @router.get("/locked-catalog")
+    def inventory_locked_catalog(db: Session = Depends(get_db)):
+        """LOT & mảnh dư đang khóa — dữ liệu dạng dict + người nhập từ bút toán IMPORT_* đầu tiên."""
+        lots = _filter_lots(db.query(DbLotInventory), None, None, True, None, None)
+        ocs = _filter_offcuts(db.query(DbOffcutInventory), None, None, None, True, None, None)
+        lot_meta = _first_import_actor_by_source(db, [l.lot_id for l in lots], ("IMPORT_LOT",))
+        oc_meta = _first_import_actor_by_source(db, [o.offcut_id for o in ocs], ("IMPORT_OFFCUT_MANUAL", "IMPORT_OFFCUT_WORKSTREAM"))
+
+        def lot_row(l):
+            m = lot_meta.get(l.lot_id) or {}
+            return {
+                "lot_id": l.lot_id,
+                "material_code": l.material_code or "",
+                "material_name": (l.material_name or "").strip(),
+                "film_type": (l.film_type or "").strip(),
+                "effective_status": _norm_lot_status(l),
+                "remaining_length_m": l.remaining_length_m,
+                "original_width_m": l.original_width_m,
+                "original_length_m": l.original_length_m,
+                "storage_location": (l.storage_location or "").strip(),
+                "locked_by_request_id": (l.locked_by_request_id or "").strip(),
+                "locked_by_workstream_id": (l.locked_by_workstream_id or "").strip(),
+                "import_date": (l.import_date or "").strip(),
+                "import_performed_by": m.get("import_performed_by") or "",
+                "import_performed_at": m.get("import_performed_at") or "",
+            }
+
+        def oc_row(o):
+            m = oc_meta.get(o.offcut_id) or {}
+            return {
+                "offcut_id": o.offcut_id,
+                "material_code": o.material_code or "",
+                "material_name": (o.material_name or "").strip(),
+                "film_type": (o.film_type or "").strip(),
+                "effective_status": _norm_offcut_status(o),
+                "width_m": o.width_m,
+                "length_m": o.length_m,
+                "area_m2": o.area_m2,
+                "quality_status": (o.quality_status or "").strip(),
+                "storage_location": (o.storage_location or "").strip(),
+                "parent_lot_id": (o.parent_lot_id or "").strip(),
+                "locked_by_request_id": (o.locked_by_request_id or "").strip(),
+                "locked_by_workstream_id": (o.locked_by_workstream_id or "").strip(),
+                "import_date": (o.import_date or "").strip(),
+                "import_performed_by": m.get("import_performed_by") or "",
+                "import_performed_at": m.get("import_performed_at") or "",
+                "created_from_request_id": (o.created_from_request_id or "").strip(),
+            }
+
+        return {"lots": [lot_row(l) for l in lots], "offcuts": [oc_row(o) for o in ocs]}
 
     @router.post("/lots/import")
     def import_lot(data: dict, db: Session = Depends(get_db)):

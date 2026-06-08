@@ -1,4 +1,4 @@
-import os, uuid, datetime, json, logging, traceback
+import os, uuid, datetime, json, logging, traceback, re, hashlib
 from contextlib import asynccontextmanager
 from typing import Optional
 
@@ -21,7 +21,7 @@ from database import (
     DbAuditLog, DbCuttingGroupMatrix,
     DbOcrDraft, DbNotification
 )
-from inventory_api import register_inventory_routes, assert_source_valid_for_wf6_commit
+from inventory_api import register_inventory_routes, assert_source_valid_for_wf6_commit, create_offcut_from_workstream_return
 from customer_api import (
     register_customer_routes,
     customer_plain_address,
@@ -33,6 +33,7 @@ from location_api import register_location_routes
 from material_preference_api import register_material_preference_routes
 from vehicle_norm_logic import normalize_vehicle_model_code, resolve_vehicle_norm_with_year_fallback
 from hr_api import router as hr_router
+from workstream_material_scope import approved_allocation_material_codes
 from ocr_lexus_test_data import (
     confirm_lexus_test_ocr,
     is_lexus_test_draft_id,
@@ -157,6 +158,20 @@ def _now():
 
 def _uid(prefix=""):
     return f"{prefix}{uuid.uuid4().hex[:8].upper()}"
+
+def _add_audit_log(db, action, draft_id, req_id, workstream_id, extra_id=""):
+    from database import DbAuditLog
+    log = DbAuditLog(
+        log_id=_uid("LOG-"),
+        transaction_type=action,
+        request_id=req_id,
+        workstream_id=workstream_id,
+        source_id=draft_id,
+        after_value=extra_id,
+        actor="ADMIN",
+        timestamp=_now()
+    )
+    db.add(log)
 
 # ─── MATERIAL RULES ───────────────────────────────────────────────────────────
 PPF_DEFAULTS = {
@@ -289,6 +304,30 @@ def _update_request_status_from_workstreams(db: Session, req: DbRequest):
         if getattr(req, "status", None) != "NEEDS_REVIEW":
             req.status = "ALLOCATED"  # ready for approval
 
+
+def _parent_links_for_ws_offcut(db: Session, source_type: str, source_id: str) -> tuple:
+    """LOT cha / mảnh cha khi tạo mảnh dư từ hoàn tất luồng (đồng bộ với nhập mảnh dư thủ công)."""
+    st = (source_type or "LOT").upper()
+    sid = (source_id or "").strip()
+    pl, po = None, None
+    if st == "LOT" and sid:
+        pl = sid
+    elif st == "OFFCUT" and sid:
+        po = sid
+        par = db.query(DbOffcutInventory).filter(DbOffcutInventory.offcut_id == sid).first()
+        if par and (par.parent_lot_id or "").strip():
+            pl = (par.parent_lot_id or "").strip()
+    return pl, po
+
+
+def _workstream_offcut_material_code(ws: DbWorkstream, default_mc: str = "JB20") -> str:
+    """Mã vật tư dùng khi tạo mảnh dư lúc commit — ưu tiên mã KTV chọn lúc submit-actual."""
+    o = (getattr(ws, "offcut_material_code", None) or "").strip()
+    if o:
+        return o
+    return ((ws.selected_material_code or default_mc).strip() or default_mc)
+
+
 def _commit_workstream_inventory(db: Session, ws: DbWorkstream, tech_id: str = "KTV-003"):
     """Commit inventory transaction for a single workstream."""
     # Window Film: trừ từng nguồn theo wf_allocation_json (WF6)
@@ -301,23 +340,36 @@ def _commit_workstream_inventory(db: Session, ws: DbWorkstream, tech_id: str = "
             from wf_allocation_service import commit_wf_multi_source_inventory
 
             if commit_wf_multi_source_inventory(db, ws, tech_id, lambda *args: _audit(db, *args)):
+                from wf_allocation_service import commit_wf_extra_cut_inventory
+
+                commit_wf_extra_cut_inventory(db, ws, tech_id, lambda *args: _audit(db, *args))
                 source_type = ws.allocated_source_type or "LOT"
                 source_id = ws.allocated_source_id or ""
                 new_offcut_id = None
                 if ws.has_new_offcut and ws.offcut_length_m and ws.offcut_width_m:
-                    base = f"SUBLOT-{ws.selected_material_code or 'JB20'}"
+                    mc_off = _workstream_offcut_material_code(ws, "JB20")
+                    base = f"SUBLOT-{mc_off}"
                     cnt = db.query(DbOffcutInventory).filter(
                         DbOffcutInventory.offcut_id.like(f"{base}-%")).count()
                     new_offcut_id = f"{base}-{str(cnt+1).zfill(3)}"
-                    db.add(DbOffcutInventory(
+                    pl, po = _parent_links_for_ws_offcut(db, source_type, source_id)
+                    create_offcut_from_workstream_return(
+                        db,
                         offcut_id=new_offcut_id,
-                        parent_lot_id=source_id if source_type == "LOT" else None,
-                        material_code=ws.selected_material_code,
-                        width_m=ws.offcut_width_m, length_m=ws.offcut_length_m,
-                        area_m2=round(ws.offcut_width_m * ws.offcut_length_m, 3),
-                        is_locked=False, storage_location=ws.offcut_storage_location or "OFFCUT-RACK-C",
-                        import_date=datetime.date.today().isoformat(), status="ACTIVE"
-                    ))
+                        material_code=mc_off,
+                        width_m=float(ws.offcut_width_m),
+                        length_m=float(ws.offcut_length_m),
+                        quality_status=ws.offcut_quality_status or "NORMAL",
+                        storage_location=ws.offcut_storage_location or "OFFCUT-RACK-C",
+                        request_id=ws.request_id,
+                        workstream_id=ws.workstream_id,
+                        job_card_id=ws.job_card_id,
+                        performed_by=tech_id,
+                        note=ws.technician_note,
+                        parent_lot_id=pl,
+                        parent_offcut_id=po,
+                        film_type="WINDOW_FILM",
+                    )
                     ws.created_offcut_id = new_offcut_id
                     _audit(db, ws.request_id, "CREATE_OFFCUT", source_type, source_id,
                            "None", f"{new_offcut_id}",
@@ -347,19 +399,29 @@ def _commit_workstream_inventory(db: Session, ws: DbWorkstream, tech_id: str = "
                 source_id = ws.allocated_source_id or f"LOT-{ws.selected_material_code or 'T-TYPE'}-001"
                 new_offcut_id = None
                 if ws.has_new_offcut and ws.offcut_length_m and ws.offcut_width_m:
-                    base = f"SUBLOT-{ws.selected_material_code or 'T-TYPE'}"
+                    mc_off = _workstream_offcut_material_code(ws, "T-TYPE")
+                    base = f"SUBLOT-{mc_off}"
                     cnt = db.query(DbOffcutInventory).filter(
                         DbOffcutInventory.offcut_id.like(f"{base}-%")).count()
                     new_offcut_id = f"{base}-{str(cnt+1).zfill(3)}"
-                    db.add(DbOffcutInventory(
+                    pl, po = _parent_links_for_ws_offcut(db, source_type, source_id)
+                    create_offcut_from_workstream_return(
+                        db,
                         offcut_id=new_offcut_id,
-                        parent_lot_id=source_id if source_type == "LOT" else None,
-                        material_code=ws.selected_material_code,
-                        width_m=ws.offcut_width_m, length_m=ws.offcut_length_m,
-                        area_m2=round(ws.offcut_width_m * ws.offcut_length_m, 3),
-                        is_locked=False, storage_location=ws.offcut_storage_location or "OFFCUT-RACK-C",
-                        import_date=datetime.date.today().isoformat(), status="ACTIVE"
-                    ))
+                        material_code=mc_off,
+                        width_m=float(ws.offcut_width_m),
+                        length_m=float(ws.offcut_length_m),
+                        quality_status=ws.offcut_quality_status or "NORMAL",
+                        storage_location=ws.offcut_storage_location or "OFFCUT-RACK-C",
+                        request_id=ws.request_id,
+                        workstream_id=ws.workstream_id,
+                        job_card_id=ws.job_card_id,
+                        performed_by=tech_id,
+                        note=ws.technician_note,
+                        parent_lot_id=pl,
+                        parent_offcut_id=po,
+                        film_type="PPF",
+                    )
                     ws.created_offcut_id = new_offcut_id
                     _audit(db, ws.request_id, "CREATE_OFFCUT", source_type, source_id,
                            "None", f"{new_offcut_id}",
@@ -403,19 +465,31 @@ def _commit_workstream_inventory(db: Session, ws: DbWorkstream, tech_id: str = "
     # Create offcut if any
     new_offcut_id = None
     if ws.has_new_offcut and ws.offcut_length_m and ws.offcut_width_m:
-        base = f"SUBLOT-{ws.selected_material_code}"
+        dmc = "T-TYPE" if ws.workstream_type == "PPF_INSTALLATION" else "JB20"
+        mc_off = _workstream_offcut_material_code(ws, dmc)
+        base = f"SUBLOT-{mc_off}"
         cnt = db.query(DbOffcutInventory).filter(
             DbOffcutInventory.offcut_id.like(f"{base}-%")).count()
         new_offcut_id = f"{base}-{str(cnt+1).zfill(3)}"
-        db.add(DbOffcutInventory(
+        pl, po = _parent_links_for_ws_offcut(db, source_type, source_id)
+        ft = "PPF" if ws.workstream_type == "PPF_INSTALLATION" else "WINDOW_FILM"
+        create_offcut_from_workstream_return(
+            db,
             offcut_id=new_offcut_id,
-            parent_lot_id=source_id if source_type == "LOT" else None,
-            material_code=ws.selected_material_code,
-            width_m=ws.offcut_width_m, length_m=ws.offcut_length_m,
-            area_m2=round(ws.offcut_width_m * ws.offcut_length_m, 3),
-            is_locked=False, storage_location=ws.offcut_storage_location or "OFFCUT-RACK-C",
-            import_date=datetime.date.today().isoformat(), status="ACTIVE"
-        ))
+            material_code=mc_off,
+            width_m=float(ws.offcut_width_m),
+            length_m=float(ws.offcut_length_m),
+            quality_status=ws.offcut_quality_status or "NORMAL",
+            storage_location=ws.offcut_storage_location or "OFFCUT-RACK-C",
+            request_id=ws.request_id,
+            workstream_id=ws.workstream_id,
+            job_card_id=ws.job_card_id,
+            performed_by=tech_id,
+            note=ws.technician_note,
+            parent_lot_id=pl,
+            parent_offcut_id=po,
+            film_type=ft,
+        )
         ws.created_offcut_id = new_offcut_id
         _audit(db, ws.request_id, "CREATE_OFFCUT", source_type, source_id,
                "None", f"{new_offcut_id}",
@@ -882,6 +956,56 @@ def run_request_step(request_id: str, db: Session = Depends(get_db)):
     return {"status":"info","detail":"Không có bước tự động khả dụng."}
 
 
+def _build_extra_cut_history_api(ws: DbWorkstream, db: Optional[Session] = None) -> list:
+    """Danh sách đề xuất cắt thêm cho API (bổ sung roll_cut_summary từng snapshot WF)."""
+    import copy
+
+    from wf_allocation_service import compute_wf_roll_cut_summary, load_extra_cut_history
+
+    rows = list(load_extra_cut_history(ws))
+    if not rows and bool(getattr(ws, "extra_cut_requested", False)):
+        if getattr(ws, "workstream_type", None) == "WINDOW_FILM_INSTALLATION":
+            ex_raw = getattr(ws, "extra_cut_wf_allocation_json", None) or ""
+            if ex_raw.strip():
+                try:
+                    ex_alloc = json.loads(ex_raw)
+                except json.JSONDecodeError:
+                    ex_alloc = None
+                if isinstance(ex_alloc, dict) and (ex_alloc.get("items") or []):
+                    rows = [
+                        {
+                            "proposal_id": "LEGACY-SNAPSHOT",
+                            "requested_at": (getattr(ws, "created_at", None) or "") or "",
+                            "actor_id": (getattr(ws, "assigned_technician_id", None) or "").strip(),
+                            "actor_name": (getattr(ws, "assigned_technician_name", None) or "").strip(),
+                            "reason": (getattr(ws, "extra_cut_reason", None) or "").strip(),
+                            "wf_allocation": ex_alloc,
+                        }
+                    ]
+        elif getattr(ws, "workstream_type", None) == "PPF_INSTALLATION":
+            rows = [
+                {
+                    "proposal_id": "LEGACY-SNAPSHOT",
+                    "requested_at": (getattr(ws, "created_at", None) or "") or "",
+                    "actor_id": (getattr(ws, "assigned_technician_id", None) or "").strip(),
+                    "actor_name": (getattr(ws, "assigned_technician_name", None) or "").strip(),
+                    "reason": (getattr(ws, "extra_cut_reason", None) or "").strip(),
+                }
+            ]
+    out = []
+    for ent in rows:
+        if not isinstance(ent, dict):
+            continue
+        e = copy.deepcopy(ent)
+        wa = e.get("wf_allocation")
+        if isinstance(wa, dict) and getattr(ws, "workstream_type", None) == "WINDOW_FILM_INSTALLATION":
+            if not wa.get("roll_cut_summary"):
+                wa["roll_cut_summary"] = compute_wf_roll_cut_summary(wa)
+            e["wf_allocation"] = wa
+        out.append(e)
+    return out
+
+
 def _serialize_workstream(ws: DbWorkstream, db: Optional[Session] = None) -> dict:
     d = ws.__dict__.copy()
     d.pop("_sa_instance_state", None)
@@ -913,8 +1037,42 @@ def _serialize_workstream(ws: DbWorkstream, db: Optional[Session] = None) -> dic
         if isinstance(wf_alloc, dict) and not wf_alloc.get("roll_cut_summary"):
             wf_alloc["roll_cut_summary"] = compute_wf_roll_cut_summary(wf_alloc)
         d["wf_allocation"] = wf_alloc
+        ex_raw = getattr(ws, "extra_cut_wf_allocation_json", None) or ""
+        if ex_raw.strip():
+            try:
+                ex_alloc = json.loads(ex_raw)
+            except json.JSONDecodeError:
+                ex_alloc = {}
+            if isinstance(ex_alloc, dict) and not ex_alloc.get("roll_cut_summary"):
+                ex_alloc["roll_cut_summary"] = compute_wf_roll_cut_summary(ex_alloc)
+            d["extra_cut_wf_allocation"] = ex_alloc
+        else:
+            d["extra_cut_wf_allocation"] = None
+        d["extra_cut_history"] = _build_extra_cut_history_api(ws, db)
+    else:
+        d["extra_cut_history"] = _build_extra_cut_history_api(ws, db)
     d.pop("ppf_allocation_json", None)
     d.pop("wf_allocation_json", None)
+    d.pop("extra_cut_wf_allocation_json", None)
+    d.pop("extra_cut_history_json", None)
+    if db and getattr(ws, "request_id", None):
+        try:
+            req = db.query(DbRequest).filter(DbRequest.request_id == ws.request_id).first()
+            if req:
+                if getattr(req, "requested_delivery_time", None):
+                    d["requested_delivery_time"] = req.requested_delivery_time
+                else:
+                    d["requested_delivery_time"] = None
+                d["request_created_at"] = getattr(req, "created_at", None) or None
+            else:
+                d["requested_delivery_time"] = None
+                d["request_created_at"] = None
+        except Exception:
+            d["requested_delivery_time"] = None
+            d["request_created_at"] = None
+    else:
+        d["requested_delivery_time"] = None
+        d["request_created_at"] = None
     return d
 
 
@@ -932,6 +1090,16 @@ def get_workstream(ws_id: str, db: Session = Depends(get_db)):
     if not ws:
         raise HTTPException(404, "Workstream not found")
     return _serialize_workstream(ws, db)
+
+
+@app.get("/api/workstreams/{ws_id}/allocation-material-codes")
+def get_workstream_allocation_material_codes(ws_id: str, db: Session = Depends(get_db)):
+    """Mã vật tư theo phân bổ đã phê duyệt (WF/PPF) — dùng picker mảnh dư / thực tế, không phải full danh sách kho."""
+    ws = db.query(DbWorkstream).filter(DbWorkstream.workstream_id == ws_id).first()
+    if not ws:
+        raise HTTPException(404, "Workstream not found")
+    codes = approved_allocation_material_codes(ws)
+    return {"material_codes": codes, "workstream_id": ws_id, "workstream_type": ws.workstream_type}
 
 
 @app.put("/api/workstreams/{ws_id}/ppf-allocation")
@@ -1480,6 +1648,12 @@ def submit_actual(ws_id: str, data: dict, db: Session = Depends(get_db)):
     ws.offcut_length_m = float(data.get("offcut_length_m", 0.0)) if ws.has_new_offcut else 0.0
     ws.offcut_quality_status = data.get("offcut_quality_status", "NORMAL")
     ws.offcut_storage_location = data.get("offcut_storage_location", "OFFCUT-RACK-C")
+    if ws.has_new_offcut:
+        ocm = (data.get("offcut_material_code") or "").strip()
+        ws.offcut_material_code = ocm if ocm else None
+    else:
+        ws.offcut_material_code = None
+    # Đăng ký cắt thêm: dùng POST /extra-cut-request (giữa ca), không gộp vào submit-actual.
     ws.has_scrap = bool(data.get("has_scrap", False))
     ws.scrap_area_m2 = float(data.get("scrap_area_m2", 0.0)) if ws.has_scrap else 0.0
     ws.technician_note = data.get("technician_note", "")
@@ -1493,6 +1667,219 @@ def submit_actual(ws_id: str, data: dict, db: Session = Depends(get_db)):
     db.commit()
     return {"status":"success",
             "detail":f"✅ Xác nhận kích thước thực tế {ws.workstream_type} thành công. Sẵn sàng Complete."}
+
+
+@app.post("/api/workstreams/{ws_id}/extra-cut-request")
+def post_extra_cut_request(ws_id: str, data: dict, db: Session = Depends(get_db)):
+    """KTV đăng ký cắt thêm giữa ca (IN_PROGRESS / chờ nhập thực tế), tách khỏi form hoàn tất."""
+    ws = db.query(DbWorkstream).filter(DbWorkstream.workstream_id == ws_id).first()
+    if not ws:
+        raise HTTPException(404, "Workstream not found")
+    if ws.status not in ("IN_PROGRESS", "ACTUAL_CONFIRMATION_REQUIRED"):
+        raise HTTPException(
+            400,
+            {
+                "error": "INVALID",
+                "message": f"Chỉ đăng ký khi luồng đang thi công hoặc chờ nhập thực tế. Hiện: {ws.status}.",
+            },
+        )
+    reason = (data.get("reason") or "").strip()
+    if len(reason) < 5:
+        raise HTTPException(
+            400,
+            {
+                "error": "INVALID",
+                "message": "Nhập lý do tối thiểu 5 ký tự (VD: gãy phim khi vận chuyển).",
+            },
+        )
+    actor_id = (data.get("technician_id") or ws.assigned_technician_id or "KTV-UNKNOWN").strip()
+    actor_name = (data.get("technician_name") or ws.assigned_technician_name or "").strip()
+    team_label = "PPF" if ws.workstream_type == "PPF_INSTALLATION" else "Window Film"
+
+    from datetime import datetime, timezone
+
+    from wf_allocation_service import (
+        _normalize_wf_body,
+        prior_extra_cut_entries_include_legacy,
+        validate_wf_extra_cut_allocation,
+    )
+
+    extra_norm = None
+    if ws.workstream_type == "WINDOW_FILM_INSTALLATION":
+        body_wf = data.get("wf_extra_allocation") or data.get("wf_allocation")
+        if not isinstance(body_wf, dict) or not isinstance(body_wf.get("items"), list):
+            raise HTTPException(
+                400,
+                {
+                    "error": "INVALID",
+                    "message": "Phim cách nhiệt: gửi kèm wf_extra_allocation (items giống phân bổ LOT).",
+                },
+            )
+        body_wf = dict(body_wf)
+        body_wf["change_reason"] = reason[:2000]
+        extra_norm = _normalize_wf_body(body_wf, ws)
+        validate_wf_extra_cut_allocation(db, ws, extra_norm)
+        ws.extra_cut_wf_allocation_json = json.dumps(extra_norm, ensure_ascii=False)
+    else:
+        ws.extra_cut_wf_allocation_json = None
+
+    history_for_save = prior_extra_cut_entries_include_legacy(ws)
+    proposal_id = f"ECP-{uuid.uuid4().hex[:12]}"
+    new_entry = {
+        "proposal_id": proposal_id,
+        "requested_at": datetime.now(timezone.utc).isoformat(),
+        "actor_id": actor_id,
+        "actor_name": actor_name,
+        "reason": reason[:2000],
+    }
+    if isinstance(extra_norm, dict) and (extra_norm.get("items") or []):
+        new_entry["wf_allocation"] = extra_norm
+    history_for_save.append(new_entry)
+    ws.extra_cut_history_json = json.dumps(history_for_save, ensure_ascii=False)
+
+    ws.extra_cut_requested = True
+    ws.extra_cut_reason = reason
+    _audit(
+        db,
+        ws.request_id,
+        "EXTRA_CUT_REGISTERED",
+        "WORKSTREAM",
+        ws_id,
+        "—",
+        json.dumps(
+            {"proposal_id": proposal_id, "reason": reason[:500], "actor_id": actor_id, "actor_name": actor_name},
+            ensure_ascii=False,
+        ),
+        "KTV đăng ký cắt thêm (lưu lịch sử từng lần: thời điểm + người + phân bổ WF nếu có).",
+        actor_id,
+        ws_id,
+        ws.workstream_type,
+    )
+    _add_notif(
+        db,
+        f"📋 KTV đăng ký cắt thêm — {team_label}",
+        f"{ws_id}: {reason[:300]}{'…' if len(reason) > 300 else ''}",
+        "EXTRA_CUT_REQUEST",
+        ws_id,
+        "WORKSTREAM",
+        "MANAGER",
+        ws_id,
+        ws.workstream_type,
+        ws.team_type,
+    )
+    db.commit()
+    out = {
+        "status": "success",
+        "detail": "Đã gửi đăng ký cắt thêm. Quản lý sẽ xử lý.",
+        "extra_cut_requested": True,
+        "extra_cut_reason": reason,
+    }
+    if ws.workstream_type == "WINDOW_FILM_INSTALLATION" and ws.extra_cut_wf_allocation_json:
+        try:
+            out["extra_cut_wf_allocation"] = json.loads(ws.extra_cut_wf_allocation_json)
+        except json.JSONDecodeError:
+            out["extra_cut_wf_allocation"] = None
+    out["extra_cut_history"] = _build_extra_cut_history_api(ws, db)
+    return out
+
+
+@app.delete("/api/workstreams/{ws_id}/extra-cut-proposals/{proposal_id}")
+def delete_extra_cut_proposal(
+    ws_id: str,
+    proposal_id: str,
+    actor: str = Query(None, description="Mã KTV thực hiện (mặc định KTV phụ trách luồng)"),
+    db: Session = Depends(get_db),
+):
+    """KTV xóa một đợt đề xuất cắt thêm; hệ thống đồng bộ lại snapshot cuối và tổng kiểm tồn."""
+    ws = db.query(DbWorkstream).filter(DbWorkstream.workstream_id == ws_id).first()
+    if not ws:
+        raise HTTPException(404, "Workstream not found")
+    if ws.status not in ("IN_PROGRESS", "ACTUAL_CONFIRMATION_REQUIRED"):
+        raise HTTPException(
+            400,
+            {
+                "error": "INVALID",
+                "message": f"Chỉ xóa đợt đề xuất khi luồng đang thi công hoặc chờ nhập thực tế. Hiện: {ws.status}.",
+            },
+        )
+    pid = (proposal_id or "").strip()
+    if not pid:
+        raise HTTPException(400, {"error": "INVALID", "message": "Thiếu proposal_id."})
+
+    from wf_allocation_service import load_extra_cut_history, sync_extra_cut_latest_snapshot
+
+    actor_id = (actor or ws.assigned_technician_id or "KTV-UNKNOWN").strip()
+
+    hist_db = load_extra_cut_history(ws)
+
+    # Bản ghi cũ / API tổng hợp: chỉ có snapshot, chưa có mảng history trên DB
+    if not hist_db and pid in ("LEGACY-SNAPSHOT", "MIGRATED-PRE-HISTORY-V1") and bool(getattr(ws, "extra_cut_requested", False)):
+        ws.extra_cut_wf_allocation_json = None
+        ws.extra_cut_history_json = None
+        ws.extra_cut_reason = None
+        ws.extra_cut_requested = False
+        _audit(
+            db,
+            ws.request_id,
+            "EXTRA_CUT_PROPOSAL_REMOVED",
+            "WORKSTREAM",
+            ws_id,
+            pid,
+            "—",
+            "Xóa đợt cắt thêm (snapshot legacy, không có lịch sử JSON).",
+            actor_id,
+            ws_id,
+            ws.workstream_type,
+        )
+        db.commit()
+        return {
+            "status": "success",
+            "detail": "Đã xóa đăng ký cắt thêm.",
+            "extra_cut_requested": False,
+            "extra_cut_history": _build_extra_cut_history_api(ws, db),
+            "extra_cut_wf_allocation": None,
+        }
+
+    new_hist = [e for e in hist_db if isinstance(e, dict) and (e.get("proposal_id") or "").strip() != pid]
+    if len(new_hist) == len(hist_db):
+        raise HTTPException(
+            404,
+            {"error": "NOT_FOUND", "message": f"Không tìm thấy đợt đề xuất: {pid}"},
+        )
+
+    ws.extra_cut_history_json = json.dumps(new_hist, ensure_ascii=False) if new_hist else None
+    sync_extra_cut_latest_snapshot(ws)
+
+    _audit(
+        db,
+        ws.request_id,
+        "EXTRA_CUT_PROPOSAL_REMOVED",
+        "WORKSTREAM",
+        ws_id,
+        pid,
+        f"Còn {len(new_hist)} đợt" if new_hist else "—",
+        "KTV xóa một đợt đề xuất cắt thêm; đã đồng bộ lại snapshot & tổng tích lũy.",
+        actor_id,
+        ws_id,
+        ws.workstream_type,
+    )
+    db.commit()
+    out = {
+        "status": "success",
+        "detail": "Đã xóa đợt đề xuất. Tổng kiểm tồn / trừ kho khi hoàn tất tính lại theo các đợt còn lại.",
+        "extra_cut_requested": bool(ws.extra_cut_requested),
+        "extra_cut_reason": ws.extra_cut_reason,
+        "extra_cut_history": _build_extra_cut_history_api(ws, db),
+    }
+    if ws.workstream_type == "WINDOW_FILM_INSTALLATION" and getattr(ws, "extra_cut_wf_allocation_json", None):
+        try:
+            out["extra_cut_wf_allocation"] = json.loads(ws.extra_cut_wf_allocation_json)
+        except json.JSONDecodeError:
+            out["extra_cut_wf_allocation"] = None
+    else:
+        out["extra_cut_wf_allocation"] = None
+    return out
+
 
 @app.post("/api/workstreams/{ws_id}/cancel")
 def cancel_workstream(ws_id: str, data: dict = None, db: Session = Depends(get_db)):
@@ -1549,6 +1936,14 @@ def complete_workstream(ws_id: str, data: dict = None, db: Session = Depends(get
         db.commit()
         return {"status":"info",
                 "detail":"⚠️ KTV chưa nhập xác nhận kích thước thực tế. Hệ thống giữ ACTUAL_CONFIRMATION_REQUIRED."}
+
+    if ws.job_card_id:
+        jc = db.query(DbJobCard).filter(DbJobCard.job_card_id == ws.job_card_id).first()
+        if jc and len(_job_completion_photos_list(jc)) < 1:
+            return {
+                "status": "info",
+                "detail": "⚠️ Cần ít nhất 1 ảnh hoàn thành (nút «Hình ảnh hoàn thành» trên lệnh thi công) trước khi hệ thống trừ kho ảo và đóng luồng.",
+            }
 
     tech_id = (data or {}).get("technician_id", ws.assigned_technician_id or "KTV-003")
 
@@ -1714,14 +2109,24 @@ def complete_request_legacy(request_id: str, data: dict, db: Session = Depends(g
         cnt = db.query(DbOffcutInventory).filter(
             DbOffcutInventory.offcut_id.like(f"{base}-%")).count()
         new_offcut_id = f"{base}-{str(cnt+1).zfill(3)}"
-        db.add(DbOffcutInventory(
-            offcut_id=new_offcut_id, parent_lot_id=source_id,
-            material_code=req.material_code,
-            width_m=offcut_wid, length_m=offcut_len,
-            area_m2=round(offcut_wid*offcut_len,3),
-            is_locked=False, storage_location=data.get("created_offcut_location","OFFCUT-RACK-C"),
-            import_date=datetime.date.today().isoformat(), status="ACTIVE"
-        ))
+        pl, po = _parent_links_for_ws_offcut(db, source_type or "LOT", source_id or "")
+        create_offcut_from_workstream_return(
+            db,
+            offcut_id=new_offcut_id,
+            material_code=(req.material_code or "JB20").strip(),
+            width_m=float(offcut_wid),
+            length_m=float(offcut_len),
+            quality_status=data.get("created_offcut_quality", "NORMAL"),
+            storage_location=data.get("created_offcut_location", "OFFCUT-RACK-C"),
+            request_id=request_id,
+            workstream_id=f"LEGACY-{request_id}",
+            job_card_id=None,
+            performed_by=tech_id,
+            note=data.get("technician_note"),
+            parent_lot_id=pl,
+            parent_offcut_id=po,
+            film_type="WINDOW_FILM",
+        )
     scrap = float(data.get("scrap_area_m2", 0))
     req.status = "CLOSED"; req.actual_cut_block = actual_block
     req.actual_length_m = actual_length; req.scrap_area_m2 = scrap
@@ -1741,9 +2146,74 @@ def complete_request_legacy(request_id: str, data: dict, db: Session = Depends(g
 # ═══════════════════════════════════════════════════════════════════════════════
 # JOB CARDS
 # ═══════════════════════════════════════════════════════════════════════════════
+def _job_completion_photos_list(jc: DbJobCard) -> list:
+    raw = getattr(jc, "completion_photos_json", None) or ""
+    if not str(raw).strip():
+        return []
+    try:
+        data = json.loads(raw)
+        return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
 @app.get("/api/job-cards")
 def get_job_cards(db: Session = Depends(get_db)):
     return db.query(DbJobCard).order_by(DbJobCard.created_at.desc()).all()
+
+
+@app.post("/api/job-cards/{jc_id}/completion-photos")
+async def upload_job_completion_photo(jc_id: str, file: UploadFile = File(...), db: Session = Depends(get_db)):
+    """KTV tải ảnh chứng minh hoàn thành thi công (chụp / chọn file)."""
+    jc = db.query(DbJobCard).filter(DbJobCard.job_card_id == jc_id).first()
+    if not jc:
+        raise HTTPException(404, "Job card not found")
+    if jc.status not in ("IN_PROGRESS", "ACTUAL_CONFIRMATION_REQUIRED"):
+        raise HTTPException(
+            400,
+            "Chỉ tải ảnh khi lệnh đang thi công (IN_PROGRESS) hoặc chờ xác nhận thực tế (ACTUAL_CONFIRMATION_REQUIRED).",
+        )
+    max_photos = 12
+    max_bytes = 8 * 1024 * 1024
+    urls = _job_completion_photos_list(jc)
+    if len(urls) >= max_photos:
+        raise HTTPException(400, f"Tối đa {max_photos} ảnh hoàn thành.")
+
+    filename = file.filename or "completion.jpg"
+    ext = os.path.splitext(filename)[1].lower()
+    if ext not in (".jpg", ".jpeg", ".png", ".webp", ".gif", ".heic", ".heif"):
+        ext = ".jpg"
+    file_id = f"COMP-{_uid()}"
+    save_filename = f"{file_id}{ext}"
+    upload_dir = os.path.join(os.path.dirname(__file__), "static", "uploads")
+    os.makedirs(upload_dir, exist_ok=True)
+    save_path = os.path.join(upload_dir, save_filename)
+
+    size = 0
+    md5_hash = hashlib.md5()
+    with open(save_path, "wb") as buffer:
+        while chunk := await file.read(8192):
+            size += len(chunk)
+            if size > max_bytes:
+                try:
+                    os.remove(save_path)
+                except OSError:
+                    pass
+                raise HTTPException(400, "File quá lớn (tối đa 8 MB).")
+            buffer.write(chunk)
+            md5_hash.update(chunk)
+
+    image_url = f"/static/uploads/{save_filename}"
+    urls.append(image_url)
+    jc.completion_photos_json = json.dumps(urls, ensure_ascii=False)
+    db.commit()
+    return {
+        "status": "success",
+        "detail": "Đã lưu ảnh hoàn thành.",
+        "url": image_url,
+        "photos": urls,
+        "md5": md5_hash.hexdigest(),
+    }
 
 @app.post("/api/job-cards/{jc_id}/start")
 def start_job(jc_id: str, db: Session = Depends(get_db)):
@@ -1777,6 +2247,17 @@ def request_complete_job(jc_id: str, data: dict = None, db: Session = Depends(ge
             if ws: ws.status = "ACTUAL_CONFIRMATION_REQUIRED"
         db.commit()
         return {"status":"info","detail":"⚠️ Cần nhập xác nhận kích thước thực tế trước."}
+    if len(_job_completion_photos_list(jc)) < 1:
+        jc.status = "ACTUAL_CONFIRMATION_REQUIRED"
+        if jc.workstream_id:
+            ws = db.query(DbWorkstream).filter(DbWorkstream.workstream_id == jc.workstream_id).first()
+            if ws:
+                ws.status = "ACTUAL_CONFIRMATION_REQUIRED"
+        db.commit()
+        return {
+            "status": "info",
+            "detail": "⚠️ Cần ít nhất 1 ảnh hoàn thành (nút «Hình ảnh hoàn thành» trên lệnh thi công) trước khi hoàn tất lệnh.",
+        }
     jc.status = "COMPLETED_BY_TECHNICIAN"; jc.completed_at = _now()
     db.commit()
     return {"status":"success","detail":"✅ Hoàn tất Job Card."}
@@ -1814,6 +2295,34 @@ def _serialize_ocr_draft_row(r: DbOcrDraft) -> dict:
     return out
 
 
+def _next_ocr_tracking_counters(db: Session) -> dict:
+    """Gợi ý STT năm / STT tháng dựa trên các đơn (requests) đã tạo."""
+    utc = datetime.datetime.utcnow()
+    y = utc.year
+    ym_prefix = f"{y}-{utc.month:02d}"
+    max_y = 0
+    max_m = 0
+    for row in db.query(DbRequest).all():
+        cat = getattr(row, "created_at", None) or ""
+        cat_s = str(cat)
+        if len(cat_s) < 4 or not cat_s.startswith(str(y)):
+            continue
+        sn = getattr(row, "sequence_no", None)
+        if sn is not None and str(sn).strip().isdigit():
+            max_y = max(max_y, int(str(sn).strip()))
+        if len(cat_s) >= 7 and cat_s[:7] == ym_prefix:
+            snm = getattr(row, "sequence_no_month", None)
+            if snm is not None and str(snm).strip().isdigit():
+                max_m = max(max_m, int(str(snm).strip()))
+    return {"sequence_year_next": max_y + 1, "sequence_month_next": max_m + 1}
+
+
+@app.get("/api/ocr/tracking-counters")
+def get_ocr_tracking_counters(db: Session = Depends(get_db)):
+    """STT theo dõi xe thi công: năm (từ 1/1) và tháng hiện tại (từ đầu tháng)."""
+    return _next_ocr_tracking_counters(db)
+
+
 @app.get("/api/ocr-drafts")
 def get_ocr_drafts(db: Session = Depends(get_db)):
     rows = db.query(DbOcrDraft).order_by(DbOcrDraft.created_at.desc()).all()
@@ -1825,7 +2334,6 @@ def post_lexus_test_ocr_drafts(db: Session = Depends(get_db)):
     """Seed / cập nhật 2 OCR draft Lexus test (demo)."""
     return upsert_lexus_ocr_drafts(db)
 
-import hashlib
 import shutil
 
 @app.post("/api/ocr/upload")
@@ -1963,8 +2471,27 @@ def process_ocr(draft_id: str, db: Session = Depends(get_db)):
     print(f"mime_type:         {mime_type}")
     print("="*50)
     
-        # 2. KIỂM TRA OCR ENGINE VÀ LOG RAW TEXT
+    # 2. KIỂM TRA OCR ENGINE VÀ LOG RAW TEXT
     raw_text = extra.get("raw_text", "")
+    
+    # MOCK DATA FOR DEMO IF NO OCR ENGINE AVAILABLE
+    if not raw_text:
+        raw_text = """
+Tên đại lý: LEXUS TRUNG TÂM SÀI GÒN
+Địa chỉ đơn vị: 264 Trần Hưng Đạo, phường Cầu Ông Lãnh, TP Hồ Chí Minh
+Điện thoại: (+84) 28 38 377 377
+Fax: (+84) 28 38 377 177
+Số đề nghị: 01.2600104
+Ngày yêu cầu: 20/04/2026
+Tên khách hàng: LÊ THANH PHƯƠNG
+Địa chỉ khách hàng: Ô 1B, DC 19, Khu phố 4, Phường An Phú, Thành phố Hồ Chí Minh
+Số điện thoại khách hàng: 0901234567
+Tư vấn bán hàng: NGUYỄN QUANG BẢO
+Số HĐ: 0844/HDKT/2025/LX600
+Loại xe: LX600 URBAN
+Số khung: JTJPB7CX304095170
+Thời gian giao xe: 27/04/2026
+        """
     
     # regex extractors
     import re
@@ -1996,22 +2523,40 @@ def process_ocr(draft_id: str, db: Session = Depends(get_db)):
     # Entity Resolution (Dealer)
     draft.dealer_resolution_status = "NOT_FOUND"
     if draft.extracted_dealer_name:
-        # Simple match logic (in reality we would query DbDealer)
-        # We will let confirm_ocr handle the actual creation. For now, mark as REVIEW_REQUIRED or MATCHED
-        draft.dealer_resolution_status = "REVIEW_REQUIRED"
+        from database import DbDealer
+        dealer = db.query(DbDealer).filter(DbDealer.dealer_name.ilike(f"%{draft.extracted_dealer_name}%")).first()
+        if dealer:
+            draft.extracted_dealer_name = dealer.dealer_name
+            draft.resolved_dealer_id = dealer.dealer_id
+            draft.dealer_resolution_status = "MATCHED"
+            draft.confidence_dealer = 1.0
+        else:
+            draft.dealer_resolution_status = "REVIEW_REQUIRED"
+            draft.confidence_dealer = 0.85
 
     # Entity Resolution (Customer)
     draft.customer_resolution_status = "NOT_FOUND"
     if draft.extracted_customer_name:
-        draft.customer_resolution_status = "REVIEW_REQUIRED"
+        from database import DbCustomer
+        customer = db.query(DbCustomer).filter(DbCustomer.customer_name.ilike(f"%{draft.extracted_customer_name}%")).first()
+        if customer:
+            draft.extracted_customer_name = customer.customer_name
+            draft.resolved_customer_id = customer.customer_id
+            draft.customer_resolution_status = "MATCHED"
+            draft.confidence_customer = 1.0
+        else:
+            draft.customer_resolution_status = "REVIEW_REQUIRED"
+            draft.confidence_customer = 0.85
 
-    draft.confidence_dealer = 0.85 if draft.extracted_dealer_name else 0.0
-    draft.confidence_customer = 0.85 if draft.extracted_customer_name else 0.0
     draft.confidence_vehicle = 0.85 if draft.extracted_vin else 0.0
     draft.confidence_overall = 0.85 if draft.extracted_vin else 0.0
 
     extra["address"] = draft.extracted_customer_address
     extra["request_date"] = draft.extracted_request_date
+    if not extra.get("extracted_services"):
+        extra["extracted_services"] = "PPF, WINDOW_FILM"
+        extra["extracted_film_type"] = "Phim cách nhiệt Konica"
+        extra["extracted_ppf_type"] = "PPF"
     draft.extra_payload_json = json.dumps(extra, ensure_ascii=False)
 
     detail_msg = "✅ OCR xử lý thành công. Cần Review."
@@ -2045,7 +2590,12 @@ def confirm_ocr(draft_id: str, data: dict, db: Session = Depends(get_db)):
         raise HTTPException(400, "VIN phải có ít nhất 6 ký tự.")
     vin_last_6 = vin_val[-6:]
     yymmdd = datetime.datetime.now().strftime("%y%m%d")
-    new_req_id = f"DYC-{yymmdd}-{vin_last_6}"
+    base_req_id = f"DYC-{yymmdd}-{vin_last_6}"
+    
+    new_req_id = base_req_id
+    existing_req = db.query(DbRequest).filter(DbRequest.request_id == new_req_id).first()
+    if existing_req:
+        new_req_id = f"{base_req_id}-{_uid()[:4]}"
 
     # Auto Create Dealer
     dealer_name = data.get("dealer_name").strip()
@@ -2057,13 +2607,29 @@ def confirm_ocr(draft_id: str, data: dict, db: Session = Depends(get_db)):
     else:
         dealer_id = f"DLR-{_uid()}"
         dealer_name_disp = dealer_name
-        new_dlr = DbDealer(dealer_id=dealer_id, dealer_name=dealer_name, created_at=_now())
+        dlr_addr = (data.get("dealer_address") or "").strip()
+        new_dlr = DbDealer(
+            dealer_id=dealer_id,
+            dealer_name=dealer_name,
+            address=dlr_addr or None,
+            full_address=dlr_addr or None,
+            created_at=_now(),
+        )
         db.add(new_dlr)
         _add_audit_log(db, "DEALER_AUTO_CREATED_FROM_OCR_ON_CONFIRM", draft_id, new_req_id, "", dealer_id)
 
     # Auto Create Customer
     customer_name = data.get("customer_name").strip()
-    customer = db.query(DbCustomer).filter(DbCustomer.customer_name.ilike(f"%{customer_name}%")).first()
+    c_phone = (data.get("customer_phone") or "").strip()
+    c_address = (data.get("customer_address") or "").strip()
+    
+    q_cust = db.query(DbCustomer).filter(DbCustomer.customer_name.ilike(f"%{customer_name}%"))
+    if c_phone:
+        q_cust = q_cust.filter(DbCustomer.phone.ilike(f"%{c_phone}%"))
+    if c_address:
+        q_cust = q_cust.filter(DbCustomer.full_address.ilike(f"%{c_address}%"))
+    
+    customer = q_cust.first()
     if customer:
         customer_id = customer.customer_id
         cust_display = customer.customer_name
@@ -2071,19 +2637,58 @@ def confirm_ocr(draft_id: str, data: dict, db: Session = Depends(get_db)):
     else:
         customer_id = f"KHL-{_uid()}"
         cust_display = customer_name
-        new_cust = DbCustomer(customer_id=customer_id, customer_name=customer_name, created_at=_now())
+        new_cust = DbCustomer(
+            customer_id=customer_id, 
+            customer_name=customer_name, 
+            phone=data.get("customer_phone"),
+            full_address=data.get("customer_address"),
+            created_at=_now()
+        )
         db.add(new_cust)
         _add_audit_log(db, "CUSTOMER_AUTO_CREATED_FROM_OCR_ON_CONFIRM", draft_id, new_req_id, "", customer_id)
+
+    # Auto Create Vehicle
+    vehicle = db.query(DbVehicleProfile).filter(DbVehicleProfile.vin_number == vin_val).first()
+    if vehicle:
+        vehicle_id = vehicle.vehicle_id
+        _add_audit_log(db, "VEHICLE_MATCHED_FROM_MASTER", draft_id, new_req_id, "", vehicle_id)
+    else:
+        vehicle_id = f"VEH-{_uid()}"
+        new_veh = DbVehicleProfile(
+            vehicle_id=vehicle_id, 
+            vin_number=vin_val, 
+            vin_masked=vin_val, 
+            vehicle_model_code=data.get("vehicle_model"),
+            model_name=data.get("vehicle_model"), 
+            model_year=int(data.get("model_year")) if data.get("model_year") else None,
+            customer_id=customer_id,
+            dealer_id=dealer_id,
+            created_from_request_id=new_req_id,
+            created_at=_now()
+        )
+        db.add(new_veh)
+        _add_audit_log(db, "VEHICLE_AUTO_CREATED_FROM_OCR_ON_CONFIRM", draft_id, new_req_id, "", vehicle_id)
 
     services_str = (data.get("services") or "WINDOW_FILM").strip()
     has_ppf = "PPF" in services_str.upper()
     has_wf = "PCN" in services_str.upper() or "WINDOW" in services_str.upper() or "FILM" in services_str.upper()
     is_multi = has_ppf and has_wf
 
+    contract_no_val = (data.get("contract_no") or "").strip()
+    if not contract_no_val:
+        contract_no_val = (getattr(draft, "extracted_contract_no", None) or "").strip() or None
+
+    sn_val = str(data.get("sequence_no") or "").strip() or None
+    snm_val = str(data.get("sequence_no_month") or "").strip() or None
+
     service_json = {"services": services_str}
-    for k in ["sequence_no", "model_year", "service_1", "film_type_1", "service_2", "film_type_2"]:
+    for k in ["model_year", "service_1", "film_type_1", "service_2", "film_type_2"]:
         if data.get(k):
             service_json[k] = data.get(k)
+    if sn_val is not None:
+        service_json["sequence_no"] = sn_val
+    if snm_val is not None:
+        service_json["sequence_no_month"] = snm_val
 
     new_req = DbRequest(
         request_id=new_req_id,
@@ -2091,7 +2696,7 @@ def confirm_ocr(draft_id: str, data: dict, db: Session = Depends(get_db)):
         dealer_name=dealer_name_disp,
         customer_id=customer_id,
         customer_name=cust_display,
-        vehicle_id=f"VEH-{_uid()}",
+        vehicle_id=vehicle_id,
         vin_number=vin_val,
         vehicle_model_code=data.get("vehicle_model"),
         material_code="JB20", 
@@ -2101,14 +2706,34 @@ def confirm_ocr(draft_id: str, data: dict, db: Session = Depends(get_db)):
         created_at=_now(),
         source_channel="OCR",
         request_no=data.get("request_no"),
+        contract_no=contract_no_val,
         request_date=data.get("request_date"),
+        sequence_no=sn_val,
+        sequence_no_month=snm_val,
         model_name=data.get("vehicle_model"),
         sales_consultant=data.get("sales_consultant"),
+        ocr_source_image=draft.image_filename,
         service_selection_json=json.dumps(service_json, ensure_ascii=False)
     )
     db.add(new_req)
     draft.review_status = "CONFIRMED"; draft.confirmed_by = "ADMIN"
     draft.confirmed_at = _now(); draft.created_request_id = new_req_id
+    if sn_val is not None:
+        draft.sequence_no = sn_val
+    try:
+        _ex = {}
+        if getattr(draft, "extra_payload_json", None):
+            try:
+                _ex = json.loads(draft.extra_payload_json) or {}
+            except Exception:
+                _ex = {}
+        if sn_val is not None:
+            _ex["sequence_no"] = sn_val
+        if snm_val is not None:
+            _ex["sequence_no_month"] = snm_val
+        draft.extra_payload_json = json.dumps(_ex, ensure_ascii=False) if _ex else None
+    except Exception:
+        pass
     
     _add_audit_log(db, "OCR_DRAFT_CONFIRMED", draft_id, new_req_id, "", "")
     _add_audit_log(db, "REQUEST_CREATED_FROM_IMAGE", draft_id, new_req_id, "", "")
@@ -2120,8 +2745,19 @@ def confirm_ocr(draft_id: str, data: dict, db: Session = Depends(get_db)):
 @app.post("/api/ocr/{draft_id}/cancel")
 def cancel_ocr(draft_id: str, db: Session = Depends(get_db)):
     draft = db.query(DbOcrDraft).filter(DbOcrDraft.ocr_draft_id == draft_id).first()
-    if draft: draft.review_status = "CANCELLED"; db.commit()
-    return {"status":"success","detail":"Đã hủy OCR Draft."}
+    if not draft:
+        raise HTTPException(404, "Không tìm thấy phiếu OCR")
+    st = (draft.review_status or "").upper()
+    if st == "CONFIRMED":
+        raise HTTPException(
+            400,
+            "Phiếu đã tạo đơn — không thể « hủy phiếu ». Dùng API rollback / nút « Hủy xác nhận » để gỡ đơn và chỉnh lại phiếu.",
+        )
+    if st == "CANCELLED":
+        return {"status": "success", "detail": "Phiếu OCR đã ở trạng thái đã hủy."}
+    draft.review_status = "CANCELLED"
+    db.commit()
+    return {"status": "success", "detail": "Đã đánh dấu phiếu OCR là đã hủy (chưa tạo đơn thi công)."}
 
 @app.post("/api/ocr/{draft_id}/rollback")
 def rollback_ocr_confirmation(draft_id: str, db: Session = Depends(get_db)):

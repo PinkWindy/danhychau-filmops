@@ -154,6 +154,22 @@ def normalize_vehicle_model_code(value: Optional[str]) -> str:
     return s
 
 
+def normalize_film_type(value: Optional[str]) -> str:
+    """
+    Chuẩn hóa loại phim để khớp với database.
+    VD: 'Phim cách nhiệt Konica xe Lexus RX' -> 'Phim cách nhiệt'
+    """
+    if not value:
+        return ""
+    v = str(value).strip()
+    vl = v.lower()
+    if "ppf" in vl:
+        return "PPF"
+    if "cách nhiệt" in vl or "window" in vl or "phim" in vl:
+        return "Phim cách nhiệt"
+    return v
+
+
 def parse_norm_year_bounds(range_str: Optional[str]) -> Tuple[Optional[int], Optional[int]]:
     """Trả (lo, hi) từ model_year_range; (None, None) = không giới hạn năm (ALL / rỗng)."""
     if not range_str:
@@ -238,7 +254,7 @@ def select_vehicle_norm_with_year_strategy(
     """
     vm_in = (vehicle_model_code or "").strip()
     vm = normalize_vehicle_model_code(vm_in) or vm_in.upper()
-    ft = (film_type or "").strip() or "Phim cách nhiệt"
+    ft = normalize_film_type(film_type) or "Phim cách nhiệt"
     rows = _query_active_norms_for_models(db, vm, ft)
     parsed: List[Tuple[DbVehicleFilmNorm, Optional[int], Optional[int]]] = []
     for r in rows:
@@ -359,7 +375,7 @@ def build_auto_fill_items(
 ) -> List[Dict[str, Any]]:
     from material_preference_logic import resolve_material_preference
 
-    ft = (film_type or "").strip() or (norm.film_type or "").strip() or "Phim cách nhiệt"
+    ft = normalize_film_type(film_type) or normalize_film_type(norm.film_type) or "Phim cách nhiệt"
 
     def one(
         job_item: str,
@@ -429,7 +445,7 @@ def resolve_vehicle_norm_with_year_fallback(
     Resolve định mức theo vehicle_model_code (đã normalize), fallback năm theo business rule.
     """
     raw_in = (vehicle_model_code or "").strip()
-    ft = (film_type or "").strip() or "Phim cách nhiệt"
+    ft = normalize_film_type(film_type) or "Phim cách nhiệt"
     warnings: List[str] = []
     norm, strategy, yr_res, warn_one, vm_used = select_vehicle_norm_with_year_strategy(
         db, raw_in, model_year, ft

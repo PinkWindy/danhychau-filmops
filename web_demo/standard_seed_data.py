@@ -156,7 +156,7 @@ def seed_dealers(db: Session) -> None:
         ward="Phường Cầu Ông Lãnh",
         city="Tp Hồ Chí Minh",
         full_address="Số 264, Đường Trần Hưng Đạo, Phường Cầu Ông Lãnh, Tp Hồ Chí Minh",
-        amis_customer_code="KH00009",
+        amis_customer_code="ĐL-001",
         status="ACTIVE",
         address="Số 264, Đường Trần Hưng Đạo, Phường Cầu Ông Lãnh, Tp Hồ Chí Minh",
         created_at=ts,
@@ -171,6 +171,7 @@ def seed_dealers(db: Session) -> None:
         tax_code="0300999999",
         contact_phone="02839123456",
         city="Tp Hồ Chí Minh",
+        amis_customer_code="ĐL-002",
         status="ACTIVE",
         created_at=ts,
     )
@@ -182,6 +183,7 @@ def seed_dealers(db: Session) -> None:
         legal_name="BMW PMH Demo",
         dealer_group="BMW",
         city="Tp Hồ Chí Minh",
+        amis_customer_code="ĐL-003",
         status="ACTIVE",
         created_at=ts,
     )
@@ -193,6 +195,7 @@ def seed_dealers(db: Session) -> None:
         legal_name="Mercedes HCM Demo",
         dealer_group="Mercedes",
         city="Tp Hồ Chí Minh",
+        amis_customer_code="ĐL-004",
         status="ACTIVE",
         created_at=ts,
     )
@@ -204,6 +207,7 @@ def seed_dealers(db: Session) -> None:
         legal_name="Direct Retail Demo",
         dealer_group="Direct Retail",
         city="Tp Hồ Chí Minh",
+        amis_customer_code="ĐL-005",
         status="ACTIVE",
         created_at=ts,
     )

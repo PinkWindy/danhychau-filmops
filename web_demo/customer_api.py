@@ -269,14 +269,22 @@ def customer_plain_phone(c: DbCustomer) -> str:
 
 
 def customer_display_name(c: DbCustomer, request_fallback: str = "") -> str:
+    base_name = ""
     for v in (
         (c.customer_name or "").strip(),
         (c.customer_masked or "").strip(),
         (request_fallback or "").strip(),
     ):
         if v and not _looks_like_mask_placeholder(v):
-            return v
-    return (c.customer_name or c.customer_masked or request_fallback or "").strip()
+            base_name = v
+            break
+    if not base_name:
+        base_name = (c.customer_name or c.customer_masked or request_fallback or "").strip()
+    
+    if c.customer_id.startswith("CUS-TEST-LEXUS-") or c.customer_id.startswith("CUS-LEXUS-"):
+        sfx = c.customer_id.split("-")[-1]
+        return f"{base_name} - KHL-{sfx}"
+    return base_name
 
 
 def _serialize_customer(c: DbCustomer) -> dict:

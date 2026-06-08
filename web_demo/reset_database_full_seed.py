@@ -83,6 +83,8 @@ def run_full_reset_sequence(web_demo_dir: Optional[Path] = None) -> Dict[str, An
             if not file_reset_ok:
                 wipe_all_demo_tables(db)
             seed_all_demo_data(db)
+            from film_norm_excel_import import try_import_excel_norms
+            try_import_excel_norms(db)
             db.commit()
         except Exception:
             db.rollback()

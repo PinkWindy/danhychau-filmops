@@ -39,10 +39,10 @@ Dự án **DYC Film Warehouse Agentic Workspace** đã hoàn thành thiết lậ
 ## 6. Đề xuất khắc phục (Suggested Fixes)
 * **Khắc phục rủi ro nhập liệu:** Triển khai sớm thiết bị đo phim laser kết nối Bluetooth để truyền trực tiếp chiều dài cắt thực tế vào hệ thống (đã đưa vào backlog Must Have).
 * **Đồng bộ hóa API:** Xây dựng webhook đồng bộ thời gian thực từ giao dịch kho ảo sang phân hệ kế toán vật lý SAP ERP.
-* **Chuẩn hóa dữ liệu demo đã thực hiện:**
-  - Chuẩn hóa mã vật tư của cuộn gốc/mảnh dư demo từ FILMA sang JB20 để nhất quán với mã phim thi công.
-  - Áp dụng triệt để dữ liệu masked cho toàn bộ hồ sơ khách hàng/số điện thoại/VIN trong các tệp kịch bản.
-  - Làm rõ quy chuẩn kích thước block dán nhóm (Planned/Actual Cut Block = 152x143 cm) và chiều dài khấu trừ (Planned/Actual Deduction = 1.43m) để tránh mâu thuẫn số đo kỹ thuật.
+* **Chuẩn hóa dữ liệu demo đã thực hiện (Đã hoàn thành):**
+  - Đã chuẩn hóa mã vật tư của cuộn gốc/mảnh dư demo từ FILMA/B/C sang JB20/RS20 để nhất quán với mã phim thi công trong các tệp CSV (`lot_inventory.csv`, `offcut_inventory.csv`), tệp cấu hình nạp DB (`populate_db.py`) và các báo cáo.
+  - Đã áp dụng triệt để dữ liệu masked cho toàn bộ hồ sơ khách hàng/số điện thoại/VIN trong các tệp kịch bản và seed dữ liệu.
+  - Đã làm rõ quy chuẩn kích thước block dán nhóm (Planned/Actual Cut Block = 152x143 cm) và chiều dài khấu trừ (Planned/Actual Deduction = 1.43m) trong tất cả báo cáo, kịch bản demo và kiểm thử để tránh mâu thuẫn số đo kỹ thuật.
 
 ---
 

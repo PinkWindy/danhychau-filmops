@@ -505,11 +505,17 @@ def confirm_lexus_test_ocr(
     if has_ppf:
         job_items_str = (job_items_str + ";PPF_FULL") if job_items_str else "PPF_FULL"
 
+    req_no = ((data or {}).get("request_no") or payload.get("request_no") or "").strip() or None
+    ctr_no = ((data or {}).get("contract_no") or payload.get("contract_no") or "").strip() or None
+    if not ctr_no:
+        ctr_no = (getattr(draft, "extracted_contract_no", None) or "").strip() or None
+    req_dt = ((data or {}).get("request_date") or payload.get("request_date") or "").strip() or None
+
     req = DbRequest(
         request_id=fixed_req_id,
-        request_no=payload.get("request_no"),
-        contract_no=payload.get("contract_no"),
-        request_date=payload.get("request_date"),
+        request_no=req_no,
+        contract_no=ctr_no,
+        request_date=req_dt,
         ocr_source_image=payload.get("source_file_name"),
         dealer_id=dealer_id,
         dealer_name=dealer_name_disp,

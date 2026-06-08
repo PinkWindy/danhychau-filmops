@@ -1,6 +1,6 @@
 # Database Standard Seed Report
 
-- **Generated (UTC):** `2026-06-04T17:02:53Z`
+- **Generated (UTC):** `2026-06-05T17:54:14Z`
 - **Integrity smoke:** `PASS` (exit 0) — chạy **sau** bước đếm DB; chi tiết mục 7.
 - **Ghi chú:** Script **không** reset database. Bảng mục 1 / 2.1 đếm **trước** khi chạy smoke subprocess (smoke có thể thay đổi tồn kho). Nếu integrity FAIL: `python reset_database_full_seed.py` rồi chạy lại báo cáo.
 
@@ -11,7 +11,7 @@
 | Dealers | 5 |
 | End Customers (bảng `customers`) | 5 |
 | Vehicle Profiles | 8 |
-| Vehicle Film Norms | 119 |
+| Vehicle Film Norms | 118 |
 | Material Preferences | 9 |
 | LOTs | 25 |
 | OFFCUTs | 8 |
@@ -35,7 +35,7 @@
 - **Skip — dòng trống:** 0
 - **Skip — thiếu mã dòng xe:** 0
 - **Skip — Năm Model không hợp lệ / rỗng:** 0
-- **Số bản ghi trong DB gắn với import Excel (ước lượng):** `118` (norm_id `NORM-XLS%` hoặc note chứa `Import Excel`)
+- **Số bản ghi trong DB gắn với import Excel (ước lượng):** `117` (norm_id `NORM-XLS%` hoặc note chứa `Import Excel`)
 
 ### 10 dòng định mức mẫu (sau seed, ưu tiên bản ghi từ Excel)
 
@@ -111,13 +111,13 @@
 - **review_status:** `NEEDS_REVIEW` (kỳ vọng NEEDS_REVIEW)
 - **ocr_status:** `COMPLETED` (kỳ vọng COMPLETED)
 - **Chưa tự tạo request:** `OK` (`created_request_id=''`)
-- **Payload masked (KH_/VIN_):** `OK`
+- **Payload demo đầy đủ (không placeholder MASKED, VIN 17 ký tự):** `OK`
 ### `OCR-DRAFT-LEXUS-117-NEW`
 - **Tồn tại:** Có
 - **review_status:** `NEEDS_REVIEW` (kỳ vọng NEEDS_REVIEW)
 - **ocr_status:** `COMPLETED` (kỳ vọng COMPLETED)
 - **Chưa tự tạo request:** `OK` (`created_request_id=''`)
-- **Payload masked (KH_/VIN_):** `OK`
+- **Payload demo đầy đủ (không placeholder MASKED, VIN 17 ký tự):** `OK`
 
 - **OCR draft checks tổng:** `PASS`
 

@@ -1,137 +1,165 @@
 # Workflow Name
 WF0 - Upload ảnh phiếu yêu cầu và trích xuất dữ liệu OCR
 
-# Business Purpose
-Quy trình này hướng dẫn cách tiếp nhận phiếu yêu cầu thi công dán xe từ đại lý dưới dạng hình ảnh chụp hoặc bản scan PDF, thực hiện tự động trích xuất chữ viết bằng công cụ OCR, tổ chức cho Admin kho đối soát sửa lỗi, và chuyển đổi dữ liệu sạch thành phiếu yêu cầu chính thức để đưa vào luồng xử lý đơn hàng.
+## 1. Mục tiêu nghiệp vụ
 
-# Trigger
-Admin kho tải lên (upload) một hoặc nhiều file ảnh/PDF phiếu yêu cầu từ Lexus hoặc các đại lý khác thông qua giao diện PWA hoặc Mobile.
+WF0 dùng để tiếp nhận ảnh chụp hoặc file PDF scan phiếu yêu cầu thi công từ đại lý, ví dụ Lexus hoặc các đại lý khác. Hệ thống cần OCR để bóc tách dữ liệu, sau đó đối soát với dữ liệu master hiện có, cho Admin chỉnh sửa, rồi tạo Request chính thức để chuyển sang WF1.
 
-# Actors
-* **Admin kho / Điều phối**: Người upload file, kiểm tra trực quan dữ liệu bóc tách được và ấn nút Xác nhận.
-* **Image Intake & OCR Extraction Agent (`AG-10`)**: Hệ thống tự động kiểm tra định dạng, đánh giá chất lượng ảnh, thực hiện bóc tách và gán độ tin cậy.
-* **Order Intake Agent (`AG-01`)**: Nhận dữ liệu sạch sau khi Admin xác nhận để tiến hành lập Request chính thức ở WF1.
+Quy trình này cần giải quyết 4 việc chính:
+- Đọc ảnh/PDF phiếu yêu cầu.
+- Bóc tách đúng các trường thông tin theo mẫu phiếu.
+- Dò tìm tương đối thông tin đại lý/khách hàng/xe/mã hàng trong master data.
+- Cho Admin xác nhận hoặc chỉnh sửa trước khi tạo Request chính thức.
 
-# Agents Involved
-* **Image Intake & OCR Extraction Agent (`AG-10`)**
-* **Order Intake Agent (`AG-01`)**
+## 2. Nguyên tắc xử lý bắt buộc
+### 2.1. Không tự tạo dữ liệu demo
+Hệ thống không được tự sinh dữ liệu như: UNKNOWN, Demo Dealer, Sample Customer, Khách hàng mẫu, Lexus Demo, Dữ liệu giả.
+Nếu OCR không đọc được trường nào thì để trống và đánh dấu NEEDS_REVIEW.
 
-# Input
-* `image_file` (Luồng dữ liệu ảnh/PDF gốc).
-* `uploaded_by` (ID tài khoản Admin kho upload).
-* `uploaded_at` (Thời điểm upload).
-* `source_channel` (Kênh tải lên: PWA/MOBILE).
-* `dealer_hint` (Gợi ý mã đại lý dán xe - nếu có).
+### 2.2. Không hiển thị ảnh upload trực tiếp trên màn hình chính
+Sau khi upload, hệ thống không được tự động bung ảnh lớn ra màn hình.
+Cách hiển thị đúng:
+File đã tải lên:
+[icon ảnh/pdf] phieu-lexus-001.jpg
+Nút: [Xem ảnh gốc]
+Khi Admin bấm [Xem ảnh gốc], hệ thống mới mở ảnh trong modal/side panel để đối chiếu.
+Yêu cầu UI:
+- Không show ảnh full size mặc định.
+- Có nút Xem ảnh gốc.
+- Có thể đóng ảnh bằng nút X.
+- Nếu là PDF nhiều trang, hiển thị danh sách từng trang.
+- Mỗi trang có nút Xem trang.
 
-# Output
-* `ocr_draft_id` (Mã định danh bản nháp OCR).
-* `extracted_fields` (Dữ liệu đã trích xuất).
-* `request_id` (Mã phiếu yêu cầu chính thức được tạo).
-* `audit_events` (Nhật ký các sự kiện kiểm toán).
+### 2.3. Bỏ trường “Loại phim yêu cầu”
+Trong WF0 không dùng trường "Loại phim yêu cầu".
+Nếu ảnh có thông tin này thì chỉ lưu vào raw OCR text để tham chiếu, không đưa vào form chính.
+Thông tin thi công thực tế sẽ được thể hiện qua danh sách mã hàng/dịch vụ ở phần chi tiết hàng hóa.
 
----
+## 3. Bộ trường OCR cần bóc tách
+Hệ thống cần bóc tách các trường chính theo mẫu phiếu như sau:
+- Đơn vị
+- Địa chỉ đơn vị
+- Điện thoại
+- Fax
+- Số đề nghị
+- Ngày yêu cầu
+- Số hợp đồng
+- Tên khách hàng
+- Địa chỉ khách hàng
+- Số điện thoại khách hàng
+- Loại xe
+- Số khung
+- Ngày giao xe
+- Tư vấn bán hàng
 
-# Main Flow (Luồng xử lý chính)
-1. Admin kho mở màn hình **Tải ảnh phiếu yêu cầu** trên ứng dụng di động hoặc PWA.
-2. Admin chọn file ảnh chụp phiếu Lexus hoặc chọn file PDF scan từ máy tính và bấm **[Tải lên]**.
-3. Hệ thống tiếp nhận file, ghi nhận sự kiện `IMAGE_UPLOADED` và tiến hành kiểm tra định dạng file cùng dung lượng.
-4. Hệ thống kiểm tra chất lượng ảnh thô (độ mờ, góc nghiêng, ánh sáng). Ghi nhận `IMAGE_VALIDATED`.
-5. Hệ thống gọi **Image Intake & OCR Extraction Agent (`AG-10`)** để khởi chạy tiến trình bóc tách OCR. Ghi nhận `IMAGE_OCR_STARTED`.
-6. Agent 10 thực hiện trích xuất toàn bộ các trường thông tin ghi trên phiếu (đại lý, số phiếu, ngày tháng, khách hàng, xe, hạng mục thi công...) và gán độ tin cậy (confidence score) cho từng trường.
-7. Agent 10 đóng gói dữ liệu thành bản nháp OCR Draft (`ocr_draft_id`) kèm theo danh sách trường thiếu hoặc trường có confidence thấp. Ghi nhận `IMAGE_OCR_COMPLETED`.
-8. Hệ thống điều hướng Admin kho sang màn hình **Review OCR Draft**. Màn hình hiển thị song song file ảnh gốc và biểu mẫu nhập liệu với các trường confidence thấp được highlight màu đỏ/vàng cảnh báo.
-9. Admin kho đối chiếu mắt trực tiếp giữa ảnh gốc và kết quả trích xuất, thực hiện gõ sửa lại các ký tự bị đọc sai (nếu có). Hệ thống ghi nhận sự kiện `OCR_FIELD_CORRECTED` kèm chi tiết thay đổi.
-10. Sau khi đảm bảo toàn bộ dữ liệu chính xác, Admin bấm nút **[Xác nhận tạo Request]**.
-11. Hệ thống tự động gửi dữ liệu sạch sang **Order Intake Agent (`AG-01`)**. Agent 01 kiểm tra hợp lệ nghiệp vụ theo Rule `R1`, cấp mã `request_id` chính thức, chuyển trạng thái đơn sang `DRAFT_APPROVED` và lưu trữ liên kết ảnh gốc để đối chiếu. Ghi nhận `OCR_DRAFT_CONFIRMED` và `REQUEST_CREATED_FROM_IMAGE`.
-12. Hệ thống chuyển tiếp dữ liệu yêu cầu sạch sang **WF1** để bắt đầu chuỗi xử lý tự động (WF1 ➡️ WF2 ➡️ WF3... ➡️ WF7).
+## 4. Danh sách mã hàng động
+Phiếu có thể có nhiều dòng mã hàng. Không được hard-code chỉ 01 hoặc 02.
+Hệ thống cần bóc tách theo dạng mảng:
+```json
+"service_items": [
+  {
+    "line_no": 1,
+    "item_code": "",
+    "item_name": "",
+    "unit": "",
+    "quantity": null,
+    "unit_price": null,
+    "amount": null,
+    "vat_amount": null,
+    "total_with_vat": null
+  }
+]
+```
+Nếu phiếu có thêm mã hàng thứ 3 thì tự động thêm dòng thứ 3 vào service_items.
 
----
+## 5. Entity Resolution — Dò tìm đại lý trong master data
+Sau khi OCR xong, hệ thống không được dùng nguyên văn OCR để tạo ngay. Cần thực hiện bước dò tìm tương đối với master data.
 
-# Alternative Flows (Luồng rẽ nhánh)
+Trường OCR (Đơn vị, Địa chỉ đơn vị, Điện thoại, Fax) được hiểu là thông tin đại lý gửi phiếu.
+Cơ chế matching: Normalize tiếng Việt, Bỏ các từ pháp lý phổ biến, Fuzzy match theo tên, ưu tiên điện thoại/địa chỉ.
 
-### AF-01: Dữ liệu bóc tách có độ tin cậy cao
-* *Bước 8*: Hệ thống hiển thị màn hình Review OCR Draft.
-* *Bước rẽ*: Mọi trường thông tin đều có confidence score trên 90%, không có trường bắt buộc nào bị thiếu hoặc nghi ngờ sai lệch.
-* *Xử lý*: Admin kho kiểm tra nhanh bằng mắt và bấm nút **[Xác nhận]** ngay mà không cần chỉnh sửa bất kỳ ô nhập liệu nào.
+**Case A — Match chắc chắn (>= 90%)**
+Trạng thái: MATCHED. Form lưu: `"dealer_resolution_status": "MATCHED", "dealer_id": "DL-xxx"`.
 
-### AF-02: Dữ liệu bóc tách bị lỗi nhẹ
-* *Bước 8*: Hệ thống hiển thị màn hình Review OCR Draft.
-* *Bước rẽ*: Số khung xe (VIN) bị đọc sai ký tự 'B' thành '8' (confidence score của trường VIN là 74%).
-* *Xử lý*: Admin click vào trường VIN, sửa lại đúng ký tự 'B', hệ thống cập nhật confidence score của trường này thành 100% (Human Confirmed), ghi audit log sửa trường và mở khóa nút [Xác nhận].
+**Case B — Nhiều kết quả (70% - 90%)**
+Trạng thái: REVIEW_REQUIRED. Hiển thị danh sách gợi ý để Admin chọn.
 
-### AF-03: File yêu cầu tải lên là PDF nhiều trang
-* *Bước 3*: Admin upload file PDF chứa nhiều trang phiếu yêu cầu của nhiều xe khác nhau.
-* *Xử lý*: Agent 10 thực hiện bóc tách PDF thành các trang đơn lẻ. Với mỗi trang, Agent 10 tự động tạo một `ocr_draft_id` độc lập để Admin kiểm tra và duyệt riêng biệt, tránh gom gộp nhầm lẫn thông tin.
+**Case C — Không tìm thấy (< 70%)**
+Hiển thị cảnh báo và nút `[Tạo mới đại lý từ dữ liệu OCR]`.
+- Nếu Admin bấm: Tạo mới đại lý, gắn dealer_id.
+- Nếu Admin bỏ qua và bấm `[Xác nhận tạo Request]`: Hệ thống tự động tạo mới đại lý từ dữ liệu OCR. Ghi audit log `DEALER_AUTO_CREATED_FROM_OCR_ON_CONFIRM`.
 
-### AF-04: Admin hủy bỏ bản nháp OCR
-* *Bước 8*: Hệ thống hiển thị màn hình Review OCR Draft.
-* *Bước rẽ*: Admin phát hiện ảnh tải lên là phiếu bị trùng lặp, hoặc chụp nhầm tài liệu không liên quan.
-* *Xử lý*: Admin bấm nút **[Hủy bỏ]** (Cancel). Hệ thống xóa bản nháp, giải phóng bộ nhớ tạm, trả trạng thái ảnh gốc về `CANCELLED` và ghi nhận sự kiện `OCR_DRAFT_CANCELLED`.
+## 6. Dò tìm khách hàng cuối
+Trường OCR (Tên khách hàng, Địa chỉ, Số điện thoại khách hàng).
+Quy tắc dò tìm tương tự Đại lý (ưu tiên SĐT -> Họ tên + Địa chỉ).
+Kết quả lưu: `end_customer_resolution_status` (MATCHED | REVIEW_REQUIRED | NOT_FOUND | AUTO_CREATED), `end_customer_id`.
 
----
+## 7. Dò tìm xe và chuẩn hóa thông tin xe
+Mapping: `vehicle_model_raw`, `vin_raw`, `requested_delivery_at`.
+- VIN phải được normalize: uppercase, bỏ khoảng trắng, bỏ ký tự đặc biệt.
+- Nếu VIN đọc sai/thiếu ký tự -> highlight vàng/đỏ. (Confidence < 80% -> NEEDS_REVIEW). Hiển thị 6 ký tự cuối VIN.
+- Loại xe dò tìm với vehicle_profile/master model. Không tự suy luận nếu OCR không có.
 
-# Exception Flows (Luồng ngoại lệ)
+## 8. Form Review OCR Draft
+Sau khi OCR hoàn tất, màn hình chia thành 6 nhóm:
+- Nhóm 1 — File nguồn (File đã tải lên, số trang, nút Xem ảnh gốc)
+- Nhóm 2 — Thông tin đại lý (Kết quả dò tìm, Nút Tạo mới đại lý)
+- Nhóm 3 — Thông tin phiếu (Số đề nghị, ngày yêu cầu, số hợp đồng, tư vấn bán hàng)
+- Nhóm 4 — Thông tin khách hàng cuối (Kết quả dò tìm, Nút tạo mới)
+- Nhóm 5 — Thông tin xe (Loại xe, số khung, ngày giao xe)
+- Nhóm 6 — Danh sách mã hàng/dịch vụ (Hiển thị dạng bảng động có nút Thêm dòng/Xóa dòng)
 
-### EF-01: File tải lên không đúng định dạng
-* *Bước 3*: Admin vô tình chọn file Word `.docx` hoặc ảnh định dạng Apple `.heic`.
-* *Xử lý*: Hệ thống chặn upload ngay tại client hoặc API trả về lỗi `IMAGE_INVALID_FORMAT`. Tiến trình kết thúc, yêu cầu Admin chọn lại file.
+## 9. Confidence và trạng thái từng trường
+- >= 90%: màu bình thường.
+- 80% <= confidence < 90%: highlight vàng.
+- < 80%: highlight đỏ.
+- Admin sửa tay: status = HUMAN_CONFIRMED, confidence = 100%.
 
-### EF-02: Chất lượng hình ảnh quá kém
-* *Bước 4*: Ảnh chụp bị rung mờ hoặc chụp thiếu góc quan trọng.
-* *Xử lý*: Hệ thống gán trạng thái `IMAGE_QUALITY_FAILED`, hiển thị thông báo lỗi `IMAGE_QUALITY_FAILED` trên màn hình và yêu cầu Admin chụp lại ảnh rõ nét hơn để tải lên lại.
+## 10. Nút xác nhận tạo Request
+Chỉ mở khi các trường bắt buộc đã hợp lệ (Đại lý final, Tên khách hàng final, Loại xe final, Số khung, Ngày yêu cầu, Ngày giao xe, ít nhất 1 dòng mã hàng). Thiếu -> Không cho xác nhận, báo lỗi từng trường, không dùng UNKNOWN.
 
-### EF-03: Không thể xác định thông tin đại lý (Dealer) từ ảnh
-* *Bước 6*: OCR không tìm thấy từ khóa đại lý nào khớp với Master Data, và Admin không chọn `dealer_hint`.
-* *Xử lý*: Hệ thống hiển thị cảnh báo, bôi đỏ trường `dealer_name`. Nút [Xác nhận] bị khóa. Admin bắt buộc phải chọn thủ công đại lý từ danh sách dropdown khả dụng trên PWA mới có thể đi tiếp.
+## 11. Cơ chế tự tạo mới nếu user bỏ qua
+Nếu OCR đọc được thông tin nhưng chưa có trong master, mà Admin bấm `[Xác nhận tạo Request]`, hệ thống tự tạo dealer/customer mới.
 
-### EF-04: Thiếu thông tin model xe hoặc hạng mục thi công bắt buộc
-* *Bước 6*: Phiếu viết tay bị thiếu nội dung dán xe hoặc bị rách mất phần thông tin xe dán.
-* *Xử lý*: Hệ thống gán trạng thái `NEEDS_REVIEW`, khóa nút [Xác nhận]. Admin phải nhập bổ sung thủ công dòng xe hoặc các hạng mục dán phim. Nếu không có thông tin để nhập, Admin bắt buộc phải [Hủy bỏ] bản nháp và liên hệ lại đại lý để xác minh.
+## 12. Tạo Request chính thức
+Sau khi Admin xác nhận, hệ thống gọi AG-01 để validate, gắn thông tin, cấp request_id, chuyển trạng thái `DRAFT_APPROVED` và sang WF1.
 
-### EF-05: Thiếu thời gian giao xe yêu cầu (SLA)
-* *Bước 6*: Phiếu đại lý không ghi rõ giờ cần lấy xe.
-* *Xử lý*: Hệ thống hiển thị cảnh báo màu vàng tại trường `requested_delivery_at` nhưng không khóa cứng nút [Xác nhận]. Admin có thể tự thỏa thuận giờ giao xe với đại lý và nhập thủ công, hoặc hệ thống tự động gán thời gian mặc định (ví dụ: 17:00 ngày hôm sau).
+## 13. Quy tắc đặt mã Request
+Mã Request tạo từ OCR phải theo format: **`DYC-YYMMDD-XXXXXX`**
+Trong đó: YYMMDD = ngày tạo đơn, XXXXXX = 6 ký tự cuối VIN. (VD: `DYC-260606-123456`). Nếu VIN chưa đủ 6 ký tự thì bắt buộc Admin sửa.
 
-### EF-06: Dịch vụ OCR gặp sự cố hệ thống
-* *Bước 5*: Công cụ OCR bị lỗi kết nối mạng hoặc quá tải.
-* *Xử lý*: Hệ thống ghi log lỗi `OCR_PROCESSING_FAILED`, hiển thị thông báo lỗi kỹ thuật và cho phép Admin chọn phương án: "Nhập liệu thủ công từ đầu" hoặc "Thử lại OCR sau 5 phút".
+## 14. Audit log bắt buộc
+- `IMAGE_UPLOADED`, `IMAGE_VALIDATED`, `IMAGE_OCR_STARTED`, `IMAGE_OCR_COMPLETED`, `OCR_FIELD_CORRECTED`
+- `DEALER_MATCHED_FROM_MASTER`, `DEALER_NOT_FOUND`, `DEALER_CREATED_FROM_OCR`, `DEALER_AUTO_CREATED_FROM_OCR_ON_CONFIRM`
+- `CUSTOMER_MATCHED_FROM_MASTER`, `CUSTOMER_NOT_FOUND`, `CUSTOMER_CREATED_FROM_OCR`, `CUSTOMER_AUTO_CREATED_FROM_OCR_ON_CONFIRM`
+- `OCR_DRAFT_CONFIRMED`, `OCR_DRAFT_CANCELLED`, `REQUEST_CREATED_FROM_IMAGE`, `SENT_TO_WF1`
 
----
+## 15. Alternative Flow
+- **AF-01: OCR tin cậy cao**: Nút Xác nhận mở sẵn.
+- **AF-02: VIN OCR sai nhẹ**: Highlight, Admin sửa, field chuyển HUMAN_CONFIRMED.
+- **AF-03: PDF nhiều trang**: Tách trang, mỗi trang tạo 1 ocr_draft_id riêng.
+- **AF-04: Admin hủy bản nháp**: Bấm [Hủy bỏ], không tạo Request, ghi audit.
 
-# Human Checkpoints (Điểm kiểm soát con người)
-1. **Kiểm tra kết quả trích xuất OCR**: Admin kho đối chiếu trực tiếp giữa ảnh phiếu gốc và các trường thông tin do AI bóc tách được.
-2. **Sửa đổi các trường dữ liệu nghi ngờ**: Admin gõ sửa các ký tự bị nhận diện sai hoặc bổ sung thông tin thiếu.
-3. **Xác nhận tạo Request**: Hành động bấm nút bấm gửi để hệ thống tạo Request chính thức.
+## 16. Exception Flow
+- **EF-01: File sai định dạng**: Chặn upload, báo lỗi `IMAGE_INVALID_FORMAT`.
+- **EF-02: Ảnh quá mờ**: Status `IMAGE_QUALITY_FAILED`.
+- **EF-03: Không xác định được đại lý**: Bôi đỏ, yêu cầu chọn thủ công.
+- **EF-04: Thiếu model xe / hạng mục**: Khóa Xác nhận, bắt buộc bổ sung.
+- **EF-05: Thiếu ngày giao xe**: Cảnh báo vàng, cho nhập thủ công.
+- **EF-06: OCR service lỗi**: Báo lỗi kỹ thuật, cho nhập tay hoặc thử lại.
 
-# Rules Applied
-* [R1-intake-validation-rules.md](file:///d:/Qu%E1%BA%A3n%20l%C3%BD%20v%E1%BA%ADn%20h%C3%A0nh%20DYC/rules/R1-intake-validation-rules.md)
-* [R2-customer-dealer-data-governance-rules.md](file:///d:/Qu%E1%BA%A3n%20l%C3%BD%20v%E1%BA%ADn%20h%C3%A0nh%20DYC/rules/R2-customer-dealer-data-governance-rules.md)
-* [R9-audit-log-rules.md](file:///d:/Qu%E1%BA%A3n%20l%C3%BD%20v%E1%BA%ADn%20h%C3%A0nh%20DYC/rules/R9-audit-log-rules.md)
-* [Mobile Security & Audit Rules](file:///d:/Qu%E1%BA%A3n%20l%C3%BD%20v%E1%BA%ADn%20h%C3%A0nh%20DYC/mobile-interaction/mobile-security-audit-rules.md)
+## 17. Status Flow
+- Luồng chuẩn: IMAGE_UPLOADED → OCR_PROCESSING → OCR_DRAFT_READY → OCR_CONFIRMED → REQUEST_CREATED → SENT_TO_WF1
+- Luồng cần review: ... → NEEDS_REVIEW → HUMAN_CORRECTED → OCR_CONFIRMED → ...
+- Luồng hủy: ... → OCR_DRAFT_READY → OCR_DRAFT_CANCELLED
 
-# Audit Events
-* `IMAGE_UPLOADED`
-* `IMAGE_VALIDATED`
-* `IMAGE_OCR_STARTED`
-* `IMAGE_OCR_COMPLETED`
-* `OCR_FIELD_CORRECTED`
-* `OCR_DRAFT_CONFIRMED`
-* `OCR_DRAFT_CANCELLED`
-* `REQUEST_CREATED_FROM_IMAGE`
-
-# Completion Criteria
-* Bản nháp OCR Draft chuyển sang trạng thái `OCR_CONFIRMED` thành công.
-* Một bản ghi Request chính thức (`request_id`) được khởi tạo trong hệ thống với đầy đủ thông tin đại lý, dòng xe, hạng mục thi công.
-* Liên kết file ảnh gốc được gắn chặt chẽ vào Request ID phục vụ đối soát.
-* Dữ liệu sạch được bàn giao thành công cho **WF1**.
-* Toàn bộ sự kiện tương tác của Admin và OCR được lưu trữ đầy đủ trong nhật ký kiểm toán.
-
-# Status Flow (Luồng Trạng Thái)
-* **Luồng xử lý chuẩn**:
-  `IMAGE_UPLOADED` ➡️ `OCR_PROCESSING` ➡️ `OCR_DRAFT_READY` ➡️ `OCR_CONFIRMED` ➡️ `REQUEST_CREATED` ➡️ `SENT_TO_WF1`
-* **Luồng phát hiện nghi ngờ / thiếu sót**:
-  `IMAGE_UPLOADED` ➡️ `OCR_PROCESSING` ➡️ `OCR_DRAFT_READY` ➡️ `NEEDS_REVIEW` ➡️ (Admin sửa và bổ sung) ➡️ `OCR_CONFIRMED` ➡️ `REQUEST_CREATED` ➡️ `SENT_TO_WF1`
-* **Luồng lỗi chất lượng / định dạng file**:
-  `IMAGE_UPLOADED` ➡️ `IMAGE_QUALITY_FAILED` ➡️ `REUPLOAD_REQUIRED`
-* **Luồng Admin từ chối**:
-  `IMAGE_UPLOADED` ➡️ `OCR_PROCESSING` ➡️ `OCR_DRAFT_READY` ➡️ `OCR_DRAFT_CANCELLED`
+## 18. Acceptance Criteria
+1. Upload thành công, không tự show ảnh lớn.
+2. OCR bóc tách đúng mẫu.
+3. Không còn trường Loại phim yêu cầu.
+4. Mã hàng động.
+5. Dealer/Customer fuzzy match master data. Tự tạo nếu thiếu lúc xác nhận.
+6. Không dùng UNKNOWN.
+7. Request ID đúng format DYC-YYMMDD-XXXXXX.
+8. File gốc gắn vào Request.
+9. Toàn bộ có audit log. Dữ liệu sạch chuyển WF1.

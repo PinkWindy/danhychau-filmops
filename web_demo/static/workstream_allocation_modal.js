@@ -1,6 +1,5 @@
 /**
- * Modal chung: chỉnh sửa phân bổ vật tư trước duyệt — PPF + Phim cách nhiệt.
- * PUT /api/workstreams/{id}/allocation
+ * Modal chung: chỉnh sửa phân bổ LOT/OFFCUT — PPF + Phim cách nhiệt (PUT /api/workstreams/{id}/allocation).
  */
 (function () {
   function esc(s) {
@@ -8,6 +7,52 @@
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
       .replace(/"/g, '&quot;');
+  }
+
+  /** Copy hộp hướng dẫn WF — khớp với tiêu đề modal theo trạng thái luồng. */
+  function wfGuideCopy(status) {
+    const s = String(status || '').toUpperCase();
+    if (s === 'PENDING_TECH_PREFLIGHT') {
+      return {
+        title: 'Chỉnh phân bổ — giai đoạn trước chốt (KTV)',
+        hint:
+          'Luồng đã qua <strong>duyệt mã phim</strong>; tại đây chọn LOT/mảnh dư và số <strong>cm lấy</strong> từng nguồn. Lưu = ghi <code>/allocation</code>.',
+      };
+    }
+    if (s === 'APPROVED' || s === 'ASSIGNED_TO_TECHNICIAN') {
+      return {
+        title: 'Chỉnh phân bổ — sau phê duyệt luồng',
+        hint:
+          'Luồng <strong>đã phê duyệt</strong>; có thể chỉnh LOT/cm lấy cho tới khi hoàn tất thi công và đóng luồng (trừ khi đã trừ kho). Mọi thay đổi cần <strong>lý do</strong> (kiểm toán). API: <code>/allocation</code>.',
+      };
+    }
+    if (s === 'IN_PROGRESS' || s === 'ACTUAL_CONFIRMATION_REQUIRED' || s === 'PARTIALLY_COMPLETED') {
+      return {
+        title: 'Chỉnh phân bổ — đang / sau thi công',
+        hint:
+          'Luồng <strong>đang thi công</strong> (hoặc chờ xác nhận thực tế); vẫn chỉnh được phân bổ LOT như lần duyệt trước — sửa trực tiếp trên bảng, nhập <strong>lý do</strong> khi có thay đổi. Sau khi hệ thống <strong>đã trừ kho</strong> thì không còn sửa allocation tại đây.',
+      };
+    }
+    return {
+      title: 'Chỉnh phân bổ phim cách nhiệt',
+      hint:
+        'Bảng theo từng hạng mục kính; mỗi hàng có thể có nhiều nguồn LOT/mảnh dư. API: <code>/allocation</code>.',
+    };
+  }
+
+  /** Copy hộp hướng dẫn PPF theo trạng thái. */
+  function ppfGuideCopy(status) {
+    const s = String(status || '').toUpperCase();
+    if (s === 'PENDING_APPROVAL') {
+      return {
+        title: 'Chỉnh vật tư PPF — trước phê duyệt Quản lý',
+        hint: 'Mặc định Full xe. Có thể chia nhiều LOT/OFFCUT. API: <code>/allocation</code>',
+      };
+    }
+    return {
+      title: 'Chỉnh phân bổ PPF',
+      hint: 'Điều chỉnh nguồn và chiều dài lấy; thay đổi cần <strong>lý do</strong> (kiểm toán). API: <code>/allocation</code>',
+    };
   }
 
   function normVm(value) {
@@ -265,7 +310,14 @@
       }
       it.planned_cut_block = document.getElementById(`wa_block_${it.item_code}`)?.value || it.planned_cut_block || '';
       const rq = document.getElementById(`wa_reqm_${it.item_code}`)?.value;
-      it.required_length_m = rq === '' || rq == null ? it.required_length_m || 0 : parseFloat(rq) / 100;
+      if (isPpfCtx(ctx)) {
+        if (rq != null && String(rq).trim() !== '') {
+          const v = parseFloat(rq);
+          if (Number.isFinite(v)) it.required_length_m = v / 100;
+        }
+      } else {
+        it.required_length_m = rq === '' || rq == null ? it.required_length_m || 0 : parseFloat(rq) / 100;
+      }
       if (!isPpfCtx(ctx)) {
         it.material_code = (document.getElementById(`wa_mat_${it.item_code}`)?.value || '').trim();
         const wcm = document.getElementById(`wa_wcm_${it.item_code}`)?.value;
@@ -309,9 +361,9 @@
       rows += `<tr style="background:rgba(255,255,255,0.03)">
         <td style="padding:6px"><input type="checkbox" id="wa_sel_${it.item_code}" ${it.is_selected ? 'checked' : ''} ${locked ? 'disabled' : ''}></td>
         <td style="padding:6px;font-weight:600">${esc(it.item_name)}</td>
-        <td style="padding:6px"><input type="number" class="field-input" style="width:56px" id="wa_qty_${it.item_code}" min="0" value="${it.quantity || 0}"></td>
-        <td style="padding:6px"><input type="text" class="field-input" style="width:88px" id="wa_block_${it.item_code}" value="${esc(it.planned_cut_block || '')}"></td>
-        <td style="padding:6px"><input type="number" class="field-input" style="width:72px" id="wa_reqm_${it.item_code}" step="0.1" value="${it.required_length_m != null ? it.required_length_m : ''}"></td>
+        <td style="padding:6px"><input type="number" class="field-input" style="width:56px" id="wa_qty_${it.item_code}" min="0" value="${it.quantity || 0}" placeholder="vd: 1" title="Số lượng hạng mục"></td>
+        <td style="padding:6px"><input type="text" class="field-input" style="width:88px" id="wa_block_${it.item_code}" value="${esc(it.planned_cut_block || '')}" placeholder="vd: 152×1300" title="Khổ cắt dự kiến (cm)"></td>
+        <td style="padding:6px"><input type="number" class="field-input" style="width:80px" id="wa_reqm_${it.item_code}" step="1" min="0" value="${it.required_length_m != null && Number(it.required_length_m) > 0 ? Math.round(Number(it.required_length_m) * 100) : ''}" placeholder="vd: 1300" title="Chiều dài phim cần cho hạng mục (cm); Full xe thường = chiều dài khổ (vd 1300)"></td>
         <td colspan="5"></td></tr>`;
       if (!it.is_selected) continue;
       const srcs = it.sources && it.sources.length ? it.sources : [{ source_type: 'LOT', source_id: '', allocated_length_m: 0, note: '' }];
@@ -325,8 +377,8 @@
               <select class="field-input wa-src-type"><option value="LOT" ${st === 'LOT' ? 'selected' : ''}>Cuộn LOT</option>
                 <option value="OFFCUT" ${st === 'OFFCUT' ? 'selected' : ''}>Mảnh dư</option></select>
               <select class="field-input wa-src-id">${opts}</select>
-              <input type="number" class="field-input wa-src-len" step="1" min="0" value="${src.allocated_length_m != null ? Math.round(src.allocated_length_m * 100) : ''}" placeholder="cm">
-              <input type="text" class="field-input wa-src-note" placeholder="Ghi chú" value="${esc(src.note || '')}">
+              <input type="number" class="field-input wa-src-len" step="1" min="0" value="${src.allocated_length_m != null && Number(src.allocated_length_m) > 0 ? Math.round(src.allocated_length_m * 100) : ''}" placeholder="Số cm lấy" title="Chiều dài lấy từ LOT/mảnh dư (cm)">
+              <input type="text" class="field-input wa-src-note" placeholder="vd: cắt đầu cuộn, ghép nguồn…" value="${esc(src.note || '')}" title="Ghi chú nguồn (không bắt buộc)">
               <button type="button" class="btn btn-outline btn-sm wa-del-src"${srcs.length < 2 ? ' disabled' : ''}>✕</button>
             </div></td></tr>`;
       });
@@ -334,10 +386,11 @@
         <button type="button" class="btn btn-outline btn-sm" data-wa-add-src="${it.item_code}">+ Thêm nguồn</button>
         <button type="button" class="btn btn-outline btn-sm" data-wa-reset style="margin-left:8px">Reset</button></td></tr>`;
     }
+    const pg = ppfGuideCopy(ws.status);
     return `
       <div class="edit-guide-box"><i class="fa-solid fa-circle-info" style="color:var(--red)"></i><div>
-        <strong style="color:var(--red)">Chỉnh sửa vật tư PPF trước duyệt</strong>
-        <p class="edit-hint" style="margin:4px 0 0">Mặc định Full xe. Có thể chia nhiều LOT/OFFCUT. API: <code>/allocation</code></p></div></div>
+        <strong style="color:var(--red)">${esc(pg.title)}</strong>
+        <p class="edit-hint" style="margin:4px 0 0">${pg.hint}</p></div></div>
       <div class="edit-section"><div class="edit-section-title"><i class="fa-solid fa-film" style="color:var(--red)"></i> Loại PPF</div>
         <div class="mat-selector">${['T-TYPE', 'M-TYPE'].map((pid) => {
           const lab = pid === 'T-TYPE' ? 'T-TYPE — PPF trong' : 'M-TYPE — PPF mờ';
@@ -420,8 +473,8 @@
           <select class="field-input wa-src-type"><option value="LOT" ${st === 'LOT' ? 'selected' : ''}>Cuộn LOT</option>
             <option value="OFFCUT" ${st === 'OFFCUT' ? 'selected' : ''}>Mảnh dư</option></select>
           <select class="field-input wa-src-id" style="min-width:140px;flex:1">${opts}</select>
-          <input type="number" class="field-input wa-src-len" step="1" min="0" value="${src.allocated_length_m != null ? Math.round(src.allocated_length_m * 100) : ''}" placeholder="cm" style="width:52px">
-          <input type="text" class="field-input wa-src-note" placeholder="Ghi chú" value="${esc(src.note || '')}" style="width:64px">
+          <input type="number" class="field-input wa-src-len" step="1" min="0" value="${src.allocated_length_m != null && Number(src.allocated_length_m) > 0 ? Math.round(src.allocated_length_m * 100) : ''}" placeholder="Số cm lấy" title="Chiều dài lấy từ nguồn (cm)" style="width:52px">
+          <input type="text" class="field-input wa-src-note" placeholder="Ghi chú nguồn…" value="${esc(src.note || '')}" style="width:64px" title="Ghi chú (không bắt buộc)">
           <button type="button" class="btn btn-outline btn-sm wa-del-src"${srcs.length < 2 ? ' disabled' : ''}>✕</button>
         </div>`;
       })
@@ -472,6 +525,27 @@
       nid || strat
         ? `Đề xuất: <code>${esc(nid || '—')}</code>${strat ? ` — <span style="opacity:0.9">${esc(strat)}</span>` : ''}`
         : 'Chưa khớp định mức — chỉnh năm model và bấm <strong>Áp dụng định mức</strong>, hoặc nhập tay trên phiếu / bảng.';
+    const wg = ctx.extraCutMode
+      ? {
+          title: 'Đăng ký cắt bổ sung — Phim cách nhiệt',
+          hint:
+            'Tick <strong>chỉ</strong> hạng mục bị hỏng cần cắt lại; chọn nguồn LOT/mảnh dư và mét lấy — cùng quy tắc <strong>gộp khổ</strong> như phân bổ. Hệ thống kiểm tra tổng mét <strong>cộng phân bổ ban đầu</strong> không vượt tồn kho.',
+        }
+      : wfGuideCopy(ws.status);
+    const normSection =
+      ctx.extraCutMode
+        ? ''
+        : `<div class="edit-section" style="padding-bottom:4px">
+        <div class="edit-section-title"><i class="fa-solid fa-calendar-days" style="color:var(--blue-light)"></i> Năm model &amp; định mức đề xuất</div>
+        <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;margin-top:8px">
+          <div class="field-group" style="margin:0;min-width:140px"><label style="font-size:11px">Năm model (phiếu YC + chỉnh tay)</label>
+            <input type="number" class="field-input" id="wa-norm-model-year" min="1985" max="2035" step="1" placeholder="VD: 2022" value="${esc(draftRaw)}">
+          </div>
+          <button type="button" class="btn btn-sm" id="wa-apply-norm-year">Áp dụng định mức</button>
+          <div class="edit-hint" id="wa-norm-resolve-hint" style="margin:0;flex:1;min-width:200px">${hint}</div>
+        </div>
+      </div>`;
+    const tableTitle = ctx.extraCutMode ? 'Bảng hạng mục &amp; nguồn cắt bổ sung' : 'Bảng hạng mục &amp; nguồn';
     let rows = '';
     for (const it of alloc.items || []) {
       const stackInner = wfSourceStackHtml(it, rowOpts);
@@ -483,7 +557,7 @@
         <td style="padding:6px;vertical-align:top"><input type="text" class="field-input" style="width:80px" id="wa_block_${it.item_code}" value="${esc(it.planned_size || it.planned_cut_block || '')}"></td>
         <td style="padding:6px;vertical-align:top"><input type="number" class="field-input" style="width:52px" id="wa_wcm_${it.item_code}" step="0.1" value="${it.required_width_cm != null ? it.required_width_cm : ''}"></td>
         <td style="padding:6px;vertical-align:top"><input type="number" class="field-input" style="width:68px" id="wa_lcm_${it.item_code}" step="0.1" value="${it.required_length_cm != null ? it.required_length_cm : ''}"></td>
-        <td style="padding:6px;vertical-align:top"><input type="number" class="field-input" style="width:72px" id="wa_reqm_${it.item_code}" step="1" value="${it.required_length_m != null ? Math.round(it.required_length_m * 100) : ''}"></td>
+        <td style="padding:6px;vertical-align:top"><input type="number" class="field-input" style="width:72px" id="wa_reqm_${it.item_code}" step="1" value="${it.required_length_m != null ? Math.round(it.required_length_m * 100) : ''}" title="Mét chạy cuộn 152cm (hiển thị cm): thường = min(rộng, dài) kính; có thể khác khi gộp khổ kính hậu + sườn trước (cùng mã phim)."></td>
         <td colspan="4" style="padding:6px;vertical-align:top;background:rgba(0,30,80,0.12)"><div class="wa-src-stack" data-wa-src-item="${it.item_code}">${stackInner}</div></td>
         <td style="padding:6px;vertical-align:top;white-space:nowrap">
           <button type="button" class="btn btn-outline btn-sm" data-wa-add-src="${it.item_code}"${it.is_selected ? '' : ' disabled'}>+ Nguồn</button>
@@ -492,21 +566,13 @@
     }
     return `
       <div class="edit-guide-box"><i class="fa-solid fa-circle-info" style="color:var(--blue-light)"></i><div>
-        <strong style="color:var(--blue-light)">Chỉnh sửa vật tư Phim cách nhiệt trước duyệt</strong>
-        <p class="edit-hint" style="margin:4px 0 0">Bảng hạng mục kính — mỗi hạng mục một hàng; chia nguồn theo mét cắt. API: <code>/allocation</code></p></div></div>
-      <div class="edit-section" style="padding-bottom:4px">
-        <div class="edit-section-title"><i class="fa-solid fa-calendar-days" style="color:var(--blue-light)"></i> Năm model &amp; định mức đề xuất</div>
-        <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;margin-top:8px">
-          <div class="field-group" style="margin:0;min-width:140px"><label style="font-size:11px">Năm model (phiếu YC + chỉnh tay)</label>
-            <input type="number" class="field-input" id="wa-norm-model-year" min="1985" max="2035" step="1" placeholder="VD: 2022" value="${esc(draftRaw)}">
-          </div>
-          <button type="button" class="btn btn-sm" id="wa-apply-norm-year">Áp dụng định mức</button>
-          <div class="edit-hint" id="wa-norm-resolve-hint" style="margin:0;flex:1;min-width:200px">${hint}</div>
-        </div>
-      </div>
-      <div class="edit-section"><div class="edit-section-title"><i class="fa-solid fa-table" style="color:var(--blue-light)"></i> Bảng hạng mục &amp; nguồn</div>
+        <strong style="color:var(--blue-light)">${esc(wg.title)}</strong>
+        <p class="edit-hint" style="margin:4px 0 0">${wg.hint}</p></div></div>
+      ${normSection}
+      <div class="edit-section"><div class="edit-section-title"><i class="fa-solid fa-table" style="color:var(--blue-light)"></i> ${tableTitle}</div>
+        <p class="edit-hint muted" style="font-size:10px;margin:0 0 8px;line-height:1.45">Cột <strong>Chạy cuộn (cm)</strong> là chiều dài cắt dọc cuộn phim (quy đổi cm), dùng khớp tổng mét LOT — không nhất thiết bằng một cạnh của <em>Size</em> khi có <strong>gộp khổ</strong> (vd. kính hậu + sườn trước cùng mã phim).</p>
         <div style="overflow-x:auto"><table class="data-table" style="width:100%;font-size:12px"><thead><tr style="text-align:left;background:rgba(255,255,255,0.05)">
-          <th>Chọn</th><th>Hạng mục</th><th>Mã vật tư</th><th>SL</th><th>Size</th><th>Rộng cm</th><th>Dài cm</th><th>Yêu cầu (cm)</th>
+          <th>Chọn</th><th>Hạng mục</th><th>Mã vật tư</th><th>SL</th><th>Size</th><th>Rộng cm</th><th>Dài cm</th><th title="Mét chạy cuộn 152cm (cm). Thường min(rộng,dài); có thể chia đôi khi gộp khổ hậu + sườn trước.">Chạy cuộn (cm)</th>
           <th colspan="4">Nguồn (LOT / mảnh dư)</th><th></th>
         </tr></thead><tbody>${rows}</tbody></table></div></div>
       <div class="edit-section" id="wa-summary-box"><div class="edit-section-title"><i class="fa-solid fa-scale-balanced" style="color:var(--teal-light)"></i> Kiểm tra từng hạng mục</div>
@@ -609,9 +675,18 @@
   }
 
   function renderReasonBlock() {
+    const ec = window.__waEditorCtx && window.__waEditorCtx.extraCutMode;
     return `<div class="edit-section" style="border-color:rgba(229,57,53,0.3);background:rgba(229,57,53,0.04)">
-      <div class="edit-section-title" style="color:var(--red-light)"><i class="fa-solid fa-pen-to-square"></i> Lý do chỉnh sửa <span style="color:var(--red)">*</span> (khi đổi nguồn / chia nguồn / vật tư)</div>
-      <textarea id="wa-alloc-reason" class="field-input" rows="3" style="width:100%;resize:vertical" placeholder="Nhập lý do khi hệ thống yêu cầu."></textarea></div>`;
+      <div class="edit-section-title" style="color:var(--red-light)"><i class="fa-solid fa-pen-to-square"></i> ${
+        ec ? 'Lý do phát sinh cắt thêm' : 'Lý do chỉnh sửa'
+      } <span style="color:var(--red)">*</span>${
+        ec
+          ? ' <span style="font-size:11px;font-weight:500;opacity:0.9">(tối thiểu 5 ký tự)</span>'
+          : ' <span style="font-size:11px;font-weight:500;opacity:0.9">(khi đổi nguồn / vật tư)</span>'
+      }</div>
+      <textarea id="wa-alloc-reason" class="field-input" rows="3" style="width:100%;resize:vertical" placeholder="${
+        ec ? 'VD: phim gãy do vận chuyển; dán lỗi phải cắt lại kính hậu…' : 'Nhập lý do khi hệ thống yêu cầu.'
+      }"></textarea></div>`;
   }
 
   function refreshSummary(ctx) {
@@ -870,6 +945,11 @@
         return;
       }
       if (e.target.closest('[data-wa-reset]')) {
+        if (ctx.extraCutMode) {
+          if (typeof toast === 'function')
+            toast('info', 'Cắt thêm', 'Không reset về phân bổ đã duyệt — đóng modal rồi mở lại để nhập lại từ đầu.');
+          return;
+        }
         fetch(`/api/workstreams/${ctx.wsId}`)
           .then((r) => r.json())
           .then(async (ws2) => {
@@ -896,7 +976,7 @@
       }
     };
     const applyNormBtn = document.getElementById('wa-apply-norm-year');
-    if (applyNormBtn && !isPpfCtx(ctx)) {
+    if (applyNormBtn && !isPpfCtx(ctx) && !ctx.extraCutMode) {
       applyNormBtn.onclick = async () => {
         window._wsEditDirty = true;
         const yEl = document.getElementById('wa-norm-model-year');
@@ -982,6 +1062,144 @@
     }
   }
 
+  async function saveExtraCut() {
+    const ctx = window.__waEditorCtx;
+    if (!ctx || !ctx.extraCutMode) return;
+    const reason = document.getElementById('wa-alloc-reason')?.value?.trim() || '';
+    if (reason.length < 5) {
+      if (typeof toast === 'function') toast('error', 'Lý do', 'Tối thiểu 5 ký tự.');
+      return;
+    }
+    const payload = readAllocFromDom(ctx);
+    payload.workstream_type = ctx.ws.workstream_type;
+    const selected = (payload.items || []).filter((x) => x.is_selected);
+    if (!selected.length) {
+      if (typeof toast === 'function') toast('warning', 'Cắt thêm', 'Chọn ít nhất một hạng mục cần cắt bổ sung.');
+      return;
+    }
+    const sum = computeWfRollCutSummary(payload);
+    const by = sum.by_material || {};
+    for (const mc of Object.keys(by).sort()) {
+      const need = parseFloat(by[mc].total_roll_strip_m) || 0;
+      if (need <= 1e-9) continue;
+      let got = 0;
+      (payload.items || []).forEach((it) => {
+        if (!it.is_selected || String(it.material_code || '').trim().toUpperCase() !== mc) return;
+        (it.sources || []).forEach((s) => {
+          got += parseFloat(s.allocated_length_m) || 0;
+        });
+      });
+      if (got + 1e-6 < need) {
+        if (typeof toast === 'function')
+          toast('warning', 'WF', `${mc}: tổng mét nguồn ${got.toFixed(2)}m < gộp khổ cần ${need.toFixed(2)}m.`);
+        return;
+      }
+    }
+    try {
+      const res = await fetch(`/api/workstreams/${encodeURIComponent(ctx.wsId)}/extra-cut-request`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          reason,
+          wf_extra_allocation: payload,
+          technician_id: (ctx.ws.assigned_technician_id || '').trim() || 'KTV-UNKNOWN',
+          technician_name: (ctx.ws.assigned_technician_name || '').trim(),
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const d = data.detail;
+        const msg = typeof d === 'object' && d && d.message ? d.message : JSON.stringify(data);
+        throw new Error(msg);
+      }
+      if (typeof toast === 'function') toast('success', 'Đã gửi', data.detail || 'Đăng ký cắt thêm đã lưu.');
+      window._wsEditDirty = false;
+      window.__waEditorCtx.extraCutMode = false;
+      if (typeof window.closeWsEdit === 'function') window.closeWsEdit();
+      if (typeof taiDonThiCong === 'function') await taiDonThiCong();
+      if (typeof taiBangLuong === 'function') await taiBangLuong();
+      if (typeof taiThongBao === 'function') taiThongBao();
+      if (typeof taiTongQuan === 'function') taiTongQuan();
+    } catch (err) {
+      if (typeof toast === 'function') toast('error', 'Lỗi gửi', err.message || String(err));
+    }
+  }
+
+  window.openExtraCutWfModal = async function (wsId) {
+    let ws;
+    try {
+      ws = await fetch(`/api/workstreams/${encodeURIComponent(wsId)}`).then((r) => r.json());
+    } catch (e) {
+      if (typeof toast === 'function') toast('error', 'Luồng', e.message || String(e));
+      return;
+    }
+    if (ws.workstream_type !== 'WINDOW_FILM_INSTALLATION') {
+      if (typeof toast === 'function')
+        toast('info', 'Chỉ PCN', 'Bảng phân bổ cắt thêm hiện chỉ áp dụng Phim cách nhiệt.');
+      return;
+    }
+    if (!ws.wf_allocation || !Array.isArray(ws.wf_allocation.items) || !ws.wf_allocation.items.length) {
+      if (typeof toast === 'function') toast('error', 'Thiếu phân bổ', 'Luồng chưa có wf_allocation.');
+      return;
+    }
+    const [lots, offcuts] = await Promise.all([
+      fetch('/api/lots').then((r) => r.json()),
+      fetch('/api/offcuts').then((r) => r.json()),
+    ]);
+    let alloc;
+    if (ws.extra_cut_wf_allocation && Array.isArray(ws.extra_cut_wf_allocation.items)) {
+      alloc = JSON.parse(JSON.stringify(ws.extra_cut_wf_allocation));
+    } else {
+      const base = JSON.parse(JSON.stringify(ws.wf_allocation || { items: [] }));
+      const items = (base.items || []).map((it) => ({
+        ...it,
+        is_selected: false,
+        quantity: 0,
+        sources: [],
+        required_length_m: 0,
+      }));
+      alloc = { ...base, items, change_reason: '' };
+    }
+    window.__waEditorCtx = {
+      wsId,
+      ws,
+      lots,
+      offcuts,
+      alloc,
+      wfRowOpts: {},
+      normMeta: {},
+      normYearDraft: '',
+      extraCutMode: true,
+    };
+    const { normRes } = await enrichWfAllocationFromNorm(ws, window.__waEditorCtx.alloc, null, {
+      forceRefreshNormDims: false,
+    });
+    window.__waEditorCtx.normMeta = normRes || {};
+    window.__waEditorCtx.wfRowOpts = {};
+    await prefetchWfSourceDropdowns(window.__waEditorCtx);
+    document.getElementById('ws-edit-title').textContent = 'Đăng ký cắt thêm — Phim cách nhiệt';
+    const sts = typeof TRANG_THAI_VI !== 'undefined' ? TRANG_THAI_VI[ws.status] || ws.status : ws.status;
+    const rid = ws.request_id || '';
+    const subEl = document.getElementById('ws-edit-subtitle');
+    subEl.innerHTML = `${esc(wsId)} | Đơn: <button type="button" class="ws-edit-jump-req" data-request-id=${JSON.stringify(
+      rid,
+    )} title="Mở tab Đơn thi công">${esc(rid)}</button> | ${esc(sts)}`;
+    const inner = document.querySelector('.ws-edit-modal-inner');
+    if (inner) inner.style.maxWidth = '1080px';
+    const body = document.getElementById('ws-edit-body');
+    body.innerHTML = renderWfBody(window.__waEditorCtx) + renderReasonBlock();
+    wire(window.__waEditorCtx);
+    refreshSummary(window.__waEditorCtx);
+    const saveBtn = document.getElementById('btn-ws-edit-save');
+    if (saveBtn) {
+      saveBtn.innerHTML = '<i class="fa-solid fa-paper-plane"></i> Gửi đăng ký cắt thêm';
+      saveBtn.onclick = () => saveExtraCut();
+    }
+    document.getElementById('ws-edit-modal').style.display = 'flex';
+    const ta = document.getElementById('wa-alloc-reason');
+    if (ta && ws.extra_cut_reason) ta.value = String(ws.extra_cut_reason);
+  };
+
   window.openWorkstreamAllocationModal = async function (wsId, ws, lots, offcuts) {
     const isPpf = ws.workstream_type === 'PPF_INSTALLATION';
     const raw = isPpf ? ws.ppf_allocation : ws.wf_allocation;
@@ -991,7 +1209,7 @@
       return;
     }
     if (isPpf) autoSecondLot(alloc, lots);
-    window.__waEditorCtx = { wsId, ws, lots, offcuts, alloc, wfRowOpts: {}, normMeta: {}, normYearDraft: '' };
+    window.__waEditorCtx = { wsId, ws, lots, offcuts, alloc, wfRowOpts: {}, normMeta: {}, normYearDraft: '', extraCutMode: false };
     if (!isPpf) {
       const { req, normRes } = await enrichWfAllocationFromNorm(ws, alloc);
       window.__waEditorCtx.normMeta = normRes || {};
@@ -1002,17 +1220,48 @@
     }
     document.getElementById('ws-edit-title').textContent = isPpf
       ? 'Chỉnh sửa vật tư PPF trước duyệt'
-      : 'Chỉnh sửa vật tư Phim cách nhiệt trước duyệt';
-    document.getElementById('ws-edit-subtitle').textContent = `${wsId} | Đơn: ${ws.request_id} | ${typeof TRANG_THAI_VI !== 'undefined' ? TRANG_THAI_VI[ws.status] || ws.status : ws.status}`;
+      : (() => {
+          const st = String(ws.status || '').toUpperCase();
+          if (st === 'PENDING_TECH_PREFLIGHT') return 'Chỉnh sửa vật tư Phim cách nhiệt — trước chốt phân bổ';
+          if (['IN_PROGRESS', 'ACTUAL_CONFIRMATION_REQUIRED', 'PARTIALLY_COMPLETED'].includes(st))
+            return 'Chỉnh phân bổ LOT — đang / sau thi công';
+          return 'Chỉnh sửa phân bổ LOT — Phim cách nhiệt';
+        })();
+    const sts = typeof TRANG_THAI_VI !== 'undefined' ? TRANG_THAI_VI[ws.status] || ws.status : ws.status;
+    const rid = ws.request_id || '';
+    const subEl = document.getElementById('ws-edit-subtitle');
+    subEl.innerHTML = `${esc(wsId)} | Đơn: <button type="button" class="ws-edit-jump-req" data-request-id=${JSON.stringify(
+      rid,
+    )} title="Mở tab Đơn thi công">${esc(rid)}</button> | ${esc(sts)}`;
     const inner = document.querySelector('.ws-edit-modal-inner');
     if (inner) inner.style.maxWidth = '1080px';
     const body = document.getElementById('ws-edit-body');
     body.innerHTML = (isPpf ? renderPpfBody(window.__waEditorCtx) : renderWfBody(window.__waEditorCtx)) + renderReasonBlock();
     wire(window.__waEditorCtx);
     refreshSummary(window.__waEditorCtx);
-    document.getElementById('btn-ws-edit-save').onclick = () => saveAllocation();
+    const saveBtn0 = document.getElementById('btn-ws-edit-save');
+    if (saveBtn0) {
+      saveBtn0.innerHTML = '<i class="fa-solid fa-floppy-disk"></i> Lưu thay đổi';
+      saveBtn0.onclick = () => saveAllocation();
+    }
     document.getElementById('ws-edit-modal').style.display = 'flex';
   };
 
   window.openPpfPreflightEditor = window.openWorkstreamAllocationModal;
+
+  (function wireJumpReqFromAllocModal() {
+    const modal = document.getElementById('ws-edit-modal');
+    if (!modal || modal.dataset.wsEditJumpReqWired === '1') return;
+    modal.dataset.wsEditJumpReqWired = '1';
+    modal.addEventListener('click', (e) => {
+      const b = e.target.closest('.ws-edit-jump-req');
+      if (!b) return;
+      const rid = (b.getAttribute('data-request-id') || '').trim();
+      if (!rid) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (typeof window.closeWsEdit === 'function') window.closeWsEdit();
+      if (typeof window.chuyenDenDon === 'function') window.chuyenDenDon(rid);
+    });
+  })();
 })();

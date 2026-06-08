@@ -628,9 +628,10 @@ const GIAO_DICH_VI = {
   'WORKSTREAM_EDIT_SELECTED_MATERIAL_CODE': 'Chỉnh sửa loại phim',
   'WORKSTREAM_EDIT_PLANNED_CUT_BLOCK': 'Chỉnh sửa kích thước block',
   'WORKSTREAM_EDIT_PLANNED_DEDUCTION_LENGTH_M': 'Chỉnh sửa chiều dài khấu',
-  'WORKSTREAM_EDIT_ALLOCATED_SOURCE_ID': 'Chỉnh sửa nguồn vật tư',
+  'EXTRA_CUT_REGISTERED': 'Đăng ký cắt thêm (KTV)',
   'IMPORT_LOT': 'Nhập LOT',
   'IMPORT_OFFCUT_MANUAL': 'Nhập mảnh dư thủ công',
+  'IMPORT_OFFCUT_WORKSTREAM': 'Nhập mảnh dư từ hoàn tất luồng (KTV)',
   'MANUAL_ISSUE_LOT': 'Xuất LOT thủ công',
   'MANUAL_ISSUE_OFFCUT': 'Xuất mảnh dư thủ công',
   'CLEAR_LOT': 'Clear LOT',
@@ -638,6 +639,7 @@ const GIAO_DICH_VI = {
   'RELEASE_LOCK_MANUAL': 'Release lock thủ công',
   'LOT_IMPORTED': 'Nhập LOT (audit)',
   'OFFCUT_IMPORTED_MANUAL': 'Nhập mảnh dư (audit)',
+  'OFFCUT_IMPORTED_WORKSTREAM': 'Nhập mảnh dư từ luồng (audit)',
   'LOT_MANUAL_ISSUED': 'Xuất LOT (audit)',
   'OFFCUT_MANUAL_ISSUED': 'Xuất mảnh dư (audit)',
   'LOT_CLEARED': 'Clear LOT (audit)',
@@ -650,7 +652,7 @@ const GIAO_DICH_VI = {
   'VEHICLE_CREATED_FROM_OCR': 'Tạo xe từ OCR',
   'WORKSTREAM_CREATED': 'Tạo luồng thi công',
   'NORM_AUTO_FILLED': 'Tự điền định mức',
-  'MATERIAL_PREFERENCE_APPLIED': 'Áp Material Preference',
+  'MATERIAL_PREFERENCE_APPLIED': 'Áp dụng vật tư ưu tiên',
 };
 
 // ─── TIỆN ÍCH ────────────────────────────────────────────────────────────────
@@ -717,19 +719,63 @@ function loaiLuongBadge(wsType) {
   return `<span class="status-badge ${cls}">${label}</span>`;
 }
 
-/** Nhãn tiếng Việt cho job_item WF (material plan) */
+/** Nhãn tiếng Việt cho job_item / item_code (WF + PPF) */
+const WF_JC_ITEM_VI = {
+  WINDSHIELD: 'Kính lái (kính chắn gió trước)',
+  REAR_WINDOW: 'Kính sau',
+  FRONT_SIDE: 'Kính cửa trước',
+  REAR_SIDE_TRIANGLE: 'Kính tam giác / sườn sau',
+  TRIANGLE: 'Tam giác',
+  REAR_SIDE: 'Sườn sau',
+  SUNROOF: 'Cửa sổ trời',
+  SIDE_QUARTER: 'Tam giác cố định',
+  PPF_FULL: 'PPF — full xe',
+  PPF_BODY: 'PPF — thân xe',
+  FULL_VEHICLE_PPF: 'PPF — full xe',
+  HOOD_PPF: 'PPF — nắp capô',
+  FRONT_BUMPER_PPF: 'PPF — cản trước',
+  REAR_BUMPER_PPF: 'PPF — cản sau',
+  MIRROR_PPF: 'PPF — gương',
+  DOOR_HANDLE_PPF: 'PPF — tay nắm cửa',
+  DOOR_EDGE_PPF: 'PPF — mép cửa',
+  DOOR_JAMB_PPF: 'PPF — hốc cửa',
+  LIGHT_CLUSTER_PPF: 'PPF — cụm đèn',
+  INTERIOR_SCREEN_PPF: 'PPF — màn hình / nội thất',
+  OTHER_PPF: 'PPF — khác',
+};
+
 function _wfJobLabelVi(ji) {
-  const m = {
-    WINDSHIELD: 'Kính lái',
-    REAR_WINDOW: 'Kính hậu',
-    FRONT_SIDE: 'Kính cửa trước',
-    REAR_SIDE_TRIANGLE: 'Kính cửa sau + tam giác',
-    SUNROOF: 'Cửa sổ trời',
-    TRIANGLE: 'Tam giác',
-    REAR_SIDE: 'Sườn sau',
-    SIDE_QUARTER: 'Tam giác cố định',
+  const j = (ji || '').trim();
+  if (!j) return '—';
+  return WF_JC_ITEM_VI[j] || j;
+}
+
+/** Nguồn gợi mã vật tư (định mức / ưu tiên / nhập tay) — hiển thị UI */
+function materialSourceVi(src) {
+  if (src == null) return '—';
+  const k = String(src).trim();
+  if (!k || k === '—') return '—';
+  const u = k.toUpperCase();
+  const map = {
+    MATERIAL_PREFERENCE: 'Theo vật tư ưu tiên',
+    MATERIAL_PREFERENCE_APPLIED: 'Đã áp vật tư ưu tiên',
+    MISSING_PREFERENCE: 'Chưa cấu hình vật tư ưu tiên',
+    MANUAL_OVERRIDE: 'Ghi đè thủ công',
+    NORM_DEFAULT: 'Theo định mức',
+    MANUAL: 'Nhập tay',
+    EXCEL_IMPORT: 'Nhập từ Excel',
   };
-  return m[ji] || ji || '—';
+  return map[u] || k;
+}
+
+function wfHangMucDisplayVi(it) {
+  if (!it) return '—';
+  const code = String(it.item_code || it.job_item || '').trim();
+  const nm = (it.item_name || '').trim();
+  if (!code) return nm || '—';
+  const lab = _wfJobLabelVi(code);
+  if (lab !== code) return lab;
+  return nm || code;
 }
 
 /** Màn hình 1 — duyệt mã phim: đủ hạng mục + checkbox (mặc định tick theo nghiệp vụ). */
@@ -743,19 +789,310 @@ const WF_MATERIAL_APPROVE_SCREEN1_JOBS = [
   { job_item: 'TRIANGLE', label: 'Tam giác', defaultOn: false },
 ];
 
+/** Gợi ý mã hạng mục / vùng thi công cho cấu hình vật tư ưu tiên (ô có datalist, vẫn gõ tay). */
+const _MAT_PREF_JOB_ITEM_SUGGESTIONS = [
+  ...WF_MATERIAL_APPROVE_SCREEN1_JOBS.map((j) => ({ code: j.job_item, label: j.label })),
+  { code: 'SIDE_QUARTER', label: 'Tam giác cố định' },
+  { code: 'PPF_BODY', label: 'PPF — vùng thân (cấu hình gộp)' },
+  { code: 'PPF_FULL', label: 'PPF — full xe (gom nhanh)' },
+  { code: 'FULL_VEHICLE_PPF', label: 'PPF — full xe' },
+  { code: 'HOOD_PPF', label: 'PPF — nắp capo' },
+  { code: 'FRONT_BUMPER_PPF', label: 'PPF — cản trước' },
+  { code: 'REAR_BUMPER_PPF', label: 'PPF — cản sau' },
+  { code: 'MIRROR_PPF', label: 'PPF — gương chiếu hậu' },
+  { code: 'DOOR_HANDLE_PPF', label: 'PPF — tay nắm cửa' },
+  { code: 'DOOR_EDGE_PPF', label: 'PPF — mép cửa' },
+  { code: 'DOOR_JAMB_PPF', label: 'PPF — hốc cửa' },
+  { code: 'LIGHT_CLUSTER_PPF', label: 'PPF — cụm đèn' },
+  { code: 'INTERIOR_SCREEN_PPF', label: 'PPF — màn hình / nội thất' },
+  { code: 'OTHER_PPF', label: 'PPF — khác' },
+];
+
+function _matPrefJobItemDatalistHtml() {
+  const seen = new Set();
+  let opts = '';
+  for (const it of _MAT_PREF_JOB_ITEM_SUGGESTIONS) {
+    const c = String(it.code || '').trim();
+    if (!c || seen.has(c)) continue;
+    seen.add(c);
+    opts += `<option value="${_esc(c)}">${_esc(c)} — ${_esc(it.label)}</option>`;
+  }
+  return `<datalist id="mpf-job-datalist">${opts}</datalist>`;
+}
+
 /** HTML tổng hợp gộp khổ (roll_cut_summary) từ API wf_allocation */
 function wfRollCutSummaryHtml(wfa) {
   if (!wfa || !wfa.roll_cut_summary) return '';
   const rc = wfa.roll_cut_summary;
   if (rc.lines_html) {
-    return `<div style="margin-top:8px;padding:8px;border-radius:8px;background:rgba(255,255,255,0.04);font-size:11px;line-height:1.55"><strong style="color:var(--text-secondary)">Gộp khổ (mét cuộn):</strong><br>${rc.lines_html}</div>`;
+    return `<div class="jc-wf-roll-sum" style="margin-top:8px;padding:8px;border-radius:8px;background:rgba(255,255,255,0.04);line-height:1.55"><strong style="color:var(--text-secondary)">Gộp khổ — tiêu hao theo LOT (m):</strong><br>${rc.lines_html}</div>`;
   }
   return '';
 }
 
+/** Kích thước kính / block kế hoạch — thống nhất hiển thị kèm cm (mét trên LOT giữ ở cột nguồn). */
+function formatWfPlannedSizeCm(raw) {
+  const t = String(raw ?? '').trim();
+  if (!t) return '—';
+  const lower = t.toLowerCase();
+  if (lower.includes('cm')) return _esc(t);
+  const norm = t.replace(/×/g, 'x');
+  const m = norm.match(/^(\d+(?:\.\d+)?)\s*x\s*(\d+(?:\.\d+)?)\s*$/i);
+  if (m) return `${_esc(m[1])}×${_esc(m[2])} cm`;
+  return `${_esc(t)} cm`;
+}
+
+/** Lý do đăng ký cắt bổ sung — chữ to, tương phản rõ. */
+function jcExtraCutReasonHtml(reasonText) {
+  const t = reasonText != null ? String(reasonText).trim() : '';
+  if (!t) return '';
+  return `<div class="jc-extra-cut-reason" style="margin-top:10px;padding:12px 14px;border-radius:8px;border-left:4px solid #fbbf24;background:rgba(251,191,36,0.12);font-size:15px;line-height:1.55;color:rgba(255,255,255,0.96);font-weight:500"><strong style="display:block;margin-bottom:6px;font-size:12px;font-weight:800;color:#fbbf24;text-transform:uppercase;letter-spacing:0.05em">Lý do</strong>${_esc(t)}</div>`;
+}
+
+function jcJobInfoRow(label, valueHtml, full = false) {
+  return `<div class="ji-row${full ? ' ji-row-full' : ''}"><span>${label}</span><strong class="jc-info-value">${valueHtml}</strong></div>`;
+}
+
+/** Chuẩn hóa về 0h ngày giao (local): hỗ trợ ISO, yyyy-mm-dd, dd/mm/yyyy (chuỗi từ DB / form). */
+function parseDeliveryDateStartOfDay(raw) {
+  if (raw == null) return null;
+  const s = String(raw).trim();
+  if (!s) return null;
+
+  let m = s.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})/);
+  if (m) {
+    const d = parseInt(m[1], 10);
+    const mo = parseInt(m[2], 10) - 1;
+    const y = parseInt(m[3], 10);
+    if (mo >= 0 && mo < 12 && d >= 1 && d <= 31 && y > 1900) {
+      const dt = new Date(y, mo, d);
+      if (!isNaN(dt.getTime()) && dt.getFullYear() === y && dt.getMonth() === mo && dt.getDate() === d) return dt;
+    }
+  }
+
+  m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) {
+    const y = parseInt(m[1], 10);
+    const mo = parseInt(m[2], 10) - 1;
+    const d = parseInt(m[3], 10);
+    if (mo >= 0 && mo < 12 && d >= 1 && d <= 31 && y > 1900) {
+      const dt = new Date(y, mo, d);
+      if (!isNaN(dt.getTime()) && dt.getFullYear() === y && dt.getMonth() === mo && dt.getDate() === d) return dt;
+    }
+  }
+
+  const t = new Date(s);
+  if (!isNaN(t.getTime())) {
+    return new Date(t.getFullYear(), t.getMonth(), t.getDate());
+  }
+  return null;
+}
+
+/** Số ngày từ 0h hôm nay đến 0h ngày hạn giao (theo giờ máy). */
+function jcDeliveryRemainHtml(isoStr) {
+  const target = parseDeliveryDateStartOfDay(isoStr);
+  if (!target) return '—';
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const diff = Math.round((target.getTime() - today.getTime()) / 86400000);
+  const wrap = (inner) => `<span class="jc-job-deadline">${inner}</span>`;
+  if (diff === 0) return wrap('Hôm nay');
+  if (diff > 0) return wrap(`${diff} ngày`);
+  return wrap(`Trễ ${Math.abs(diff)} ngày`);
+}
+
+function _jcWfSourcesCell(it) {
+  const parts = [];
+  (it.sources || []).forEach((s) => {
+    const al = parseFloat(s.allocated_length_m) || 0;
+    if (al <= 0) return;
+    const st = (s.source_type || 'LOT').toUpperCase();
+    const sid = (s.source_id || '').trim() || '—';
+    const stLab = st === 'LOT' ? 'Cuộn LOT' : st === 'OFFCUT' ? 'Mảnh dư' : st;
+    parts.push(`${stLab} <code>${_esc(sid)}</code>: <strong>${al.toFixed(2)} m</strong>`);
+  });
+  return parts.length ? parts.join('<br>') : '—';
+}
+
+function jcWfPhanBoBangHtml(title, wfa) {
+  if (!wfa || !Array.isArray(wfa.items)) return '';
+  const rows = wfa.items.filter((i) => i && i.is_selected);
+  if (!rows.length) return '';
+  const body = rows
+    .map((it) => {
+      const name = wfHangMucDisplayVi(it);
+      return `<tr><td>${_esc(name)}</td><td><code>${_esc(String(it.material_code || '').trim())}</code></td><td>${formatWfPlannedSizeCm(it.planned_size)}</td><td style="text-align:left">${_jcWfSourcesCell(it)}</td></tr>`;
+    })
+    .join('');
+  return `<div class="jc-wf-pb-block" style="margin-top:10px;padding:10px;border-radius:8px;border:1px solid var(--border);background:rgba(0,0,0,0.12)">
+    <div class="jc-wf-subhead">${title}</div>
+    <table class="data-table jc-wf-flow-table" style="width:100%"><thead><tr><th>Hạng mục</th><th>Mã vật tư</th><th>Kích thước (cm)</th><th>Nguồn cắt (m)</th></tr></thead><tbody>${body}</tbody></table>
+    ${wfRollCutSummaryHtml(wfa)}</div>`;
+}
+
+function jcWfTongHopNguonHtml(baseWf, extraWfOrList) {
+  const agg = {};
+  function add(items) {
+    if (!Array.isArray(items)) return;
+    items.forEach((it) => {
+      if (!it || !it.is_selected) return;
+      (it.sources || []).forEach((s) => {
+        const al = parseFloat(s.allocated_length_m) || 0;
+        if (al <= 0) return;
+        const st = (s.source_type || 'LOT').toUpperCase();
+        const sid = (s.source_id || '').trim();
+        const k = `${st}|${sid}`;
+        if (!agg[k]) agg[k] = { st, sid, m: 0 };
+        agg[k].m += al;
+      });
+    });
+  }
+  add((baseWf && baseWf.items) || []);
+  const extras = Array.isArray(extraWfOrList)
+    ? extraWfOrList
+    : extraWfOrList && Array.isArray(extraWfOrList.items)
+      ? [extraWfOrList]
+      : [];
+  for (const ex of extras) add((ex && ex.items) || []);
+  const keys = Object.keys(agg).sort();
+  if (!keys.length) return '';
+  const rows = keys
+    .map((k) => {
+      const o = agg[k];
+      const lab = o.st === 'OFFCUT' ? 'Mảnh dư' : 'LOT cuộn';
+      return `<tr><td>${lab}</td><td><code>${_esc(o.sid)}</code></td><td><strong>${o.m.toFixed(2)} m</strong></td></tr>`;
+    })
+    .join('');
+  return `<div class="jc-wf-tonghop-block" style="margin-top:10px;padding:10px;border-radius:8px;border:1px solid rgba(45,212,191,0.35);background:rgba(45,212,191,0.06)">
+    <div class="jc-wf-teal-head"><i class="fa-solid fa-calculator"></i> Tổng hợp tiêu hao nguồn (ban đầu + bổ sung)</div>
+    <table class="data-table jc-wf-flow-table" style="width:100%"><thead><tr><th>Loại</th><th>Mã nguồn</th><th>Tổng (m) LOT</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+
+/** Các snapshot wf_allocation từ lịch sử cắt bổ sung (tránh đếm trùng khi API đã có extra_cut_history). */
+function collectExtraCutWfAllocations(ws) {
+  const hist = Array.isArray(ws.extra_cut_history) ? ws.extra_cut_history : [];
+  if (hist.length) {
+    return hist.map((e) => e && e.wf_allocation).filter((a) => a && Array.isArray(a.items));
+  }
+  if (ws.extra_cut_wf_allocation && Array.isArray(ws.extra_cut_wf_allocation.items)) return [ws.extra_cut_wf_allocation];
+  return [];
+}
+
+function sumAllExtraCutRequiredLengthM(ws) {
+  let s = 0;
+  for (const a of collectExtraCutWfAllocations(ws)) s += sumWfSelectedRequiredLengthM(a);
+  return s;
+}
+
+/** Tổng required_length_m các hạng mục được chọn — WF: ghi nhận mét phim khi không nhập tay ở modal hoàn tất. */
+function sumWfSelectedRequiredLengthM(alloc) {
+  if (!alloc || !Array.isArray(alloc.items)) return 0;
+  let s = 0;
+  for (const it of alloc.items) {
+    if (it && it.is_selected) s += parseFloat(it.required_length_m) || 0;
+  }
+  return Math.round(s * 1000) / 1000;
+}
+
+/**
+ * Bảng Kiểm tra từng hạng mục + tổng LOT (WF) — dùng cho phân bổ chính và cắt bổ sung.
+ * @returns {string} HTML (rỗng nếu không có roll_cut_summary.blocks)
+ */
+function jcWfKiemTraTungHangMucCardSection(wfa, sectionOpts) {
+  if (!wfa) return '';
+  const blocks = wfa.roll_cut_summary ? wfa.roll_cut_summary.blocks || [] : [];
+  if (!Array.isArray(blocks) || !blocks.length) return '';
+  const title = (sectionOpts && sectionOpts.title) || 'Kiểm tra từng hạng mục';
+  const icon = (sectionOpts && sectionOpts.icon) || 'fa-scale-balanced';
+  const iconColor = (sectionOpts && sectionOpts.iconColor) || 'var(--teal-light)';
+
+  const sel = (wfa.items || []).filter((x) => x && x.is_selected);
+  let nsrc = 0;
+  let hasOff = false;
+  for (const it of sel) {
+    nsrc += (it.sources || []).filter((s) => (s.source_id || '').trim()).length;
+    if ((it.sources || []).some((s) => (s.source_type || '').toUpperCase() === 'OFFCUT')) hasOff = true;
+  }
+  const splitBadge =
+    nsrc > sel.length && sel.length
+      ? ' <span class="jc-wf-badge jc-wf-badge-split">Chia nguồn</span>'
+      : '';
+  const offBadge = hasOff
+    ? ' <span class="jc-wf-badge jc-wf-badge-off">Dùng mảnh dư</span>'
+    : '';
+
+  let tableHtml = `<table class="data-table jc-wf-flow-table" style="width:100%;margin-bottom:12px">
+        <thead>
+          <tr style="text-align:left;background:rgba(255,255,255,0.05)">
+            <th style="padding:8px">Hạng mục</th>
+            <th style="padding:8px">Nguồn (LOT / mảnh)</th>
+            <th style="padding:8px">Yêu cầu cắt gộp (m)</th>
+            <th style="padding:8px">Số mét cắt (m)</th>
+            <th style="padding:8px">Kết quả</th>
+          </tr>
+        </thead>
+        <tbody>`;
+
+  const byLot = {};
+  blocks.forEach((block) => {
+    const reqM = parseFloat(block.roll_strip_m) || 0;
+    let gotM = 0;
+    const sourcesArr = [];
+
+    (wfa.items || []).forEach((it) => {
+      if (!it.is_selected || !(block.item_codes || []).includes(it.item_code)) return;
+      (it.sources || []).forEach((s) => {
+        const len = parseFloat(s.allocated_length_m) || 0;
+        gotM += len;
+        if (len > 0) {
+          const sid = (s.source_id || 'Chưa chọn LOT').toUpperCase();
+          if (!sourcesArr.includes(sid)) sourcesArr.push(sid);
+          if (!byLot[sid]) byLot[sid] = 0;
+          byLot[sid] += len;
+        }
+      });
+    });
+
+    const ok = gotM + 1e-6 >= reqM;
+    const label = reqM <= 1e-9 ? '—' : ok ? 'Đủ' : 'Thiếu';
+    const col = reqM <= 1e-9 ? 'var(--text-secondary)' : ok ? 'var(--teal-light)' : 'var(--amber)';
+    const sourcesStr = sourcesArr.length > 0 ? sourcesArr.join(', ') : '—';
+
+    tableHtml += `<tr>
+          <td style="padding:8px"><strong>${_esc(block.label)}</strong></td>
+          <td style="padding:8px">${_esc(sourcesStr)}</td>
+          <td style="padding:8px">${reqM.toFixed(2)}</td>
+          <td style="padding:8px">${gotM.toFixed(2)}</td>
+          <td style="padding:8px;color:${col};font-weight:600">${label}</td>
+        </tr>`;
+  });
+  tableHtml += `</tbody></table>`;
+
+  let summaryHtml =
+    '<div class="jc-wf-rollup-summary" style="margin-bottom:10px;padding:10px;background:rgba(0,60,120,0.22);border-radius:8px;line-height:1.45"><div style="font-weight:700;margin-bottom:6px">Tổng hợp cắt khổ (152cm) theo LOT</div>';
+  const lotKeys = Object.keys(byLot).sort();
+  if (lotKeys.length > 0) {
+    lotKeys.forEach((sid) => {
+      summaryHtml += `<div style="margin-bottom:4px">LOT <strong>${_esc(sid)}</strong>: Tổng chiều dài cắt là <strong>${byLot[sid].toFixed(2)}m</strong> x 152cm</div>`;
+    });
+  } else {
+    summaryHtml += `<div>Chưa có dữ liệu phân bổ theo LOT</div>`;
+  }
+  summaryHtml += '</div>';
+
+  return `<div class="ws-info-row jc-wf-inspect-section" style="display:block; width:100%;">
+        <span class="ws-label jc-wf-inspect-label" style="display:inline-block; margin-bottom:10px;"><i class="fa-solid ${icon}" style="color:${iconColor}; margin-right:4px;"></i> ${title}${splitBadge}${offBadge}</span>
+        <div style="margin-top:6px">${tableHtml}${summaryHtml}</div>
+      </div>`;
+}
+
 function fmtDt(isoStr) {
   if (!isoStr) return '—';
-  try { return new Date(isoStr).toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit', year: 'numeric' }); }
+  try { 
+    const d = new Date(isoStr);
+    if (isNaN(d.getTime())) return isoStr;
+    return d.toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit', year: 'numeric' }); 
+  }
   catch { return isoStr; }
 }
 
@@ -1268,17 +1605,24 @@ window.moDrawerVehicle = async function(id) {
   let statsHtml = '';
   if (h.requests && h.requests.length > 0) {
     statsHtml = `<div style="margin-top:20px; padding-top:10px; border-top:1px solid #3b3b4f;"><h4 style="margin-bottom:12px;color:#fff;">Lịch sử thi công</h4>`;
-    statsHtml += `<table class="data-table" style="font-size:12px; width:100%;">
+    statsHtml += `<table class="data-table veh-hist-table" style="font-size:12px; width:100%;">
       <thead><tr><th>Mã yêu cầu</th><th>Ngày tạo</th><th>Trạng thái</th><th>Hạng mục</th></tr></thead>
       <tbody>
-        ${h.requests.map(r => `<tr>
-          <td>${_esc(r.request_id)}</td>
+        ${h.requests.map((r) => {
+          const rid = r.request_id || '';
+          const hang = _requestHangMucOneLine(r);
+          return `<tr>
+          <td><button type="button" class="veh-hist-req-link" data-request-id=${JSON.stringify(
+            rid,
+          )} title="Xem đầy đủ đơn thi công">${_esc(rid)}</button></td>
           <td>${fmtDt(r.created_at)}</td>
           <td>${_esc(r.status)}</td>
-          <td><span style="font-size:10px;">${_esc(r.job_items || '').replace(/;/g, ', ')}</span></td>
-        </tr>`).join('')}
+          <td><span class="veh-hist-hang" style="font-size:10px;">${_esc(hang)}</span></td>
+        </tr>`;
+        }).join('')}
       </tbody>
-    </table></div>`;
+    </table>
+    <p class="muted" style="font-size:10px;margin:8px 0 0;line-height:1.45">Nhấn <strong>mã yêu cầu</strong> để chuyển sang tab Đơn thi công và xem toàn bộ thông tin đơn (tiến trình, định mức, phân bổ, audit…).</p></div>`;
   }
 
   delete h.requests; delete h.owner_customer; delete h.dealer; delete h.services_completed; delete h.last_delivery_date;
@@ -1456,6 +1800,16 @@ document.addEventListener('keydown', (e) => {
 });
 document.getElementById('btn-x-drawer')?.addEventListener('click', () => {
   document.getElementById('modal-drawer-overlay').style.display = 'none';
+});
+/** Mã yêu cầu trong drawer Xe — dùng delegation (onclick inline đôi khi không gọi được hàm global). */
+document.getElementById('drawer-body')?.addEventListener('click', (e) => {
+  const btn = e.target.closest('button.veh-hist-req-link');
+  if (!btn) return;
+  const id = (btn.getAttribute('data-request-id') || '').trim();
+  if (!id) return;
+  e.preventDefault();
+  e.stopPropagation();
+  if (typeof window.dongDrawerVaMoChiTietDon === 'function') window.dongDrawerVaMoChiTietDon(id);
 });
 document.getElementById('btn-x-demo-modal')?.addEventListener('click', () => {
   document.getElementById('demo-modal-overlay').style.display = 'none';
@@ -2133,8 +2487,10 @@ async function mcPreviewNorm() {
     const res = await fetch(`/api/vehicle-norms/resolve?${q}`).then(r => r.json());
     if (res.found) {
       const rows = (res.auto_fill_items || []).map((i) => {
-        const src = i.material_source ? ` <small class="muted">(${_esc(i.material_source)})</small>` : '';
-        return `${_esc(i.job_item)} ${_esc(i.material_code || '—')} ${_esc(i.size || '')}${src}`;
+        const src = i.material_source
+          ? ` <small class="muted">(${_esc(materialSourceVi(i.material_source))})</small>`
+          : '';
+        return `${_esc(_wfJobLabelVi(i.job_item))} ${_esc(i.material_code || '—')} ${_esc(i.size || '')}${src}`;
       }).join('<br/>');
       box.innerHTML = `<strong>Định mức &amp; vật tư gợi ý</strong> (${_esc(res.norm_id || res.norm?.norm_id || '')})<br/>${rows}`;
     } else {
@@ -2242,8 +2598,7 @@ document.getElementById('mc-btn-submit')?.addEventListener('click', async () => 
     const data = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(data.detail || JSON.stringify(data));
     toast('success', 'Đã tạo đơn', 'Đơn thủ công thành công');
-    document.querySelector('[data-tab="requests"]').click();
-    setTimeout(() => { window.chonDon(data.request_id); }, 300);
+    if (data.request_id) chuyenDenDon(data.request_id);
   } catch (e) { toast('error', 'Lỗi tạo đơn', e.message); }
 });
 document.getElementById('mc-btn-draft')?.addEventListener('click', () => {
@@ -2462,10 +2817,45 @@ window.pheDuyetNhanhWs = async function(wsId) {
     taiTongQuan(); taiThongBao();
   } catch(e) { toast('error', 'Lỗi phê duyệt', e.message); }
 };
-window.chuyenDenDon = function(reqId) {
-  document.querySelector('[data-tab="requests"]').click();
-  setTimeout(() => chonDon(reqId), 200);
+window.chuyenDenDon = function (reqId) {
+  const id = (reqId != null && String(reqId).trim()) || '';
+  if (!id) return;
+  currentRequestId = id;
+  const tabBtn = document.querySelector('[data-tab="requests"]');
+  if (tabBtn) tabBtn.click();
+  /* tab handler gọi taiDonThiCong — lúc đó currentRequestId đã đúng nên board + highlight đồng bộ, không cần setTimeout */
 };
+
+/** Đóng drawer (Khách / Xe / Đại lý) rồi mở tab Đơn thi công với đơn được chọn — đủ panel chi tiết E2E. */
+window.dongDrawerVaMoChiTietDon = function (requestId) {
+  const ov = document.getElementById('modal-drawer-overlay');
+  if (ov) ov.style.display = 'none';
+  chuyenDenDon(requestId);
+};
+
+/** Một dòng tóm tắt hạng mục / dịch vụ cho bảng lịch sử (job_items hoặc service_selection_json). */
+function _requestHangMucOneLine(r) {
+  const j = (r.job_items || '').toString().trim();
+  if (j) return j.replace(/;/g, ', ');
+  try {
+    const raw = r.service_selection_json || r.service_selection;
+    const sel = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    if (!sel || typeof sel !== 'object') return '—';
+    const parts = [];
+    const svc = (sel.services || '').toString().trim();
+    if (svc) parts.push(svc);
+    [
+      [sel.service_1, sel.film_type_1],
+      [sel.service_2, sel.film_type_2],
+    ].forEach((p) => {
+      const line = [p[0], p[1]].filter(Boolean).join(' — ');
+      if (line) parts.push(line);
+    });
+    return parts.length ? parts.join(' · ') : '—';
+  } catch (_) {
+    return '—';
+  }
+}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // OCR INTAKE
@@ -2511,6 +2901,46 @@ async function xuLyOcr(draftId) {
   taiDanhSachOcr(); taiThongBao();
 }
 
+function _ocrAttrEsc(s) {
+  return String(s ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;');
+}
+
+function _ocrFieldRowHtml(f, readonly) {
+  if (f.type === 'hidden') {
+    return `<input type="hidden" id="ocrf-${f.key}" value="${_ocrAttrEsc(f.val)}">`;
+  }
+  const typ = f.type || 'text';
+  const ph = f.placeholder ? ` placeholder="${_ocrAttrEsc(f.placeholder)}"` : '';
+  const ro = readonly ? ' readonly' : '';
+  if (f.tracking) {
+    const hint = f.hint
+      ? `<p class="muted" style="font-size:11px;margin:-2px 0 8px;line-height:1.45">${f.hint}</p>`
+      : '';
+    return `<div class="ocr-field-group ocr-field-tracking">
+      <label>${f.label}</label>
+      ${hint}
+      <input type="${typ}" id="ocrf-${f.key}" class="field-input" value="${_ocrAttrEsc(f.val)}"${ph}${ro}>
+    </div>`;
+  }
+  const pct = Math.round((f.conf || 0) * 100);
+  const dot = pct >= 90 ? 'conf-high' : pct >= 70 ? 'conf-mid' : 'conf-low';
+  return `<div class="ocr-field-group">
+      <label><span class="conf-dot ${dot}"></span> ${f.label} (độ chính xác: ${pct}%)</label>
+      <input type="${typ}" id="ocrf-${f.key}" class="field-input" value="${_ocrAttrEsc(f.val)}"${ph}${ro}>
+    </div>`;
+}
+
+function _ocrSectionHtml(title, iconClass, fieldList, readonly) {
+  const inner = fieldList.map((f) => _ocrFieldRowHtml(f, readonly)).join('');
+  return `<div class="ocr-form-section">
+    <h4 class="ocr-form-section-title"><i class="${iconClass}"></i> ${title}</h4>
+    <div class="ocr-section-grid">${inner}</div>
+  </div>`;
+}
+
 window.moPhieuOcr = async function(draftId) {
   currentOcrDraftId = draftId;
   document.getElementById('ocr-review-panel').style.display = 'block';
@@ -2518,6 +2948,45 @@ window.moPhieuOcr = async function(draftId) {
   const drafts = await fetch('/api/ocr-drafts').then(r => r.json());
   const d = drafts.find(x => x.ocr_draft_id === draftId);
   if (!d) return;
+
+  const imgEl = document.getElementById('ocr-preview-img');
+  if (imgEl) {
+    let url = '';
+    if (d.image_url) {
+      url = d.image_url;
+    } else if (d.image_filename) {
+      url = `/static/uploads/${encodeURIComponent(d.image_filename)}`;
+    }
+
+    let pdfEl = document.getElementById('ocr-preview-pdf');
+    if (!pdfEl) {
+      pdfEl = document.createElement('iframe');
+      pdfEl.id = 'ocr-preview-pdf';
+      pdfEl.style.width = '100%';
+      pdfEl.style.height = '100%';
+      pdfEl.style.minHeight = '250px';
+      pdfEl.style.border = 'none';
+      pdfEl.style.display = 'none';
+      imgEl.parentNode.appendChild(pdfEl);
+    }
+
+    if (url.toLowerCase().endsWith('.pdf')) {
+      pdfEl.src = url;
+      pdfEl.style.display = 'block';
+      imgEl.style.display = 'none';
+      document.querySelector('.ocr-image-controls').style.display = 'none';
+    } else {
+      pdfEl.style.display = 'none';
+      imgEl.style.display = 'block';
+      document.querySelector('.ocr-image-controls').style.display = 'flex';
+      imgEl.src = url || '';
+      // Reset transformations
+      imgEl.style.transform = 'scale(1) rotate(0deg)';
+      imgEl.dataset.scale = 1;
+      imgEl.dataset.rotate = 0;
+    }
+  }
+
   const badge = document.getElementById('ocr-status-badge');
   badge.className = `status-badge status-${(d.review_status||'').toLowerCase()}`;
   badge.textContent = TRANG_THAI_VI[d.review_status] || d.review_status;
@@ -2528,46 +2997,119 @@ window.moPhieuOcr = async function(draftId) {
   const services = d.extracted_services || 'PPF,WINDOW_FILM';
   const hasWF = services.includes('WINDOW_FILM');
   const hasPPF = services.includes('PPF');
+  const readonly = ['CONFIRMED', 'CANCELLED'].includes(d.review_status);
 
-  const fields = [
-    { key: 'request_no',     label: 'Số phiếu/ Số đề nghị',    val: d.extracted_request_no || '', conf: 0.90 },
-    { key: 'dealer_name',    label: 'Đại lý',                  val: d.extracted_dealer_name, conf: d.confidence_dealer },
-    { key: 'customer_name',  label: 'Khách hàng',              val: d.extracted_customer_name, conf: d.confidence_customer },
-    { key: 'vehicle_model',  label: 'Dòng xe',                 val: d.extracted_vehicle_model, conf: d.confidence_vehicle },
-    { key: 'model_year',     label: 'Năm Model',               val: new Date().getFullYear(), conf: 0.90 },
-    { key: 'vin',            label: 'Số VIN',                  val: d.extracted_vin, conf: 0.99 },
-    { key: 'sales_consultant', label: 'Tư vấn bán hàng',       val: d.sales_consultant || '', conf: 0.90 },
-    { key: 'sequence_no',    label: 'Số thứ tự',               val: '', conf: 0.90, type: 'number' },
-    { key: 'request_date',   label: 'Ngày yêu cầu',            val: d.extracted_request_date || (d.created_at ? fmtDt(d.created_at) : new Date().toLocaleString('en-GB', {hour: '2-digit', minute:'2-digit', day:'2-digit', month:'2-digit', year:'numeric'}).replace(',', '')), conf: 0.90, placeholder: 'hh:mm dd/mm/yyyy' },
-    { key: 'delivery_time',  label: 'Hạn giao xe',             val: d.extracted_delivery_time ? fmtDt(d.extracted_delivery_time) : '', conf: 0.88, placeholder: 'hh:mm dd/mm/yyyy' },
-  ];
-
-  if (hasWF && !hasPPF) {
-      fields.push({ key: 'service_1', label: 'Dịch vụ 01', val: 'Phim cách nhiệt', conf: 0.97 });
-      fields.push({ key: 'film_type_1', label: 'Loại phim yêu cầu', val: d.extracted_film_type || '', conf: 0.95 });
-  } else if (hasPPF && !hasWF) {
-      fields.push({ key: 'service_1', label: 'Dịch vụ 01', val: 'Phim PPF', conf: 0.97 });
-      fields.push({ key: 'film_type_1', label: 'Loại phim yêu cầu', val: d.extracted_ppf_type || '', conf: 0.92 });
+  let seqYear = '';
+  let seqMonth = '';
+  if (readonly) {
+    seqYear = d.sequence_no != null && d.sequence_no !== '' ? String(d.sequence_no) : '';
+    seqMonth =
+      d.sequence_no_month != null && d.sequence_no_month !== '' ? String(d.sequence_no_month) : '';
+    if (d.created_request_id && (!seqYear || !seqMonth)) {
+      try {
+        const rr = await fetch(`/api/requests/${encodeURIComponent(d.created_request_id)}`).then((r) =>
+          r.json(),
+        );
+        if (rr) {
+          if (!seqYear && rr.sequence_no != null && String(rr.sequence_no).trim() !== '')
+            seqYear = String(rr.sequence_no).trim();
+          if (!seqMonth && rr.sequence_no_month != null && String(rr.sequence_no_month).trim() !== '')
+            seqMonth = String(rr.sequence_no_month).trim();
+        }
+      } catch (_) {
+        /* ignore */
+      }
+    }
   } else {
-      fields.push({ key: 'service_1', label: 'Dịch vụ 01', val: 'Phim cách nhiệt', conf: 0.97 });
-      fields.push({ key: 'film_type_1', label: 'Loại phim yêu cầu', val: d.extracted_film_type || '', conf: 0.95 });
-      fields.push({ key: 'service_2', label: 'Dịch vụ 02', val: 'Phim PPF', conf: 0.97 });
-      fields.push({ key: 'film_type_2', label: 'Loại phim yêu cầu', val: d.extracted_ppf_type || '', conf: 0.92 });
+    try {
+      const tc = await fetch('/api/ocr/tracking-counters').then((r) => r.json());
+      if (tc.sequence_year_next != null) seqYear = String(tc.sequence_year_next);
+      if (tc.sequence_month_next != null) seqMonth = String(tc.sequence_month_next);
+    } catch (_) {
+      /* ignore */
+    }
   }
 
-  // Inject hidden original services string for payload if needed, or we just calculate it in payload
-  fields.push({ key: 'services', type: 'hidden', val: services, conf: 0.97 });
+  const sectionTracking = [
+    {
+      key: 'sequence_no',
+      label: 'Số thứ tự',
+      val: seqYear,
+      type: 'number',
+      tracking: true,
+      hint: 'STT xe doanh nghiệp thi công trong năm (từ đầu năm), tăng theo từng đơn — hệ thống gợi ý số tiếp theo.',
+    },
+    {
+      key: 'sequence_no_month',
+      label: 'Số thứ tự/tháng',
+      val: seqMonth,
+      type: 'number',
+      tracking: true,
+      hint: 'STT xe thi công trong tháng hiện tại (từ đầu tháng), gợi ý tăng dần theo đơn.',
+    },
+  ];
 
-  const readonly = ['CONFIRMED','CANCELLED'].includes(d.review_status);
-  document.getElementById('ocr-fields-form').innerHTML = fields.map(f => {
-    if (f.type === 'hidden') return `<input type="hidden" id="ocrf-${f.key}" value="${f.val || ''}">`;
-    const pct = Math.round((f.conf || 0) * 100);
-    const dot = pct >= 90 ? 'conf-high' : pct >= 70 ? 'conf-mid' : 'conf-low';
-    return `<div class="ocr-field-group">
-      <label><span class="conf-dot ${dot}"></span> ${f.label} (độ chính xác: ${pct}%)</label>
-      <input type="${f.type || 'text'}" id="ocrf-${f.key}" class="field-input" value="${f.val || ''}" placeholder="${f.placeholder || ''}" ${readonly ? 'readonly' : ''}>
-    </div>`;
-  }).join('');
+  const reqDateVal =
+    d.extracted_request_date ||
+    (d.created_at
+      ? fmtDt(d.created_at)
+      : new Date()
+          .toLocaleString('en-GB', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit', year: 'numeric' })
+          .replace(',', ''));
+
+  const section1 = [
+    { key: 'dealer_name', label: 'Đại lý', val: d.extracted_dealer_name, conf: d.confidence_dealer || 0.85 },
+    { key: 'dealer_address', label: 'Địa chỉ đại lý', val: d.extracted_dealer_address || '', conf: 0.85 },
+    { key: 'request_no', label: 'Số phiếu / Số đề nghị', val: d.extracted_request_no || '', conf: 0.9 },
+    { key: 'contract_no', label: 'Số hợp đồng (Số HĐ)', val: d.extracted_contract_no || '', conf: 0.88 },
+    { key: 'sales_consultant', label: 'Tư vấn bán hàng', val: d.sales_consultant || '', conf: 0.9 },
+    { key: 'vehicle_model', label: 'Dòng xe', val: d.extracted_vehicle_model, conf: d.confidence_vehicle || 0.85 },
+    { key: 'model_year', label: 'Năm model', val: new Date().getFullYear(), conf: 0.9, type: 'number' },
+    { key: 'vin', label: 'Số khung (VIN)', val: d.extracted_vin, conf: 0.99 },
+    { key: 'request_date', label: 'Ngày yêu cầu', val: reqDateVal, conf: 0.9, placeholder: 'hh:mm dd/mm/yyyy' },
+    {
+      key: 'delivery_time',
+      label: 'Hạn giao xe',
+      val: d.extracted_delivery_time ? fmtDt(d.extracted_delivery_time) : '',
+      conf: 0.88,
+      placeholder: 'hh:mm dd/mm/yyyy',
+    },
+  ];
+
+  const section2 = [
+    { key: 'customer_name', label: 'Khách hàng', val: d.extracted_customer_name, conf: d.confidence_customer || 0.85 },
+    { key: 'customer_address', label: 'Địa chỉ KH', val: d.extracted_customer_address || '', conf: 0.85 },
+    { key: 'customer_phone', label: 'Điện thoại KH', val: d.extracted_customer_phone || '', conf: 0.85 },
+  ];
+
+  const section3 = [];
+
+  if (hasWF && !hasPPF) {
+    section3.push(
+      { key: 'service_1', label: 'Dịch vụ 01', val: 'Phim cách nhiệt', conf: 0.97 },
+      { key: 'film_type_1', label: 'Loại phim yêu cầu 01', val: d.extracted_film_type || '', conf: 0.95 },
+    );
+  } else if (hasPPF && !hasWF) {
+    section3.push(
+      { key: 'service_1', label: 'Dịch vụ 01', val: 'Phim PPF', conf: 0.97 },
+      { key: 'film_type_1', label: 'Loại phim yêu cầu 01', val: d.extracted_ppf_type || '', conf: 0.92 },
+    );
+  } else {
+    section3.push(
+      { key: 'service_1', label: 'Dịch vụ 01', val: 'Phim cách nhiệt', conf: 0.97 },
+      { key: 'film_type_1', label: 'Loại phim yêu cầu 01', val: d.extracted_film_type || '', conf: 0.95 },
+      { key: 'service_2', label: 'Dịch vụ 02', val: 'Phim PPF', conf: 0.97 },
+      { key: 'film_type_2', label: 'Loại phim yêu cầu 02', val: d.extracted_ppf_type || '', conf: 0.92 },
+    );
+  }
+
+  document.getElementById('ocr-fields-form').innerHTML = [
+    _ocrSectionHtml('Thông tin đại lý & phiếu yêu cầu', 'fa-solid fa-building', section1, readonly),
+    _ocrSectionHtml('Thông tin chủ xe', 'fa-solid fa-user', section2, readonly),
+    _ocrSectionHtml('Theo dõi', 'fa-solid fa-list-ol', sectionTracking, readonly),
+    _ocrSectionHtml('Thông tin cung cấp dịch vụ', 'fa-solid fa-screwdriver-wrench', section3, readonly),
+    `<input type="hidden" id="ocrf-services" value="${_ocrAttrEsc(services)}">`,
+  ].join('');
 
   const svcBox = document.getElementById('ocr-services-box');
   const titleEl = document.getElementById('ocr-services-title');
@@ -2587,17 +3129,64 @@ window.moPhieuOcr = async function(draftId) {
 
   const confirmBtn = document.getElementById('btn-confirm-ocr');
   const cancelBtn = document.getElementById('btn-cancel-ocr');
+  const rollbackBtn = document.getElementById('btn-rollback-ocr');
+  const hintEl = document.getElementById('ocr-actions-hint');
   const isLexDraft = /^OCR-DRAFT-LEXUS-/.test(d.ocr_draft_id || '');
-  if (d.ocr_status !== 'COMPLETED') { confirmBtn.disabled = true; confirmBtn.textContent = 'Chờ AI xử lý...'; }
-  else if (readonly) {
-    confirmBtn.disabled = true; cancelBtn.disabled = true;
-    confirmBtn.textContent = d.review_status === 'CONFIRMED' ? `✅ Đã tạo đơn: ${d.created_request_id}` : '✅ Đã xử lý xong';
-  } else {
-    confirmBtn.disabled = false;
-    confirmBtn.innerHTML = isLexDraft
-      ? '<i class="fa-solid fa-check-circle"></i> Xác nhận tạo đơn'
-      : '<i class="fa-solid fa-check-circle"></i> Xác nhận & Tạo đơn thi công';
-    cancelBtn.disabled = false;
+
+  const setOcrActionsHint = (html) => {
+    if (hintEl) hintEl.innerHTML = html;
+  };
+
+  if (confirmBtn && cancelBtn && rollbackBtn) {
+    rollbackBtn.style.display = 'none';
+    rollbackBtn.disabled = true;
+    cancelBtn.title = '';
+    rollbackBtn.title = '';
+
+    if (d.ocr_status !== 'COMPLETED') {
+      confirmBtn.disabled = true;
+      cancelBtn.disabled = true;
+      confirmBtn.textContent = 'Chờ AI xử lý...';
+      setOcrActionsHint(
+        '<strong>Chờ OCR xong</strong> mới xác nhận hoặc hủy phiếu. « Hủy phiếu » chỉ dùng khi <em>chưa</em> tạo đơn — đánh dấu phiếu OCR là đã hủy.',
+      );
+    } else if (readonly) {
+      confirmBtn.disabled = true;
+      cancelBtn.disabled = true;
+      if (d.review_status === 'CONFIRMED') {
+        confirmBtn.textContent = `✅ Đã tạo đơn: ${d.created_request_id || '—'}`;
+        cancelBtn.title =
+          'Sau khi đã tạo đơn không dùng « Hủy phiếu ». Dùng « Hủy xác nhận (Rollback đơn) » để xóa đơn đã tạo, gỡ luồng thi công và mở lại chỉnh sửa phiếu OCR.';
+        rollbackBtn.style.display = 'inline-flex';
+        rollbackBtn.disabled = false;
+        rollbackBtn.title = `Xóa đơn ${d.created_request_id || ''}, workstream, thẻ việc; mở khóa kho gắn đơn; đưa phiếu về chờ chỉnh sửa.`;
+        setOcrActionsHint(
+          `Đơn đã tạo: <strong>${_esc(d.created_request_id || '—')}</strong>. ` +
+            'Để sửa sai sau khi xác nhận, dùng nút <strong>vàng</strong> bên cạnh. ' +
+            '« Hủy phiếu » (đỏ) <em>không áp dụng</em> ở bước này — nó chỉ dùng khi chưa tạo đơn.',
+        );
+      } else {
+        confirmBtn.textContent =
+          d.review_status === 'CANCELLED' ? '⛔ Phiếu OCR đã hủy (chưa tạo đơn)' : '✅ Đã xử lý xong';
+        cancelBtn.title = 'Phiếu đã hủy hoặc đóng — không thao tác thêm.';
+        setOcrActionsHint(
+          d.review_status === 'CANCELLED'
+            ? 'Phiếu đã được <strong>hủy trước khi tạo đơn</strong>. Có thể để tham chiếu / audit; không có rollback đơn.'
+            : 'Trạng thái phiếu đã khóa chỉnh sửa.',
+        );
+      }
+    } else {
+      confirmBtn.disabled = false;
+      confirmBtn.innerHTML = isLexDraft
+        ? '<i class="fa-solid fa-check-circle"></i> Xác nhận tạo đơn'
+        : '<i class="fa-solid fa-check-circle"></i> Xác nhận & Tạo đơn thi công';
+      cancelBtn.disabled = false;
+      cancelBtn.title =
+        'Chỉ khi chưa tạo đơn: đánh dấu phiếu OCR « Đã hủy » (không xóa đơn — vì chưa có đơn).';
+      setOcrActionsHint(
+        '« <strong>Xác nhận</strong> » tạo đơn thi công + luồng theo dịch vụ. « <strong>Hủy phiếu</strong> » chỉ khi <em>chưa</em> xác nhận — ghi nhận phiếu hủy, không gỡ dữ liệu đơn.',
+      );
+    }
   }
   taiDanhSachOcr();
 };
@@ -2606,15 +3195,20 @@ document.getElementById('btn-confirm-ocr').addEventListener('click', async () =>
   if (!currentOcrDraftId) return;
   const payload = {
     dealer_name: document.getElementById('ocrf-dealer_name')?.value,
+    dealer_address: document.getElementById('ocrf-dealer_address')?.value,
     customer_name: document.getElementById('ocrf-customer_name')?.value,
+    customer_phone: document.getElementById('ocrf-customer_phone')?.value,
+    customer_address: document.getElementById('ocrf-customer_address')?.value,
     vehicle_model: document.getElementById('ocrf-vehicle_model')?.value,
     vin: document.getElementById('ocrf-vin')?.value,
     services: document.getElementById('ocrf-services')?.value,
     request_no: document.getElementById('ocrf-request_no')?.value,
+    contract_no: document.getElementById('ocrf-contract_no')?.value,
     model_year: document.getElementById('ocrf-model_year')?.value,
     request_date: document.getElementById('ocrf-request_date')?.value,
     sales_consultant: document.getElementById('ocrf-sales_consultant')?.value,
     sequence_no: document.getElementById('ocrf-sequence_no')?.value,
+    sequence_no_month: document.getElementById('ocrf-sequence_no_month')?.value,
     requested_delivery_time: document.getElementById('ocrf-delivery_time')?.value,
     service_1: document.getElementById('ocrf-service_1')?.value,
     film_type_1: document.getElementById('ocrf-film_type_1')?.value,
@@ -2633,8 +3227,7 @@ document.getElementById('btn-confirm-ocr').addEventListener('click', async () =>
     taiTongQuan();
     taiDonThiCong();
     if (data.request_id && /^REQ-TEST-LEXUS-/.test(data.request_id)) {
-      document.querySelector('[data-tab="requests"]')?.click();
-      setTimeout(() => chonDon(data.request_id), 300);
+      chuyenDenDon(data.request_id);
     }
   } catch (e) {
     toast('error', 'Lỗi xác nhận phiếu', e.message);
@@ -2642,9 +3235,91 @@ document.getElementById('btn-confirm-ocr').addEventListener('click', async () =>
 });
 document.getElementById('btn-cancel-ocr').addEventListener('click', async () => {
   if (!currentOcrDraftId) return;
-  await fetch(`/api/ocr/${currentOcrDraftId}/cancel`, { method: 'POST' });
-  toast('warning', '🚫 Đã hủy phiếu', `Phiếu ${currentOcrDraftId} đã bị hủy.`);
-  moPhieuOcr(currentOcrDraftId);
+  if (
+    !confirm(
+      'Hủy phiếu OCR?\n\nChỉ dùng khi CHƯA tạo đơn thi công. Hệ thống sẽ đánh dấu phiếu « Đã hủy » (không xóa đơn vì chưa có đơn).\n\nTiếp tục?',
+    )
+  ) {
+    return;
+  }
+  try {
+    const r = await fetch(`/api/ocr/${encodeURIComponent(currentOcrDraftId)}/cancel`, { method: 'POST' });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.detail || j.message || `HTTP ${r.status}`);
+    toast('warning', '🚫 Đã hủy phiếu', j.detail || `Phiếu ${currentOcrDraftId} đã bị hủy.`);
+    moPhieuOcr(currentOcrDraftId);
+    taiDanhSachOcr();
+  } catch (e) {
+    toast('error', 'Không hủy được phiếu', e.message);
+  }
+});
+
+document.getElementById('btn-rollback-ocr').addEventListener('click', async () => {
+  if (!currentOcrDraftId) return;
+  if (
+    !confirm(
+      'Hủy xác nhận (rollback đơn)?\n\nThao tác này sẽ:\n' +
+        '• Xóa đơn thi công đã tạo từ phiếu này, các luồng và thẻ việc liên quan\n' +
+        '• Mở khóa kho (LOT/mảnh dư) đang gắn đơn đó\n' +
+        '• Đưa phiếu OCR về trạng thái chỉnh sửa để xác nhận lại\n\n' +
+        'Không thể hoàn tác. Tiếp tục?',
+    )
+  ) {
+    return;
+  }
+  try {
+    const data = await fetchJSON(`/api/ocr/${encodeURIComponent(currentOcrDraftId)}/rollback`, { method: 'POST' });
+    toast('success', 'Đã hủy xác nhận', data.detail || '');
+    moPhieuOcr(currentOcrDraftId);
+    taiThongBao();
+    taiTongQuan();
+    taiDonThiCong();
+    taiDanhSachOcr();
+  } catch (e) {
+    toast('error', 'Rollback thất bại', e.message);
+  }
+});
+
+// Image Preview Controls
+document.getElementById('btn-zoom-in')?.addEventListener('click', () => {
+  const imgEl = document.getElementById('ocr-preview-img');
+  if (!imgEl) return;
+  let scale = parseFloat(imgEl.dataset.scale || 1) + 0.25;
+  if (scale > 3) scale = 3;
+  let rotate = parseFloat(imgEl.dataset.rotate || 0);
+  imgEl.dataset.scale = scale;
+  imgEl.style.transform = `scale(${scale}) rotate(${rotate}deg)`;
+});
+
+document.getElementById('btn-zoom-out')?.addEventListener('click', () => {
+  const imgEl = document.getElementById('ocr-preview-img');
+  if (!imgEl) return;
+  let scale = parseFloat(imgEl.dataset.scale || 1) - 0.25;
+  if (scale < 0.25) scale = 0.25;
+  let rotate = parseFloat(imgEl.dataset.rotate || 0);
+  imgEl.dataset.scale = scale;
+  imgEl.style.transform = `scale(${scale}) rotate(${rotate}deg)`;
+});
+
+document.getElementById('btn-rotate-cw')?.addEventListener('click', () => {
+  const imgEl = document.getElementById('ocr-preview-img');
+  if (!imgEl) return;
+  let scale = parseFloat(imgEl.dataset.scale || 1);
+  let rotate = parseFloat(imgEl.dataset.rotate || 0) + 90;
+  imgEl.dataset.rotate = rotate;
+  imgEl.style.transform = `scale(${scale}) rotate(${rotate}deg)`;
+});
+
+document.getElementById('btn-fullscreen')?.addEventListener('click', () => {
+  const imgEl = document.getElementById('ocr-preview-img');
+  if (!imgEl || !imgEl.src) return;
+  if (imgEl.requestFullscreen) {
+    imgEl.requestFullscreen();
+  } else if (imgEl.webkitRequestFullscreen) { /* Safari */
+    imgEl.webkitRequestFullscreen();
+  } else if (imgEl.msRequestFullscreen) { /* IE11 */
+    imgEl.msRequestFullscreen();
+  }
 });
 
 document.getElementById('btn-lexus-ocr-seed')?.addEventListener('click', async () => {
@@ -2671,6 +3346,30 @@ document.getElementById('btn-lexus-ocr-seed')?.addEventListener('click', async (
 // ═══════════════════════════════════════════════════════════════════════════════
 let currentRequestId = null;
 
+function _reqListSeqYear(r) {
+  return r.sequence_no != null && String(r.sequence_no).trim() !== '' ? String(r.sequence_no).trim() : '—';
+}
+
+function _reqListSeqMonth(r) {
+  return r.sequence_no_month != null && String(r.sequence_no_month).trim() !== ''
+    ? String(r.sequence_no_month).trim()
+    : '—';
+}
+
+/** Khối thông tin dọc trong thẻ danh sách đơn (sidebar Đơn thi công). */
+function _reqListSidebarBody(r) {
+  const daLuong = r.is_multi_workstream
+    ? '<span class="req-multi-ws"><i class="fa-solid fa-layer-group" aria-hidden="true"></i> Có</span>'
+    : 'Không';
+  return `<div class="req-item-meta">
+    <div class="req-item-row"><span class="req-item-k">Mã đơn</span><span class="req-item-v">${_esc(r.request_id)}</span></div>
+    <div class="req-item-row"><span class="req-item-k">Đa luồng</span><span class="req-item-v">${daLuong}</span></div>
+    <div class="req-item-row"><span class="req-item-k">Số thứ tự</span><span class="req-item-v">${_esc(_reqListSeqYear(r))}</span></div>
+    <div class="req-item-row"><span class="req-item-k">Số thứ tự/tháng</span><span class="req-item-v">${_esc(_reqListSeqMonth(r))}</span></div>
+    <div class="req-item-row"><span class="req-item-k">Dòng xe</span><span class="req-item-v">${_esc(_reqSvcModel(r))}</span></div>
+  </div>`;
+}
+
 function _reqSvcModel(r) {
   try {
     const s = r.service_selection_json ? JSON.parse(r.service_selection_json) : (r.service_selection || {});
@@ -2688,14 +3387,18 @@ async function taiDonThiCong() {
       ? '<p class="text-center muted pad-20" style="font-size:12px">Không có đơn thi công nào.</p>'
       : reqs.map(r => `
           <div class="req-item ${r.request_id === currentRequestId ? 'active' : ''}" onclick="chonDon('${r.request_id}')">
-            <h4>${r.request_id} ${r.is_multi_workstream ? '<span style="color:var(--purple-light);font-size:10px"><i class="fa-solid fa-layer-group"></i> Đa luồng</span>' : ''}</h4>
-            <p>${_esc(r.dealer_name || r.dealer_id || '—')} · ${_esc(_reqSvcModel(r))} · ${_esc(r.customer_name || '')}</p>
-            ${['ALLOCATED','NEEDS_REVIEW'].includes(r.status) ? '<p class="muted" style="font-size:10px;margin:4px 0 0">Bước tiếp: Phê duyệt Quản lý</p>' : ''}
+            ${_reqListSidebarBody(r)}
+            ${['ALLOCATED','NEEDS_REVIEW'].includes(r.status) ? '<p class="muted req-item-hint">Bước tiếp: Phê duyệt Quản lý</p>' : ''}
             <div class="req-badges">${trangThaiBadge(r.status)}</div>
           </div>`).join('');
     if (currentRequestId) {
       const sel = reqs.find((r) => r.request_id === currentRequestId);
       if (sel) await hienThiDon(sel);
+      requestAnimationFrame(() => {
+        document
+          .querySelector('#demo-req-list .req-item.active')
+          ?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      });
     }
   } catch(e) { toast('error', 'Lỗi tải đơn thi công', e.message); }
 }
@@ -2725,11 +3428,36 @@ async function hienThiDon(req) {
   if (scEl) scEl.textContent = sc === 'MANUAL' ? 'Thủ công (MANUAL)' : 'OCR';
   const rno = document.getElementById('det-request-no');
   if (rno) {
-    rno.textContent = req.request_no || '—';
-    if (req.sequence_no) rno.textContent += ` (STT: ${req.sequence_no})`;
+    rno.textContent = (req.request_no || '').trim() || '—';
+  }
+  const detSeqY = document.getElementById('det-sequence-year');
+  if (detSeqY) {
+    detSeqY.textContent =
+      req.sequence_no != null && String(req.sequence_no).trim() !== ''
+        ? String(req.sequence_no).trim()
+        : '—';
+  }
+  const detSeqM = document.getElementById('det-sequence-month');
+  if (detSeqM) {
+    detSeqM.textContent =
+      req.sequence_no_month != null && String(req.sequence_no_month).trim() !== ''
+        ? String(req.sequence_no_month).trim()
+        : '—';
   }
   const cno = document.getElementById('det-contract-no');
-  if (cno) cno.textContent = req.contract_no || '—';
+  if (cno) cno.textContent = (req.contract_no || '').trim() || '—';
+  const refsBar = document.getElementById('board-req-refs');
+  if (refsBar) {
+    const sttBits = [];
+    if (req.sequence_no != null && String(req.sequence_no).trim() !== '') sttBits.push(`STT: ${req.sequence_no}`);
+    if (req.sequence_no_month != null && String(req.sequence_no_month).trim() !== '')
+      sttBits.push(`STT/tháng: ${req.sequence_no_month}`);
+    const sttStr = sttBits.length ? ` (${sttBits.join(', ')})` : '';
+    const phieuTxt = ((req.request_no || '').trim() + sttStr) || '—';
+    const hdTxt = (req.contract_no || '').trim() || '—';
+    refsBar.style.display = 'block';
+    refsBar.innerHTML = `<span><strong>Số phiếu YC:</strong> ${_esc(phieuTxt)}</span> <span style="opacity:0.45">·</span> <span><strong>Số hợp đồng:</strong> ${_esc(hdTxt)}</span>`;
+  }
   const rdt = document.getElementById('det-request-date');
   if (rdt) rdt.textContent = req.request_date || '—';
   const oim = document.getElementById('det-ocr-image');
@@ -2767,8 +3495,11 @@ async function hienThiDon(req) {
       (na.norm_id && String(na.norm_id).includes('XLS') ? 'EXCEL_IMPORT' : '—');
     const items = (na.applied_items || [])
       .map((i) => {
-        const src2 = i.material_source ? ` <small class="muted">(${_esc(i.material_source)})</small>` : '';
-        return `${_esc(i.job_item)} ${_esc(i.material_code || '—')} ${_esc(i.size || '')}${src2}`;
+        const ji = _wfJobLabelVi(i.job_item);
+        const src2 = i.material_source
+          ? ` <small class="muted">(${_esc(materialSourceVi(i.material_source))})</small>`
+          : '';
+        return `${_esc(ji)} ${_esc(i.material_code || '—')} ${_esc(i.size || '')}${src2}`;
       })
       .join('<br/>');
     const yrReq = na.model_year_requested != null ? na.model_year_requested : na.model_year;
@@ -2818,12 +3549,14 @@ async function hienThiDon(req) {
         if (!Array.isArray(plan) || !plan.length) return;
         const title = isPpf ? 'Dán Phim PPF' : 'Dán Phim Cách Nhiệt';
         html += `<div style="margin-bottom:12px"><strong style="color:var(--text-secondary)">${title}</strong> <small class="muted">(${_esc(ws.workstream_id)})</small>
-          <table class="data-table" style="font-size:11px;margin-top:6px"><thead><tr><th>Hạng mục</th><th>Kích thước</th><th>Mã vật tư</th><th>Nguồn</th><th>Lý do</th></tr></thead><tbody>`;
+          <table class="data-table" style="font-size:13px;margin-top:6px"><thead><tr><th>Hạng mục</th><th>Kích thước</th><th>Mã vật tư</th><th>Nguồn</th><th>Lý do</th></tr></thead><tbody>`;
         plan.forEach((p) => {
-          const src = (p.material_source || '—').toString();
-          if (src === 'MISSING_PREFERENCE') hasMiss = true;
+          const srcRaw = (p.material_source || '—').toString();
+          if (srcRaw === 'MISSING_PREFERENCE') hasMiss = true;
+          const srcVi = materialSourceVi(srcRaw);
           const rs = p.material_override_reason ? _esc(p.material_override_reason) : '—';
-          html += `<tr><td>${_esc(p.job_item)}</td><td>${_esc(p.size || '—')}</td><td>${_esc(p.material_code || '—')}</td><td>${_esc(src)}</td><td>${rs}</td></tr>`;
+          const hang = _wfJobLabelVi(p.job_item);
+          html += `<tr><td>${_esc(hang)}</td><td>${_esc(p.size || '—')}</td><td>${_esc(p.material_code || '—')}</td><td>${_esc(srcVi)}</td><td>${rs}</td></tr>`;
         });
         html += '</tbody></table></div>';
       });
@@ -2971,6 +3704,22 @@ async function hienThiDon(req) {
   } else { document.getElementById('workstream-section').style.display = 'none'; }
 }
 
+/** Cuộn tới thẻ luồng trong “Tiến độ từng luồng” (phương án 1 — tránh nút trùng ở ô tóm tắt). */
+window.scrollToWsDetail = function (workstreamId) {
+  const id = String(workstreamId ?? '');
+  let el = null;
+  document.querySelectorAll('.ws-card[data-workstream-id]').forEach((node) => {
+    if (node.getAttribute('data-workstream-id') === id) el = node;
+  });
+  if (!el) {
+    if (typeof toast === 'function') toast('info', 'Luồng thi công', 'Chưa thấy thẻ luồng — hãy đợi trang tải xong hoặc kéo xuống mục Tiến độ từng luồng.');
+    return;
+  }
+  el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  el.classList.add('ws-card--highlight');
+  setTimeout(() => el.classList.remove('ws-card--highlight'), 1800);
+};
+
 async function hienThiThePheDuyet(requestId) {
   const wss = await fetch(`/api/requests/${requestId}/workstreams`).then(r => r.json());
   const container = document.getElementById('ws-approval-cards');
@@ -3039,18 +3788,11 @@ async function hienThiThePheDuyet(requestId) {
         <br>Đội: ${ws.technician_team} | KTV: ${ws.assigned_technician_name || '—'} | Nguồn: ${ws.allocated_source_id || '—'}
         ${ppfAllocHtml}${wfAllocHtml}
       </div>
-      <div style="display:flex;gap:6px;flex-wrap:wrap">
-        ${ws.status === 'PENDING_APPROVAL' ? (isPpf ? `
-          <button class="btn btn-green btn-sm" onclick="pheDuyetWs('${ws.workstream_id}')"><i class="fa-solid fa-check"></i> Phê duyệt</button>
-          <button class="btn btn-outline btn-sm" onclick="chiinhSuaWs('${ws.workstream_id}')"><i class="fa-solid fa-pen"></i> Chỉnh sửa trước duyệt</button>` : `
-          <button class="btn btn-green btn-sm" onclick="moModalDuyetMaPhimWF('${ws.workstream_id}')"><i class="fa-solid fa-film"></i> Duyệt mã phim</button>
-          <button class="btn btn-outline btn-sm" onclick="chiinhSuaWs('${ws.workstream_id}')"><i class="fa-solid fa-pen"></i> Sửa mã phim / kế hoạch</button>`) : ''}
-        ${!isPpf && ws.status === 'PENDING_TECH_PREFLIGHT' ? `
-          <button class="btn btn-outline btn-sm" onclick="chiinhSuaWs('${ws.workstream_id}')"><i class="fa-solid fa-warehouse"></i> Chỉnh phân bổ LOT</button>
-          <button class="btn btn-green btn-sm" onclick="pheDuyetWs('${ws.workstream_id}')"><i class="fa-solid fa-check"></i> Chốt phân bổ</button>` : ''}
-        ${ws.status === 'APPROVED' ? `<button class="btn btn-blue btn-sm" onclick="batDauWs('${ws.workstream_id}')"><i class="fa-solid fa-play"></i> KTV bắt đầu thi công</button>` : ''}
-        ${ws.status === 'IN_PROGRESS' ? `<button class="btn btn-primary btn-sm" onclick="moFormXacNhan('${ws.workstream_id}')"><i class="fa-solid fa-flag-checkered"></i> Nhập thực tế & hoàn tất</button>` : ''}
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:4px">
         ${ws.status === 'CLOSED' ? '<span style="color:var(--teal-light);font-size:12px;font-weight:700"><i class="fa-solid fa-check-circle"></i> Đã hoàn tất & đóng</span>' : ''}
+        <button type="button" class="btn btn-outline btn-sm" onclick="scrollToWsDetail(${JSON.stringify(ws.workstream_id)})" title="Cuộn xuống thẻ luồng tương ứng — phê duyệt & chỉnh sửa tại đó">
+          <i class="fa-solid fa-arrow-down"></i> Xem chi tiết & thao tác
+        </button>
       </div>
     </div>`;
   }).join('');
@@ -3074,11 +3816,27 @@ async function hienThiTheLuong(requestId) {
     const typeClass = isPpf ? 'ppf' : 'wf';
     const icon = isPpf ? 'fa-shield-film' : 'fa-window-restore';
     const tenLoai = isPpf ? 'Dán Phim PPF' : 'Dán Phim Cách Nhiệt';
+    const canXoaDotCatThem = ws.status === 'IN_PROGRESS' || ws.status === 'ACTUAL_CONFIRMATION_REQUIRED';
     const matPlan = ws.material_plan ? (Array.isArray(ws.material_plan) ? ws.material_plan : JSON.parse(ws.material_plan || '[]')) : [];
     const progress = { 'PENDING_APPROVAL':0,'PENDING_TECH_PREFLIGHT':12,'APPROVED':30,'IN_PROGRESS':60,'ACTUAL_CONFIRMATION_REQUIRED':75,'COMPLETED':90,'CLOSED':100 }[ws.status] || 0;
     const tenPhim = { 'T-TYPE':'T-TYPE (Trong suốt)', 'M-TYPE':'M-TYPE (Mờ)', 'JB20':'JB20 (Cách nhiệt)', 'RT40':'RT40 (Kính lái)' };
 
     const ppfFilmLabel = isPpf ? tenPhim[ws.ppf_allocation?.ppf_type || ws.selected_material_code] || ws.ppf_allocation?.ppf_type || ws.selected_material_code || '—' : '';
+    let ppfBlockDisplay = '—';
+    let ppfLenDisplay = '';
+    if (isPpf) {
+      const pa = ws.ppf_allocation || {};
+      const fullItPpf = (pa.items || []).find((x) => x.item_code === 'FULL_VEHICLE_PPF');
+      const rawBlock = (fullItPpf && fullItPpf.planned_cut_block) || ws.planned_cut_block || '';
+      ppfBlockDisplay = rawBlock ? _esc(String(rawBlock)) : '—';
+      const reqLen =
+        fullItPpf && fullItPpf.required_length_m != null && fullItPpf.required_length_m !== ''
+          ? fullItPpf.required_length_m
+          : pa.required_total_length_m != null && pa.required_total_length_m !== ''
+            ? pa.required_total_length_m
+            : null;
+      ppfLenDisplay = reqLen != null && reqLen !== '' ? String(reqLen) : '';
+    }
     let ppfSourceBlock = `<div class="ws-info-row"><span class="ws-label">Nguồn vật tư</span><span class="ws-value">${ws.allocated_source_type || '—'}: ${ws.allocated_source_id || '—'}</span></div>`;
     if (isPpf && ws.ppf_allocation) {
       const pa = ws.ppf_allocation;
@@ -3099,88 +3857,107 @@ async function hienThiTheLuong(requestId) {
 
     let wfSourceBlock = `<div class="ws-info-row"><span class="ws-label">Nguồn vật tư</span><span class="ws-value">${ws.allocated_source_type || '—'}: ${ws.allocated_source_id || '—'}</span></div>`;
     if (!isPpf && ws.wf_allocation) {
-      const wfa = ws.wf_allocation;
-      const sel = (wfa.items || []).filter((x) => x.is_selected);
-      let nsrc = 0;
-      let hasOff = false;
-      for (const it of sel) {
-        nsrc += (it.sources || []).filter((s) => (s.source_id || '').trim()).length;
-        if ((it.sources || []).some((s) => (s.source_type || '').toUpperCase() === 'OFFCUT')) hasOff = true;
-      }
-      const splitBadge =
-        nsrc > sel.length && sel.length
-          ? ' <span style="padding:2px 7px;border-radius:6px;background:rgba(0,188,212,0.2);font-size:9px;font-weight:700">Chia nguồn</span>'
-          : '';
-      const offBadge = hasOff
-        ? ' <span style="padding:2px 7px;border-radius:6px;background:rgba(156,39,176,0.25);font-size:9px;font-weight:700">Dùng mảnh dư</span>'
-        : '';
-
-      let tableHtml = `<table class="data-table" style="width:100%;font-size:12px;margin-bottom:12px">
-        <thead>
-          <tr style="text-align:left;background:rgba(255,255,255,0.05)">
-            <th style="padding:8px">HẠNG MỤC</th>
-            <th style="padding:8px">NGUỒN (LOT/MẢNH)</th>
-            <th style="padding:8px">YÊU CẦU CẮT GỘP (M)</th>
-            <th style="padding:8px">SỐ MÉT CẮT (M)</th>
-            <th style="padding:8px">KẾT QUẢ</th>
-          </tr>
-        </thead>
-        <tbody>`;
-
-      const byLot = {};
-      const blocks = wfa.roll_cut_summary ? (wfa.roll_cut_summary.blocks || []) : [];
-      blocks.forEach((block) => {
-        const reqM = parseFloat(block.roll_strip_m) || 0;
-        let gotM = 0;
-        let sourcesArr = [];
-
-        (wfa.items || []).forEach((it) => {
-          if (!it.is_selected || !(block.item_codes || []).includes(it.item_code)) return;
-          (it.sources || []).forEach((s) => {
-            const len = parseFloat(s.allocated_length_m) || 0;
-            gotM += len;
-            if (len > 0) {
-              const sid = (s.source_id || 'Chưa chọn LOT').toUpperCase();
-              if (!sourcesArr.includes(sid)) sourcesArr.push(sid);
-              if (!byLot[sid]) byLot[sid] = 0;
-              byLot[sid] += len;
-            }
-          });
-        });
-
-        const ok = gotM + 1e-6 >= reqM;
-        const label = reqM <= 1e-9 ? '—' : ok ? 'Đủ' : 'Thiếu';
-        const col = reqM <= 1e-9 ? 'var(--text-secondary)' : ok ? 'var(--teal-light)' : 'var(--amber)';
-        const sourcesStr = sourcesArr.length > 0 ? sourcesArr.join(', ') : '—';
-
-        tableHtml += `<tr>
-          <td style="padding:8px"><strong>${_esc(block.label)}</strong></td>
-          <td style="padding:8px">${_esc(sourcesStr)}</td>
-          <td style="padding:8px">${reqM.toFixed(2)}</td>
-          <td style="padding:8px">${gotM.toFixed(2)}</td>
-          <td style="padding:8px;color:${col};font-weight:600">${label}</td>
-        </tr>`;
-      });
-      tableHtml += `</tbody></table>`;
-
-      let summaryHtml = '<div style="margin-bottom:10px;padding:10px;background:rgba(0,60,120,0.22);border-radius:8px;font-size:12px;line-height:1.45"><div style="font-weight:700;margin-bottom:6px">Tổng hợp cắt khổ (152cm) theo LOT</div>';
-      const lotKeys = Object.keys(byLot).sort();
-      if (lotKeys.length > 0) {
-        lotKeys.forEach(sid => {
-          summaryHtml += `<div style="margin-bottom:4px">LOT <strong>${_esc(sid)}</strong>: Tổng chiều dài cắt là <strong>${byLot[sid].toFixed(2)}m</strong> x 152cm</div>`;
-        });
-      } else {
-        summaryHtml += `<div>Chưa có dữ liệu phân bổ theo LOT</div>`;
-      }
-      summaryHtml += '</div>';
-
-      wfSourceBlock = `<div class="ws-info-row" style="display:block; width:100%;">
-        <span class="ws-label" style="display:inline-block; margin-bottom:10px;"><i class="fa-solid fa-scale-balanced" style="color:var(--teal-light); margin-right:4px;"></i> Kiểm tra từng hạng mục ${splitBadge}${offBadge}</span>
-        <div style="margin-top:6px">${tableHtml}${summaryHtml}</div>
-      </div>`;
+      const sec = jcWfKiemTraTungHangMucCardSection(ws.wf_allocation, {});
+      if (sec) wfSourceBlock = sec;
     }
 
-    return `<div class="ws-card ${typeClass}">
+    let wfExtraCutBlock = '';
+    if (!isPpf && ws.extra_cut_requested) {
+      const hist = Array.isArray(ws.extra_cut_history) ? ws.extra_cut_history : [];
+      if (hist.length) {
+        const blocks = hist
+          .map((ent, idx) => {
+            if (!ent || typeof ent !== 'object') return '';
+            const ex = ent.wf_allocation;
+            const when = ent.requested_at ? fmtDt(ent.requested_at) : '—';
+            const who = [ent.actor_name, ent.actor_id].filter(Boolean).join(' · ') || '—';
+            const pb = ex ? jcWfPhanBoBangHtml(`Đợt ${idx + 1} — hạng mục &amp; nguồn`, ex) : '';
+            const kt = ex
+              ? jcWfKiemTraTungHangMucCardSection(ex, {
+                  title: `Đợt ${idx + 1} — kiểm tra hạng mục`,
+                  icon: 'fa-scissors',
+                  iconColor: '#fbbf24',
+                })
+              : '';
+            const rs = jcExtraCutReasonHtml(ent.reason);
+            const pid = ent.proposal_id
+              ? `<code style="font-size:9px;opacity:0.85;margin-left:6px">${_esc(String(ent.proposal_id))}</code>`
+              : '';
+            const delBtn =
+              canXoaDotCatThem && ent.proposal_id
+                ? `<button type="button" class="btn btn-outline btn-sm" style="flex-shrink:0;padding:2px 10px;font-size:10px;border-color:rgba(248,113,113,0.45);color:#f87171" onclick="event.stopPropagation();void window.xoaDeXuatCatThem('${_esc(String(ws.workstream_id))}','${_esc(String(ent.proposal_id))}')"><i class="fa-solid fa-trash"></i> Xóa</button>`
+                : '';
+            return `<div style="margin-bottom:14px;padding-bottom:12px;border-bottom:1px solid rgba(251,191,36,0.15)">
+              <div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px">
+                <div style="font-size:10px;font-weight:700;color:var(--text-secondary)">
+                <i class="fa-regular fa-clock" style="margin-right:4px"></i>${_esc(when)} · ${_esc(who)}${pid}
+                </div>${delBtn}
+              </div>
+              ${pb}${kt}${rs}
+            </div>`;
+          })
+          .join('');
+        wfExtraCutBlock = `<div style="width:100%;margin-top:12px;padding-top:12px;border-top:1px solid rgba(251,191,36,0.28)">
+          <div style="font-size:11px;font-weight:700;color:#fbbf24;margin-bottom:8px"><i class="fa-solid fa-scissors" style="margin-right:6px"></i> Lịch sử cắt bổ sung (${hist.length} đợt)</div>
+          ${blocks}
+          <p class="muted" style="font-size:9px;margin-top:4px;opacity:0.85">Mỗi đợt ghi nhận thời điểm &amp; người gửi. Khi hoàn tất luồng, hệ thống trừ kho theo <strong>tất cả</strong> đợt có bảng phân bổ. Có thể <strong>xóa từng đợt</strong> (đang thi công) để hệ thống cộng dồn lại kiểm tồn.</p>
+        </div>`;
+      } else {
+        const exAllocs = collectExtraCutWfAllocations(ws);
+        const ex = exAllocs[0];
+        const phanBoEx = ex ? jcWfPhanBoBangHtml('Hạng mục &amp; nguồn cắt bổ sung (KTV đã xác nhận)', ex) : '';
+        const kiemTraEx = ex
+          ? jcWfKiemTraTungHangMucCardSection(ex, {
+              title: 'Kiểm tra từng hạng mục (cắt bổ sung)',
+              icon: 'fa-scissors',
+              iconColor: '#fbbf24',
+            })
+          : '';
+        if (phanBoEx || kiemTraEx) {
+          const legacyDel =
+            canXoaDotCatThem && ex
+              ? `<div style="display:flex;justify-content:flex-end;margin-bottom:6px"><button type="button" class="btn btn-outline btn-sm" style="padding:2px 10px;font-size:10px;border-color:rgba(248,113,113,0.45);color:#f87171" onclick="event.stopPropagation();void window.xoaDeXuatCatThem('${_esc(String(ws.workstream_id))}','LEGACY-SNAPSHOT')"><i class="fa-solid fa-trash"></i> Xóa đăng ký cắt thêm</button></div>`
+              : '';
+          wfExtraCutBlock = `<div style="width:100%;margin-top:12px;padding-top:12px;border-top:1px solid rgba(251,191,36,0.28)">
+          <div style="font-size:11px;font-weight:700;color:#fbbf24;margin-bottom:8px"><i class="fa-solid fa-scissors" style="margin-right:6px"></i> Cắt bổ sung — KTV đã xác nhận</div>
+          ${legacyDel}
+          ${phanBoEx || ''}
+          ${kiemTraEx || ''}
+          ${jcExtraCutReasonHtml(ws.extra_cut_reason)}
+        </div>`;
+        } else {
+          wfExtraCutBlock = `<div class="ws-info-row"><span class="ws-label">Cắt thêm</span><span class="ws-value" style="color:#fbbf24;font-size:11px"><i class="fa-solid fa-scissors"></i> Đã đăng ký</span></div>${jcExtraCutReasonHtml(ws.extra_cut_reason)}`;
+        }
+      }
+    }
+
+    let ppfExtraCutHist = '';
+    if (isPpf && ws.extra_cut_requested) {
+      const h = Array.isArray(ws.extra_cut_history) ? ws.extra_cut_history : [];
+      if (h.length) {
+        const rows = h
+          .map((ent, i) => {
+            if (!ent || typeof ent !== 'object') return '';
+            const when = ent.requested_at ? fmtDt(ent.requested_at) : '—';
+            const who = [ent.actor_name, ent.actor_id].filter(Boolean).join(' · ') || '—';
+            const rs = jcExtraCutReasonHtml(ent.reason);
+            const delP =
+              canXoaDotCatThem && ent.proposal_id
+                ? `<button type="button" class="btn btn-outline btn-sm" style="flex-shrink:0;padding:2px 8px;font-size:10px;border-color:rgba(248,113,113,0.45);color:#f87171" onclick="event.stopPropagation();void window.xoaDeXuatCatThem('${_esc(String(ws.workstream_id))}','${_esc(String(ent.proposal_id))}')"><i class="fa-solid fa-trash"></i></button>`
+                : '';
+            return `<div style="margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid rgba(251,191,36,0.12)">
+              <div style="display:flex;flex-wrap:wrap;align-items:flex-start;justify-content:space-between;gap:6px">
+              <div style="font-size:10px;font-weight:700;color:var(--text-secondary)"><strong>${i + 1}.</strong> ${_esc(when)} · ${_esc(who)}</div>${delP}</div>${rs}</div>`;
+          })
+          .join('');
+        ppfExtraCutHist = `<div style="width:100%;margin-top:12px;padding-top:12px;border-top:1px solid rgba(251,191,36,0.28)">
+          <div style="font-size:11px;font-weight:700;color:#fbbf24;margin-bottom:6px"><i class="fa-solid fa-scissors"></i> Lịch sử đăng ký cắt thêm (${h.length})</div>${rows}</div>`;
+      } else {
+        ppfExtraCutHist = `<div class="ws-info-row"><span class="ws-label">Cắt thêm</span><span class="ws-value" style="color:#fbbf24;font-size:11px"><i class="fa-solid fa-scissors"></i> Đã đăng ký</span></div>${jcExtraCutReasonHtml(ws.extra_cut_reason)}`;
+      }
+    }
+
+    return `<div class="ws-card ${typeClass}" data-workstream-id="${_esc(ws.workstream_id)}">
       <div class="ws-card-header">
         <div class="ws-card-title"><i class="fa-solid ${icon} ws-type-icon"></i>${tenLoai}</div>
         ${trangThaiBadge(ws.status)}
@@ -3203,9 +3980,9 @@ async function hienThiTheLuong(requestId) {
           <div style="font-size:11px;font-weight:700;color:var(--text-secondary);margin-bottom:6px">Kế hoạch vật tư từng kính:</div>
           ${matPlan.map(p => `
             <div class="wf-plan-row">
-              <span class="job-name">${p.job_item === 'WINDSHIELD' ? 'Kính lái' : p.job_item === 'REAR_WINDOW' ? 'Kính hậu' : p.job_item === 'FRONT_SIDE' ? 'Kính cửa trước' : p.job_item === 'REAR_SIDE_TRIANGLE' ? 'Kính cửa sau' : p.job_item === 'SUNROOF' ? 'Cửa sổ trời' : p.job_item === 'TRIANGLE' ? 'Tam giác' : p.job_item === 'REAR_SIDE' ? 'Sườn sau' : p.job_item}</span>
+              <span class="job-name">${_esc(_wfJobLabelVi(p.job_item))}</span>
               <span class="mat-code ${(p.material_code||'').toLowerCase()}">${p.material_code}</span>
-              <small class="muted">${_esc(p.material_source || '')}</small>
+              <small class="muted">${_esc(materialSourceVi(p.material_source || ''))}</small>
             </div>`).join('')}
         </div>` : ''}
 
@@ -3214,6 +3991,8 @@ async function hienThiTheLuong(requestId) {
         <div class="ws-info-row"><span class="ws-label">Thời gian bắt đầu</span><span class="ws-value">${fmtDt(ws.started_at)}</span></div>
         <div class="ws-info-row"><span class="ws-label">Thời gian hoàn tất</span><span class="ws-value">${fmtDt(ws.completed_at)}</span></div>
         ${ws.created_offcut_id ? `<div class="ws-info-row"><span class="ws-label">Mảnh dư tạo ra</span><span class="ws-value" style="color:var(--green-light)">${ws.created_offcut_id}</span></div>` : ''}
+        ${wfExtraCutBlock}
+        ${ppfExtraCutHist}
       </div>
       <div class="ws-card-actions">
         ${ws.status === 'PENDING_APPROVAL' ? (isPpf ? `<button class="btn btn-green btn-sm" onclick="pheDuyetWs('${ws.workstream_id}')"><i class="fa-solid fa-check"></i> Phê duyệt</button>` : `<button class="btn btn-green btn-sm" onclick="moModalDuyetMaPhimWF('${ws.workstream_id}')"><i class="fa-solid fa-film"></i> Duyệt mã phim</button>`) : ''}
@@ -3221,7 +4000,7 @@ async function hienThiTheLuong(requestId) {
           <button class="btn btn-outline btn-sm" onclick="chiinhSuaWs('${ws.workstream_id}')"><i class="fa-solid fa-warehouse"></i> Chỉnh phân bổ LOT</button>
           <button class="btn btn-green btn-sm" onclick="pheDuyetWs('${ws.workstream_id}')"><i class="fa-solid fa-check"></i> Chốt phân bổ</button>` : ''}
         ${ws.status === 'APPROVED' ? `<button class="btn btn-blue btn-sm" onclick="batDauWs('${ws.workstream_id}')"><i class="fa-solid fa-play"></i> KTV bắt đầu</button>` : ''}
-        ${ws.status === 'IN_PROGRESS' ? `<button class="btn btn-primary btn-sm" onclick="moFormXacNhan('${ws.workstream_id}')"><i class="fa-solid fa-ruler"></i> Nhập thực tế</button>` : ''}
+        ${ws.status === 'IN_PROGRESS' || ws.status === 'ACTUAL_CONFIRMATION_REQUIRED' ? `<button class="btn btn-primary btn-sm" onclick="moFormXacNhan('${ws.workstream_id}')"><i class="fa-solid fa-ruler"></i> Nhập thực tế</button><button class="btn btn-outline btn-sm" style="margin-left:6px;border-color:rgba(251,191,36,0.45);color:#fbbf24" onclick="moDangKyCatThem('${ws.workstream_id}')" title="Đăng ký cắt thêm giữa ca"><i class="fa-solid fa-scissors"></i> Cắt thêm</button>` : ''}
         <button class="btn btn-outline btn-sm" onclick="chiinhSuaWs('${ws.workstream_id}')"><i class="fa-solid fa-pen"></i> Chỉnh sửa</button>
         ${ws.job_card_id ? `<button class="btn btn-outline btn-sm" onclick="chuyenDenLenh('${ws.job_card_id}')"><i class="fa-solid fa-id-card"></i> Xem lệnh</button>` : ''}
       </div>
@@ -3455,82 +4234,322 @@ window.batDauWs = async function(wsId) {
   } catch(e) { toast('error', 'Lỗi', e.message); }
 };
 
+/** Đăng ký cắt thêm giữa ca — tách khỏi modal xác nhận thực tế / hoàn tất. */
+window.moDangKyCatThem = async function (wsId) {
+  let ws;
+  try {
+    ws = await fetchJSON(`/api/workstreams/${encodeURIComponent(wsId)}`);
+  } catch (e) {
+    toast('error', 'Không tải luồng', e.message);
+    return;
+  }
+  const okSt = ws.status === 'IN_PROGRESS' || ws.status === 'ACTUAL_CONFIRMATION_REQUIRED';
+  if (!okSt) {
+    toast('info', 'Không áp dụng', `Chỉ đăng ký khi đang thi công hoặc chờ nhập thực tế (hiện: ${TRANG_THAI_VI[ws.status] || ws.status}).`);
+    return;
+  }
+  if (ws.workstream_type === 'WINDOW_FILM_INSTALLATION' && typeof window.openExtraCutWfModal === 'function') {
+    await window.openExtraCutWfModal(wsId);
+    return;
+  }
+  const isPpf = ws.workstream_type === 'PPF_INSTALLATION';
+  const team = isPpf ? 'PPF' : 'Phim cách nhiệt';
+  const wid = ws.workstream_id || wsId;
+  document.getElementById('extra-cut-modal')?.remove();
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.id = 'extra-cut-modal';
+  overlay.style.display = 'flex';
+  overlay.dataset.wsId = wid;
+  overlay.dataset.techId = (ws.assigned_technician_id || '').trim();
+  overlay.dataset.techName = (ws.assigned_technician_name || '').trim();
+  overlay.innerHTML = `
+    <div class="demo-modal" style="max-width:480px">
+      <div class="demo-modal-header">
+        <i class="fa-solid fa-scissors" style="color:#fbbf24"></i>
+        <div>
+          <h3>Đăng ký cắt thêm — ${_esc(team)}</h3>
+          <p style="font-size:12px;color:var(--text-secondary);margin-top:4px">Luồng <code>${_esc(wid)}</code>${ws.extra_cut_requested ? ' <span style="color:#fbbf24">(thêm đợt — lưu lịch sử)</span>' : ''}</p>
+        </div>
+      </div>
+      <div style="padding:16px 20px">
+        <p class="muted" style="font-size:12px;margin:0 0 10px;line-height:1.5">Ghi rõ phát sinh (hỏng, gãy, dán lỗi, thiếu mét…). Quản lý nhận thông báo để xử lý xuất bổ sung / điều chỉnh.</p>
+        <div class="field-group full-width" style="margin:0">
+          <label>Lý do <span class="req">*</span></label>
+          <textarea id="ec-reason" class="field-input" rows="4" style="resize:vertical;min-height:96px;line-height:1.5" placeholder="Ví dụ: gãy phim do vận chuyển; dán hỏng kính sau phải cắt lại..."></textarea>
+        </div>
+      </div>
+      <div class="demo-modal-footer" style="display:flex">
+        <button class="btn btn-outline" onclick="document.getElementById('extra-cut-modal').remove()"><i class="fa-solid fa-xmark"></i> Đóng</button>
+        <button class="btn btn-green" onclick="guiDangKyCatThem()"><i class="fa-solid fa-paper-plane"></i> Gửi đăng ký</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  const ta = document.getElementById('ec-reason');
+  if (ta && ws.extra_cut_reason) ta.value = String(ws.extra_cut_reason);
+};
+
+window.guiDangKyCatThem = async function () {
+  const modal = document.getElementById('extra-cut-modal');
+  const wsId = modal?.dataset?.wsId;
+  if (!wsId) return;
+  const reason = (document.getElementById('ec-reason')?.value || '').trim();
+  if (reason.length < 5) {
+    toast('error', 'Lý do', 'Tối thiểu 5 ký tự.');
+    return;
+  }
+  try {
+    const r = await fetch(`/api/workstreams/${encodeURIComponent(wsId)}/extra-cut-request`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        reason,
+        technician_id: (modal.dataset.techId || '').trim() || 'KTV-UNKNOWN',
+        technician_name: (modal.dataset.techName || '').trim(),
+      }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      const det = d.detail;
+      let m = `Lỗi ${r.status}`;
+      if (typeof det === 'string') m = det;
+      else if (det && typeof det === 'object' && det.message) m = String(det.message);
+      else if (det && typeof det === 'object') m = JSON.stringify(det);
+      throw new Error(m);
+    }
+    modal.remove();
+    toast('success', 'Đã gửi', d.detail || 'Đăng ký cắt thêm đã gửi cho Quản lý.');
+    await taiDonThiCong();
+    taiThongBao();
+    taiTongQuan();
+  } catch (e) {
+    toast('error', 'Lỗi', e.message);
+  }
+};
+
+/** Xóa một đợt đề xuất cắt thêm — backend cập nhật lịch sử & đồng bộ snapshot cuối (kiểm tồn / trừ kho khi hoàn tất tính lại). */
+window.xoaDeXuatCatThem = async function (wsId, proposalId) {
+  if (!wsId || !proposalId) {
+    toast('error', 'Thiếu dữ liệu', 'Không xác định được đợt cần xóa.');
+    return;
+  }
+  if (
+    !confirm(
+      'Xóa đợt đề xuất cắt thêm này?\n\nHệ thống sẽ cập nhật lại tổng kiểm tồn và phần trừ kho khi hoàn tất luồng theo các đợt còn lại.'
+    )
+  ) {
+    return;
+  }
+  try {
+    const r = await fetch(
+      `/api/workstreams/${encodeURIComponent(wsId)}/extra-cut-proposals/${encodeURIComponent(proposalId)}`,
+      { method: 'DELETE' }
+    );
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      const det = d.detail;
+      let m = `Lỗi ${r.status}`;
+      if (typeof det === 'string') m = det;
+      else if (det && typeof det === 'object' && det.message) m = String(det.message);
+      else if (det && typeof det === 'object') m = JSON.stringify(det);
+      throw new Error(m);
+    }
+    toast('success', 'Đã xóa', d.detail || 'Đã xóa đợt đề xuất.');
+    if (typeof taiBangLuong === 'function') await taiBangLuong();
+    if (typeof taiDonThiCong === 'function') await taiDonThiCong();
+    if (typeof taiThongBao === 'function') taiThongBao();
+    if (typeof taiTongQuan === 'function') taiTongQuan();
+    if (
+      typeof currentActualWsId === 'string' &&
+      currentActualWsId === wsId &&
+      typeof window.moFormXacNhan === 'function'
+    ) {
+      document.getElementById('actual-modal')?.remove();
+      await window.moFormXacNhan(wsId);
+    }
+  } catch (e) {
+    toast('error', 'Không xóa được', e.message || String(e));
+  }
+};
+
 let currentActualWsId = null;
-window.moFormXacNhan = function(wsId) {
+window.moFormXacNhan = async function (wsId) {
   currentActualWsId = wsId;
   const isPpf = wsId.includes('PPF');
   const mauIcon = isPpf ? 'var(--red)' : 'var(--blue-light)';
   const iconKy = isPpf ? 'fa-shield-film' : 'fa-window-restore';
+
+  let ws = {};
+  let mcOptions = '<option value="">— Chọn mã vật tư —</option>';
+  try {
+    const [wsRes, scopeRes] = await Promise.all([
+      fetch(`/api/workstreams/${encodeURIComponent(wsId)}`).then((r) => r.json()),
+      fetch(`/api/workstreams/${encodeURIComponent(wsId)}/allocation-material-codes`).then((r) => r.json()),
+    ]);
+    ws = wsRes && !wsRes.error ? wsRes : {};
+    const codes = Array.isArray(scopeRes.material_codes)
+      ? scopeRes.material_codes.filter((c) => String(c || '').trim())
+      : [];
+    if (codes.length) {
+      mcOptions += codes.map((v) => {
+        const t = String(v).trim();
+        return `<option value="${_esc(t)}">${_esc(t)}</option>`;
+      }).join('');
+    }
+  } catch (e) {
+    console.warn('[moFormXacNhan]', e);
+  }
+
+  const matDefault = (ws.selected_material_code || (isPpf ? 'T-TYPE' : 'JB20')).toString().trim();
+  const st = (ws.allocated_source_type || 'LOT').toString().toUpperCase();
+  const sid = (ws.allocated_source_id || '').toString();
+  const parentLotReadonly = st === 'LOT' ? sid : '';
+  const ktvId = (ws.assigned_technician_id || 'KTV-003').toString();
+  const canXoaDotActual = ws.status === 'IN_PROGRESS' || ws.status === 'ACTUAL_CONFIRMATION_REQUIRED';
+
+  const baseWf = ws.wf_allocation;
+  const extraAllocs = collectExtraCutWfAllocations(ws);
+  const hasExtra = !!(ws.extra_cut_requested && extraAllocs.length);
+  let wfSummaryHtml = '';
+  if (!isPpf && ws.workstream_type === 'WINDOW_FILM_INSTALLATION' && baseWf && Array.isArray(baseWf.items)) {
+    let exSection = '';
+    if (hasExtra) {
+      const hist = Array.isArray(ws.extra_cut_history) ? ws.extra_cut_history : [];
+      if (hist.length) {
+        exSection = hist
+          .map((ent, idx) => {
+            if (!ent || typeof ent !== 'object') return '';
+            const exa = ent.wf_allocation;
+            const when = ent.requested_at ? fmtDt(ent.requested_at) : '—';
+            const who = [ent.actor_name, ent.actor_id].filter(Boolean).join(' · ') || '—';
+            const delB =
+              canXoaDotActual && ent.proposal_id
+                ? `<button type="button" class="btn btn-outline btn-sm" style="flex-shrink:0;padding:2px 8px;font-size:10px;border-color:rgba(248,113,113,0.45);color:#f87171" onclick="void window.xoaDeXuatCatThem('${_esc(String(wsId))}','${_esc(String(ent.proposal_id))}')"><i class="fa-solid fa-trash"></i></button>`
+                : '';
+            if (!exa || !Array.isArray(exa.items)) {
+              return `<div class="muted" style="font-size:11px;margin-bottom:10px;display:flex;flex-wrap:wrap;justify-content:space-between;gap:6px;align-items:flex-start"><div><strong>${idx + 1}.</strong> ${_esc(when)} · ${_esc(who)}</div>${delB}</div>${jcExtraCutReasonHtml(ent.reason)}`;
+            }
+            return `<div style="margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid rgba(251,191,36,0.15)">
+              <div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px">
+              <div style="font-size:10px;font-weight:700;color:var(--text-secondary)">Đợt ${idx + 1} · ${_esc(when)} · ${_esc(who)}</div>${delB}</div>
+              ${jcWfPhanBoBangHtml('Hạng mục &amp; nguồn cắt bổ sung', exa)}
+              ${jcExtraCutReasonHtml(ent.reason)}
+            </div>`;
+          })
+          .join('');
+      } else {
+        const exa = extraAllocs[0];
+        const legDel =
+          canXoaDotActual && exa
+            ? `<div style="display:flex;justify-content:flex-end;margin-bottom:6px"><button type="button" class="btn btn-outline btn-sm" style="padding:2px 8px;font-size:10px;border-color:rgba(248,113,113,0.45);color:#f87171" onclick="void window.xoaDeXuatCatThem('${_esc(String(wsId))}','LEGACY-SNAPSHOT')"><i class="fa-solid fa-trash"></i> Xóa cắt thêm</button></div>`
+            : '';
+        exSection = `${legDel}${jcWfPhanBoBangHtml('Nhóm hạng mục &amp; nguồn — yêu cầu cắt bổ sung', exa)}${jcExtraCutReasonHtml(ws.extra_cut_reason)}`;
+      }
+    }
+    const banDauHtml = jcWfPhanBoBangHtml('Nhóm hạng mục &amp; nguồn ban đầu', baseWf);
+    const tongHtml = jcWfTongHopNguonHtml(baseWf, hasExtra ? collectExtraCutWfAllocations(ws) : null);
+    if (banDauHtml || exSection || tongHtml) {
+      wfSummaryHtml = `
+        <div style="border:1px solid rgba(59,130,246,0.35);border-radius:8px;padding:12px;margin:12px 0;background:rgba(59,130,246,0.06)">
+          <div style="font-size:12px;font-weight:700;margin-bottom:6px;display:flex;align-items:center;gap:6px;color:var(--blue-light)">
+            <i class="fa-solid fa-list-check"></i> Tổng hợp phim sử dụng (đối chiếu)
+          </div>
+          <p class="muted" style="font-size:10px;margin:0 0 10px;line-height:1.45">Nhóm ban đầu (đã phê duyệt) và <strong>từng đợt</strong> cắt bổ sung đã đăng ký — chỉ để xác nhận; phần nhập mảnh dư bên dưới giữ nguyên.</p>
+          ${banDauHtml}
+          ${exSection}
+          ${tongHtml}
+        </div>`;
+    }
+  }
 
   const modal = document.createElement('div');
   modal.className = 'modal-overlay';
   modal.id = 'actual-modal';
   modal.style.display = 'flex';
   modal.innerHTML = `
-    <div class="demo-modal" style="max-width:540px">
+    <div class="demo-modal dyc-actual-modal" style="max-width:580px">
       <div class="demo-modal-header">
         <i class="fa-solid ${iconKy}" style="color:${mauIcon}"></i>
         <div>
           <h3>${isPpf ? 'Xác Nhận Thực Tế — Dán Phim PPF' : 'Xác Nhận Thực Tế — Dán Phim Cách Nhiệt'}</h3>
-          <p style="font-size:12px;color:var(--text-secondary);margin-top:4px">Nhập số liệu thực tế sau khi thi công để hệ thống trừ kho ảo</p>
+          <p style="font-size:12px;color:var(--text-secondary);margin-top:4px">${
+            isPpf
+              ? 'Nhập số liệu thực tế sau khi thi công để hệ thống trừ kho ảo'
+              : 'Xác nhận hoàn tất theo phân bổ đã duyệt (+ cắt thêm nếu có); nhập mảnh dư (nếu có) bên dưới — hệ thống trừ kho theo bảng đối chiếu.'
+          }</p>
         </div>
       </div>
-      <div style="padding:16px 20px">
-        <div style="background:rgba(255,143,0,0.07);border:1px solid rgba(255,143,0,0.2);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:12px">
+      <div class="dyc-actual-modal-body" style="padding:16px 20px">
+        <p class="muted" style="font-size:10px;margin:0 0 10px;line-height:1.4"><i class="fa-solid fa-arrows-up-down" style="opacity:0.7;margin-right:4px"></i>Cuộn khu vực này nếu nội dung dài (mảnh dư, ghi chú).</p>
+        ${
+          isPpf
+            ? `<div style="background:rgba(255,143,0,0.07);border:1px solid rgba(255,143,0,0.2);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:12px">
           <i class="fa-solid fa-circle-info" style="color:var(--orange-light);margin-right:6px"></i>
-          <strong style="color:var(--orange-light)">Lưu ý:</strong> Kích thước thực tế sẽ được dùng để tính toán lượng phim tiêu hao. Nếu có mảnh dư, vui lòng nhập để hệ thống ghi nhận vào kho mảnh dư.
+          <strong style="color:var(--orange-light)">Lưu ý:</strong> Kích thước thực tế dùng để tính tiêu hao. Phần <strong>mảnh dư</strong> bên dưới dùng cùng thứ tự trường như <strong>Quản lý kho → Nhập mảnh dư thủ công</strong> (mã vật tư, R×D, chất lượng, vị trí). Mã <code>SUBLOT-…</code> được sinh khi bạn hoàn tất.<br/>
+          <span style="font-size:11px;opacity:0.95">Cần <strong>cắt bổ sung giữa ca</strong>: dùng nút <strong>«Đăng ký cắt thêm»</strong> trên Lệnh thi công hoặc thẻ Luồng — không gộp vào form này.</span>
         </div>
         <div class="form-grid">
           <div class="field-group">
             <label>Kích thước block thực tế</label>
-            <input type="text" id="act-block" class="field-input" value="${isPpf ? '152x1300' : '152x143'}" placeholder="vd: 152x143">
+            <input type="text" id="act-block" class="field-input" value="152x1300" placeholder="vd: 152x143">
             <small style="color:var(--text-muted);font-size:10px;margin-top:3px">Định dạng: rộng × dài (cm)</small>
           </div>
           <div class="field-group">
             <label>Chiều rộng thực tế (m)</label>
-            <input type="number" id="act-width" class="field-input" value="${isPpf ? '1.52' : '1.52'}" step="0.01">
+            <input type="number" id="act-width" class="field-input" value="1.52" step="0.01">
           </div>
           <div class="field-group">
             <label>Chiều dài thực tế (m)</label>
-            <input type="number" id="act-len" class="field-input" value="${isPpf ? '13.0' : '1.43'}" step="0.01">
+            <input type="number" id="act-len" class="field-input" value="13.0" step="0.01">
             <small style="color:var(--text-muted);font-size:10px;margin-top:3px">Chiều dài phim đã sử dụng</small>
           </div>
           <div class="field-group">
             <label>Diện tích phế liệu (m²)</label>
             <input type="number" id="act-scrap" class="field-input" value="0.35" step="0.01">
           </div>
-        </div>
+        </div>`
+            : `<div style="background:rgba(255,143,0,0.07);border:1px solid rgba(255,143,0,0.2);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:12px">
+          <i class="fa-solid fa-circle-info" style="color:var(--orange-light);margin-right:6px"></i>
+          <strong style="color:var(--orange-light)">Lưu ý:</strong> <strong>Block và mét phim</strong> hệ thống lấy theo <strong>phân bổ đã duyệt + đăng ký cắt thêm</strong> (bảng đối chiếu bên dưới), không nhập lại ở đây. Phần <strong>mảnh dư</strong> tiếp theo dùng cùng thứ tự trường như <strong>Quản lý kho → Nhập mảnh dư thủ công</strong>. Mã <code>SUBLOT-…</code> được sinh khi hoàn tất.<br/>
+          <span style="font-size:11px;opacity:0.95">Cần <strong>cắt bổ sung giữa ca</strong>: nút <strong>«Đăng ký cắt thêm»</strong> trên Lệnh thi công hoặc thẻ Luồng.</span>
+        </div>`
+        }
+        ${wfSummaryHtml}
         <div style="border:1px solid var(--border);border-radius:8px;padding:12px;margin:12px 0">
           <div style="font-size:12px;font-weight:700;margin-bottom:8px;display:flex;align-items:center;gap:6px">
             <i class="fa-solid fa-scissors" style="color:var(--orange-light)"></i>
-            Mảnh dư (nếu có)
+            Nhập mảnh dư (nếu có) — cùng cấu trúc với nhập thủ công
           </div>
+          <p class="muted" style="font-size:12px;margin-bottom:10px;line-height:1.45">
+            <strong>Mã vật tư</strong> chỉ hiển thị các mã <strong>đã nằm trong phân bổ phê duyệt</strong> của luồng (không phải toàn bộ kho).<br/>
+            Nguồn luồng: <strong>${_esc(st)}</strong> <code>${_esc(sid || '—')}</code>.
+            ${st === 'OFFCUT' ? ' Mã lô cha có thể được hệ thống suy ra từ mảnh nguồn khi ghi kho.' : ''}
+            Không có mảnh dư thì để <strong>chiều rộng / chiều dài = 0</strong>.
+          </p>
           <div class="form-grid">
-            <div class="field-group">
-              <label>Chiều dài mảnh dư (m)</label>
-              <input type="number" id="act-oc-len" class="field-input" value="0" step="0.01" placeholder="0 nếu không có">
-            </div>
-            <div class="field-group">
-              <label>Chiều rộng mảnh dư (m)</label>
-              <input type="number" id="act-oc-wid" class="field-input" value="0" step="0.01">
-            </div>
-            <div class="field-group">
-              <label>Chất lượng mảnh dư</label>
+            <div class="field-group"><label>Mã mảnh dư <span class="req">*</span></label>
+              <input type="text" class="field-input" readonly value="Tự động (SUBLOT-… khi hoàn tất)" style="opacity:0.9"></div>
+            <div class="field-group"><label>Mã lô cha</label>
+              <input type="text" class="field-input" readonly value="${_esc(parentLotReadonly)}" placeholder="—"></div>
+            <div class="field-group"><label>Mã vật tư <span class="req">*</span></label>
+              <select id="act-oc-mc" class="field-input">${mcOptions}</select></div>
+            <div class="field-group"><label>Chiều rộng (m) <span class="req">*</span></label>
+              <input type="number" id="act-oc-wid" class="field-input" value="0" step="0.01" min="0" placeholder="0 nếu không có mảnh dư"></div>
+            <div class="field-group"><label>Chiều dài (m) <span class="req">*</span></label>
+              <input type="number" id="act-oc-len" class="field-input" value="0" step="0.01" min="0" placeholder="0 nếu không có mảnh dư"></div>
+            <div class="field-group"><label>Trạng thái chất lượng <span class="req">*</span></label>
               <select id="act-oc-qual" class="field-input">
-                <option value="NORMAL">Bình thường</option>
-                <option value="GOOD">Tốt</option>
-                <option value="POOR">Kém</option>
-              </select>
-            </div>
-            <div class="field-group">
-              <label>Vị trí lưu mảnh dư</label>
-              <input type="text" id="act-oc-loc" class="field-input" value="OFFCUT-RACK-C">
-            </div>
+                <option value="GOOD">Tốt (GOOD)</option>
+                <option value="NORMAL" selected>Bình thường (NORMAL)</option>
+                <option value="POOR">Kém (POOR)</option>
+              </select></div>
+            <div class="field-group"><label>Vị trí lưu kho <span class="req">*</span></label>
+              <input type="text" id="act-oc-loc" class="field-input" value="OFFCUT-RACK-C" placeholder="VD: OFFCUT-RACK-C"></div>
+            <div class="field-group"><label>Người thực hiện</label>
+              <input type="text" id="act-by" class="field-input" readonly value="${_esc(ktvId)}"></div>
+            <div class="field-group full-width"><label>Ghi chú</label>
+              <input type="text" id="act-note" class="field-input" placeholder="Không có vấn đề gì / Ghi chú thêm..."></div>
           </div>
-        </div>
-        <div class="field-group">
-          <label>Ghi chú của KTV</label>
-          <input type="text" id="act-note" class="field-input" placeholder="Không có vấn đề gì / Ghi chú thêm...">
         </div>
       </div>
       <div class="demo-modal-footer" style="display:flex">
@@ -3543,6 +4562,18 @@ window.moFormXacNhan = function(wsId) {
       </div>
     </div>`;
   document.body.appendChild(modal);
+  const mcSel = document.getElementById('act-oc-mc');
+  if (mcSel && matDefault) {
+    const opt = Array.from(mcSel.options).find((o) => o.value === matDefault);
+    if (opt) mcSel.value = matDefault;
+    else {
+      mcSel.insertAdjacentHTML(
+        'beforeend',
+        `<option value="${_esc(matDefault)}">${_esc(matDefault)} — (theo luồng)</option>`,
+      );
+      mcSel.value = matDefault;
+    }
+  }
 };
 
 window.xacNhanVaHoanTat = async function() {
@@ -3554,30 +4585,115 @@ window.xacNhanVaHoanTat = async function() {
     toast('error', 'Nguồn vật tư không hợp lệ', err.map(i => `${i.workstream_id}: ${i.message}`).join(' | '));
     return;
   }
+  const ocLen = parseFloat(document.getElementById('act-oc-len').value);
+  const ocWid = parseFloat(document.getElementById('act-oc-wid').value);
+  const hasOc =
+    (Number.isFinite(ocLen) && ocLen > 0) || (Number.isFinite(ocWid) && ocWid > 0);
+  if (hasOc) {
+    if (!Number.isFinite(ocLen) || ocLen <= 0 || !Number.isFinite(ocWid) || ocWid <= 0) {
+      toast(
+        'error',
+        'Mảnh dư',
+        'Nhập đủ chiều rộng và chiều dài mảnh dư (m) > 0 — cùng quy tắc với form Nhập mảnh dư thủ công.',
+      );
+      return;
+    }
+    const mc = document.getElementById('act-oc-mc')?.value?.trim();
+    if (!mc) {
+      toast('error', 'Mảnh dư', 'Chọn mã vật tư.');
+      return;
+    }
+    const loc = document.getElementById('act-oc-loc')?.value?.trim();
+    if (!loc) {
+      toast('error', 'Mảnh dư', 'Nhập vị trí lưu kho.');
+      return;
+    }
+  }
+  const blockEl = document.getElementById('act-block');
+  const widthEl = document.getElementById('act-width');
+  const lenEl = document.getElementById('act-len');
+  const scrapEl = document.getElementById('act-scrap');
+  let actual_cut_block;
+  let actual_width_m;
+  let actual_length_m;
+  let has_scrap;
+  let scrap_area_m2;
+  if (blockEl && widthEl && lenEl && scrapEl) {
+    actual_cut_block = blockEl.value;
+    actual_width_m = parseFloat(widthEl.value);
+    actual_length_m = parseFloat(lenEl.value);
+    scrap_area_m2 = parseFloat(scrapEl.value);
+    has_scrap = Number.isFinite(scrap_area_m2) && scrap_area_m2 > 0;
+  } else if (ws.workstream_type === 'WINDOW_FILM_INSTALLATION') {
+    actual_cut_block = (ws.planned_cut_block || '152x143').toString().trim();
+    const firstCm = actual_cut_block.toLowerCase().split('x')[0];
+    const wFromBlock = firstCm ? parseFloat(firstCm) / 100 : NaN;
+    actual_width_m = Number.isFinite(wFromBlock) && wFromBlock > 0 ? wFromBlock : 1.52;
+    let len = sumWfSelectedRequiredLengthM(ws.wf_allocation);
+    len += sumAllExtraCutRequiredLengthM(ws);
+    const pd = parseFloat(ws.planned_deduction_length_m);
+    if (!Number.isFinite(len) || len <= 0) len = Number.isFinite(pd) && pd > 0 ? pd : 1.43;
+    actual_length_m = len;
+    scrap_area_m2 = 0;
+    has_scrap = false;
+  } else {
+    toast('error', 'Form', 'Thiếu ô nhập kích thước thực tế.');
+    return;
+  }
   const payload = {
-    actual_cut_block: document.getElementById('act-block').value,
-    actual_width_m: parseFloat(document.getElementById('act-width').value),
-    actual_length_m: parseFloat(document.getElementById('act-len').value),
-    has_new_offcut: parseFloat(document.getElementById('act-oc-len').value) > 0,
-    offcut_length_m: parseFloat(document.getElementById('act-oc-len').value),
-    offcut_width_m: parseFloat(document.getElementById('act-oc-wid').value),
+    actual_cut_block,
+    actual_width_m,
+    actual_length_m,
+    has_new_offcut: hasOc,
+    offcut_length_m: Number.isFinite(ocLen) ? ocLen : 0,
+    offcut_width_m: Number.isFinite(ocWid) ? ocWid : 0,
     offcut_quality_status: document.getElementById('act-oc-qual').value,
     offcut_storage_location: document.getElementById('act-oc-loc').value,
-    has_scrap: parseFloat(document.getElementById('act-scrap').value) > 0,
-    scrap_area_m2: parseFloat(document.getElementById('act-scrap').value),
+    offcut_material_code: hasOc ? document.getElementById('act-oc-mc')?.value?.trim() || undefined : undefined,
+    has_scrap,
+    scrap_area_m2: Number.isFinite(scrap_area_m2) ? scrap_area_m2 : 0,
     technician_note: document.getElementById('act-note').value,
   };
   try {
-    await fetch(`/api/workstreams/${wsId}/submit-actual`, {
-      method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload)
+    const r0 = await fetch(`/api/workstreams/${wsId}/submit-actual`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
     });
-    const res = await fetch(`/api/workstreams/${wsId}/complete`, {
-      method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({})
-    }).then(r => r.json());
+    const d0 = await r0.json().catch(() => ({}));
+    if (!r0.ok) {
+      const det = d0.detail;
+      let m = `Lỗi ${r0.status}`;
+      if (typeof det === 'string') m = det;
+      else if (det && typeof det === 'object' && det.message) m = String(det.message);
+      else if (det && typeof det === 'object') m = JSON.stringify(det);
+      throw new Error(m);
+    }
+    const r1 = await fetch(`/api/workstreams/${wsId}/complete`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}),
+    });
+    const res = await r1.json().catch(() => ({}));
+    if (!r1.ok) {
+      const det = res.detail;
+      let m = `Lỗi ${r1.status}`;
+      if (typeof det === 'string') m = det;
+      else if (det && typeof det === 'object' && det.message) m = String(det.message);
+      else if (det && typeof det === 'object') m = JSON.stringify(det);
+      throw new Error(m);
+    }
+    if (res.status === 'info') {
+      document.getElementById('actual-modal')?.remove();
+      toast('info', '⚠️ Cần thêm bước', res.detail || 'Không thể đóng luồng.');
+      await taiDonThiCong();
+      if (typeof taiLenhThiCong === 'function') await taiLenhThiCong();
+      taiThongBao();
+      taiTongQuan();
+      return;
+    }
     document.getElementById('actual-modal')?.remove();
-    toast(res.status === 'success' ? 'success' : 'info',
-      res.status === 'success' ? '✅ Luồng đã hoàn tất & đóng' : '⚠️ Cần thêm thao tác', res.detail);
-    await taiDonThiCong(); taiThongBao(); taiTongQuan();
+    toast('success', '✅ Luồng đã hoàn tất & đóng', res.detail || '');
+    await taiDonThiCong();
+    if (typeof taiLenhThiCong === 'function') await taiLenhThiCong();
+    taiThongBao();
+    taiTongQuan();
   } catch(e) { toast('error', 'Lỗi xác nhận', e.message); }
 };
 
@@ -3612,14 +4728,17 @@ window.chiinhSuaWs = async function(wsId) {
   }
   if (
     isWf &&
-    ws.status === 'PENDING_TECH_PREFLIGHT' &&
+    ws.status !== 'PENDING_APPROVAL' &&
+    ws.wf_allocation &&
+    Array.isArray(ws.wf_allocation.items) &&
+    ws.wf_allocation.items.length > 0 &&
     typeof window.openWorkstreamAllocationModal === 'function'
   ) {
     const [lots, offcuts] = await Promise.all([
       fetch('/api/lots').then((r) => r.json()),
       fetch('/api/offcuts').then((r) => r.json()),
     ]);
-    _wsEditModePpf = true;
+    _wsEditModePpf = false;
     _wsEditDirty = false;
     await window.openWorkstreamAllocationModal(wsId, ws, lots, offcuts);
     return;
@@ -3816,11 +4935,17 @@ async function luuChinhSuaWs(ws, isPpf) {
 }
 
 window.closeWsEdit = function() {
-  if (typeof _wsEditDirty !== 'undefined' && _wsEditDirty && typeof _wsEditModePpf !== 'undefined' && _wsEditModePpf) {
+  if (typeof _wsEditDirty !== 'undefined' && _wsEditDirty) {
     if (!confirm('Bạn có thay đổi chưa lưu. Đóng cửa sổ?')) return;
   }
   _wsEditDirty = false;
   _wsEditModePpf = false;
+  if (window.__waEditorCtx) window.__waEditorCtx.extraCutMode = false;
+  const sb = document.getElementById('btn-ws-edit-save');
+  if (sb) {
+    sb.innerHTML = '<i class="fa-solid fa-floppy-disk"></i> Lưu thay đổi';
+    sb.onclick = null;
+  }
   const inner = document.querySelector('.ws-edit-modal-inner');
   if (inner) inner.style.maxWidth = '';
   document.getElementById('ws-edit-modal').style.display = 'none';
@@ -3892,24 +5017,229 @@ document.getElementById('btn-retry-exception')?.addEventListener('click', chayBu
 // ═══════════════════════════════════════════════════════════════════════════════
 // BẢNG LUỒNG THI CÔNG
 // ═══════════════════════════════════════════════════════════════════════════════
+let __wsTableSort = { key: 'created_at', dir: 'desc' };
+let __wsListPage = 0;
+let __wsDateFiltersInitialized = false;
+
+function _wsDefaultStartDateRangeYmd() {
+  const now = new Date();
+  const y = now.getFullYear();
+  const mo = now.getMonth();
+  const d = now.getDate();
+  const firstPrev = new Date(y, mo - 1, 1);
+  const pad = (n) => String(n).padStart(2, '0');
+  return {
+    from: `${firstPrev.getFullYear()}-${pad(firstPrev.getMonth() + 1)}-${pad(firstPrev.getDate())}`,
+    to: `${y}-${pad(mo + 1)}-${pad(d)}`,
+  };
+}
+
+function _wsDayBoundaryLocalMs(y, m0, d, endOfDay) {
+  if (endOfDay) return new Date(y, m0, d, 23, 59, 59, 999).getTime();
+  return new Date(y, m0, d, 0, 0, 0, 0).getTime();
+}
+
+/** @returns {{ lo: number, hi: number } | null} null = không lọc theo ngày */
+function _wsParseYmdBounds(fromYmd, toYmd) {
+  const f = (fromYmd || '').trim();
+  const t = (toYmd || '').trim();
+  if (!f && !t) return null;
+  let lo = -Infinity;
+  let hi = Infinity;
+  if (f && /^\d{4}-\d{2}-\d{2}$/.test(f)) {
+    const [y, m, d] = f.split('-').map(Number);
+    lo = _wsDayBoundaryLocalMs(y, m - 1, d, false);
+  }
+  if (t && /^\d{4}-\d{2}-\d{2}$/.test(t)) {
+    const [y, m, d] = t.split('-').map(Number);
+    hi = _wsDayBoundaryLocalMs(y, m - 1, d, true);
+  }
+  return { lo, hi };
+}
+
+/** Lọc theo ngày tạo đơn (request.created_at), không dùng started_at */
+function _wsRequestCreatedInRange(w, bounds) {
+  if (!bounds) return true;
+  const raw = w.request_created_at;
+  if (raw == null || String(raw).trim() === '') return false;
+  const dt = new Date(raw);
+  if (Number.isNaN(dt.getTime())) return false;
+  const dayMs = new Date(dt.getFullYear(), dt.getMonth(), dt.getDate()).getTime();
+  return dayMs >= bounds.lo && dayMs <= bounds.hi;
+}
+
+function _wsReadPageSize() {
+  const el = document.getElementById('ws-page-size');
+  if (!el) return 10;
+  const v = parseInt(String(el.value), 10);
+  return [10, 20, 50, 100].includes(v) ? v : 10;
+}
+
+function _wsUpdatePaginationBar(total, pageSize, pageIndex, maxPageIndex) {
+  const info = document.getElementById('ws-page-info');
+  const prev = document.getElementById('ws-page-prev');
+  const next = document.getElementById('ws-page-next');
+  if (info) {
+    const from = total === 0 ? 0 : pageIndex * pageSize + 1;
+    const to = Math.min(total, (pageIndex + 1) * pageSize);
+    const np = maxPageIndex + 1;
+    info.textContent =
+      total === 0
+        ? '0 luồng'
+        : `Hiển thị ${from}–${to} / ${total} luồng · Trang ${pageIndex + 1}/${np}`;
+  }
+  if (prev) prev.disabled = pageIndex <= 0;
+  if (next) next.disabled = pageIndex >= maxPageIndex || total === 0;
+}
+
+function _wsSortTimeMs(isoOrEmpty) {
+  if (!isoOrEmpty) return 0;
+  const t = new Date(isoOrEmpty);
+  return isNaN(t.getTime()) ? 0 : t.getTime();
+}
+
+function _wsSortDeadlineMs(w) {
+  const d = parseDeliveryDateStartOfDay(w.requested_delivery_time || '');
+  return d ? d.getTime() : 0;
+}
+
+function _wsSortValue(w, key) {
+  switch (key) {
+    case 'workstream_id':
+      return (w.workstream_id || '').toLowerCase();
+    case 'request_id':
+      return (w.request_id || '').toLowerCase();
+    case 'request_created_at':
+      return _wsSortTimeMs(w.request_created_at);
+    case 'workstream_type':
+      return (w.workstream_type || '').toLowerCase();
+    case 'technician_name':
+      return String(w.assigned_technician_name || w.assigned_technician_id || '—')
+        .toLowerCase()
+        .trim();
+    case 'requested_delivery_time':
+      return _wsSortDeadlineMs(w);
+    case 'status':
+      return (w.status || '').toLowerCase();
+    case 'started_at':
+      return _wsSortTimeMs(w.started_at);
+    case 'completed_at':
+      return _wsSortTimeMs(w.completed_at);
+    case 'actions_mgr':
+    case 'actions_ktv':
+      return (w.status || '').toLowerCase();
+    case 'created_at':
+      return _wsSortTimeMs(w.created_at);
+    default:
+      return '';
+  }
+}
+
+function _wsCompareRows(a, b) {
+  const { key, dir } = __wsTableSort;
+  const mul = dir === 'asc' ? 1 : -1;
+  const va = _wsSortValue(a, key);
+  const vb = _wsSortValue(b, key);
+  let c = 0;
+  if (typeof va === 'number' && typeof vb === 'number') {
+    if (va < vb) c = -1;
+    else if (va > vb) c = 1;
+  } else {
+    const sa = String(va);
+    const sb = String(vb);
+    c = sa < sb ? -1 : sa > sb ? 1 : 0;
+  }
+  if (c !== 0) return c * mul;
+  return String(a.workstream_id || '').localeCompare(String(b.workstream_id || ''), 'vi');
+}
+
+function wsUpdateWorkstreamSortHeaders() {
+  const root = document.getElementById('tab-workstreams');
+  if (!root) return;
+  root.querySelectorAll('thead th.ws-sortable').forEach((th) => {
+    const k = th.getAttribute('data-ws-sort');
+    const icon = th.querySelector('.ws-sort-icon');
+    if (!icon) return;
+    if (k === __wsTableSort.key) {
+      icon.className =
+        'fa-solid ws-sort-icon ' + (__wsTableSort.dir === 'asc' ? 'fa-sort-up' : 'fa-sort-down');
+    } else {
+      icon.className = 'fa-solid fa-sort ws-sort-icon';
+    }
+  });
+}
+
+window.wsToggleWorkstreamSort = function (key) {
+  if (__wsTableSort.key === key) {
+    __wsTableSort.dir = __wsTableSort.dir === 'asc' ? 'desc' : 'asc';
+  } else {
+    __wsTableSort.key = key;
+    __wsTableSort.dir =
+      key === 'requested_delivery_time' ||
+      key === 'request_created_at' ||
+      key === 'started_at' ||
+      key === 'completed_at' ||
+      key === 'created_at'
+        ? 'desc'
+        : 'asc';
+  }
+  __wsListPage = 0;
+  void taiBangLuong();
+};
+
 async function taiBangLuong() {
-  const wss = await fetch('/api/workstreams').then(r => r.json());
+  const wss = await fetch('/api/workstreams').then((r) => r.json());
+  const fromEl = document.getElementById('ws-filter-start-from');
+  const toEl = document.getElementById('ws-filter-start-to');
+  if (fromEl && toEl && !__wsDateFiltersInitialized) {
+    const r = _wsDefaultStartDateRangeYmd();
+    fromEl.value = r.from;
+    toEl.value = r.to;
+    __wsDateFiltersInitialized = true;
+  }
   const filterType = document.getElementById('ws-filter-type')?.value || '';
   const filterStatus = document.getElementById('ws-filter-status')?.value || '';
-  const loc = wss.filter(w => (!filterType || w.workstream_type === filterType) && (!filterStatus || w.status === filterStatus));
+  const fromYmd = fromEl?.value?.trim() || '';
+  const toYmd = toEl?.value?.trim() || '';
+  const dateBounds = _wsParseYmdBounds(fromYmd, toYmd);
+  const loc = wss.filter(
+    (w) =>
+      (!filterType || w.workstream_type === filterType) &&
+      (!filterStatus || w.status === filterStatus) &&
+      _wsRequestCreatedInRange(w, dateBounds),
+  );
+  loc.sort(_wsCompareRows);
+  const pageSize = _wsReadPageSize();
+  const total = loc.length;
+  const maxPage = Math.max(0, Math.ceil(total / pageSize) - 1);
+  if (__wsListPage > maxPage) __wsListPage = maxPage;
+  const start = __wsListPage * pageSize;
+  const pageRows = loc.slice(start, start + pageSize);
+  _wsUpdatePaginationBar(total, pageSize, __wsListPage, maxPage);
   const tbody = document.getElementById('table-ws-body');
   if (!tbody) return;
-  tbody.innerHTML = loc.length === 0
-    ? '<tr><td colspan="11" class="text-center muted" style="padding:20px">Không có luồng thi công nào.</td></tr>'
-    : loc.map(w => `<tr>
-        <td><strong style="font-size:11px">${w.workstream_id}</strong></td>
-        <td><a href="#" onclick="xemNhanhDonThiCong('${w.request_id}', '${w.workstream_id}'); return false;" style="color:var(--primary);font-weight:600">${w.request_id}</a></td>
+  const techName = (w) =>
+    String((w.assigned_technician_name || '').trim() || w.assigned_technician_id || '').trim() || '—';
+  const deadlineCell = (w) => {
+    const raw = w.requested_delivery_time;
+    if (!raw) return '—';
+    return `<span class="ws-td-deadline">${_esc(fmtDt(raw))}</span>`;
+  };
+  tbody.innerHTML =
+    pageRows.length === 0
+      ? '<tr><td colspan="11" class="text-center muted" style="padding:20px">Không có luồng thi công nào.</td></tr>'
+      : pageRows
+          .map(
+            (w) => `<tr>
+        <td><strong class="ws-td-primary">${_esc(w.workstream_id)}</strong></td>
+        <td><a href="#" onclick="xemNhanhDonThiCong('${w.request_id}', '${w.workstream_id}'); return false;" class="ws-td-link">${_esc(w.request_id)}</a></td>
+        <td class="ws-td-primary ws-td-dt">${_esc(fmtDt(w.request_created_at))}</td>
         <td>${loaiLuongBadge(w.workstream_type)}</td>
-        <td>${w.technician_team || '—'}</td>
-        <td><strong>${w.selected_material_code || '—'}</strong></td>
+        <td class="ws-td-primary">${_esc(techName(w))}</td>
+        <td class="ws-td-primary">${deadlineCell(w)}</td>
         <td>${trangThaiBadge(w.status)}</td>
-        <td><small>${fmtDt(w.started_at)}</small></td>
-        <td><small>${fmtDt(w.completed_at)}</small></td>
+        <td class="ws-td-primary ws-td-dt">${_esc(fmtDt(w.started_at))}</td>
+        <td class="ws-td-primary ws-td-dt">${_esc(fmtDt(w.completed_at))}</td>
         <td style="white-space:nowrap">
           ${w.status === 'PENDING_APPROVAL' && w.workstream_type === 'WINDOW_FILM_INSTALLATION' ? `<button class="btn btn-green btn-sm" onclick="moModalDuyetMaPhimWF('${w.workstream_id}')">Duyệt mã phim</button>` : ''}
         </td>
@@ -3917,15 +5247,74 @@ async function taiBangLuong() {
           ${w.status === 'PENDING_APPROVAL' && w.workstream_type !== 'WINDOW_FILM_INSTALLATION' ? `<button class="btn btn-green btn-sm" onclick="pheDuyetNhanhWs('${w.workstream_id}')">Duyệt</button>` : ''}
           ${w.status === 'PENDING_TECH_PREFLIGHT' && w.workstream_type === 'WINDOW_FILM_INSTALLATION' ? `<button class="btn btn-outline btn-sm" onclick="chiinhSuaWs('${w.workstream_id}')">LOT</button><button class="btn btn-green btn-sm" style="margin-left:4px" onclick="pheDuyetNhanhWs('${w.workstream_id}')">Chốt</button>` : ''}
           ${w.status === 'APPROVED' ? `<button class="btn btn-blue btn-sm" onclick="batDauWs('${w.workstream_id}')">Bắt đầu</button>` : ''}
-          ${w.status === 'IN_PROGRESS' ? `<button class="btn btn-primary btn-sm" onclick="moFormXacNhan('${w.workstream_id}')">Hoàn tất</button>` : ''}
+          ${w.status === 'IN_PROGRESS' || w.status === 'ACTUAL_CONFIRMATION_REQUIRED' ? `<button class="btn btn-primary btn-sm" onclick="moFormXacNhan('${w.workstream_id}')">Hoàn tất</button><button class="btn btn-outline btn-sm" style="margin-left:4px;border-color:rgba(251,191,36,0.45);color:#fbbf24" onclick="moDangKyCatThem('${w.workstream_id}')" title="Đăng ký cắt thêm"><i class="fa-solid fa-scissors"></i></button>` : ''}
           <button class="btn btn-outline btn-sm" style="margin-left:4px" onclick="chiinhSuaWs('${w.workstream_id}')"><i class="fa-solid fa-pen"></i></button>
         </td>
-      </tr>`).join('');
+      </tr>`,
+          )
+          .join('');
+  wsUpdateWorkstreamSortHeaders();
 }
 
-['ws-filter-type','ws-filter-status'].forEach(id => {
-  document.getElementById(id)?.addEventListener('change', taiBangLuong);
+['ws-filter-type', 'ws-filter-status', 'ws-filter-start-from', 'ws-filter-start-to'].forEach((id) => {
+  document.getElementById(id)?.addEventListener('change', () => {
+    __wsListPage = 0;
+    void taiBangLuong();
+  });
 });
+document.getElementById('ws-page-size')?.addEventListener('change', () => {
+  __wsListPage = 0;
+  void taiBangLuong();
+});
+document.getElementById('ws-page-prev')?.addEventListener('click', () => {
+  if (__wsListPage > 0) {
+    __wsListPage -= 1;
+    void taiBangLuong();
+  }
+});
+document.getElementById('ws-page-next')?.addEventListener('click', () => {
+  __wsListPage += 1;
+  void taiBangLuong();
+});
+
+function _quickReqWorkstreamLabelVi(t) {
+  if (t === 'PPF_INSTALLATION') return 'PPF';
+  if (t === 'WINDOW_FILM_INSTALLATION') return 'Phim cách nhiệt';
+  return t || '—';
+}
+
+function _quickReqServicesHtml(req) {
+  const j = (req.job_items || '').toString().trim();
+  if (j) return _esc(j);
+  try {
+    const raw = req.service_selection_json || req.service_selection;
+    const sel = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    if (!sel || typeof sel !== 'object') return '—';
+    const parts = [];
+    const svc = (sel.services || '').toString().trim();
+    if (svc) parts.push(`<span class="muted">Gói dịch vụ:</span> ${_esc(svc)}`);
+    const rows = [
+      [sel.service_1, sel.film_type_1],
+      [sel.service_2, sel.film_type_2],
+    ];
+    rows.forEach((pair, idx) => {
+      const line = [pair[0], pair[1]].filter(Boolean).join(' — ');
+      if (line) parts.push(`${idx + 1}. ${_esc(line)}`);
+    });
+    if (!parts.length) return '—';
+    return parts.join('<br/>');
+  } catch (_) {
+    return '—';
+  }
+}
+
+function _quickReqOcrImageHtml(fn) {
+  if (fn == null || String(fn).trim() === '') return '—';
+  const name = String(fn).trim();
+  const enc = encodeURIComponent(name);
+  const href = /^IMG-/i.test(name) ? `/static/uploads/${enc}` : `/static/test_orders/${enc}`;
+  return `<a href="${href}" class="quick-req-ocr-link" target="_blank" rel="noopener">Xem ảnh</a> <span class="muted" style="font-size:10px;font-weight:500">(${_esc(name)})</span>`;
+}
 
 async function xemNhanhDonThiCong(requestId, workstreamId) {
   try {
@@ -3938,31 +5327,61 @@ async function xemNhanhDonThiCong(requestId, workstreamId) {
     
     const techId = ws.technician_id || req.technician_id || '—';
 
+    const cap = document.getElementById('quick-req-ws-caption');
+    if (cap) {
+      const wid = ws.workstream_id || workstreamId || '—';
+      const lab = _quickReqWorkstreamLabelVi(ws.workstream_type);
+      cap.textContent = `Luồng đang xem: ${wid} · ${lab}`;
+    }
+
     document.getElementById('quick-req-id').textContent = req.request_id || '';
     document.getElementById('quick-req-status').innerHTML = trangThaiBadge(req.status);
     document.getElementById('quick-req-dealer').textContent = req.dealer_name || req.dealer_id || '—';
+    const src = (req.source_channel || '').toUpperCase();
+    document.getElementById('quick-req-source').textContent =
+      src === 'MANUAL' ? 'Thủ công (MANUAL)' : src === 'OCR' ? 'OCR' : req.source_channel || '—';
+    document.getElementById('quick-req-ticket').textContent = (req.request_no || '').trim() || '—';
+    document.getElementById('quick-req-contract').textContent = (req.contract_no || '').trim() || '—';
+    document.getElementById('quick-req-date').textContent = req.request_date || '—';
+    document.getElementById('quick-req-ocr-img').innerHTML = _quickReqOcrImageHtml(req.ocr_source_image);
+    document.getElementById('quick-req-sales').textContent = (req.sales_consultant || '').trim() || '—';
+
+    const qsy = document.getElementById('quick-req-seq-year');
+    if (qsy) {
+      qsy.textContent =
+        req.sequence_no != null && String(req.sequence_no).trim() !== ''
+          ? String(req.sequence_no).trim()
+          : '—';
+    }
+    const qsm = document.getElementById('quick-req-seq-month');
+    if (qsm) {
+      qsm.textContent =
+        req.sequence_no_month != null && String(req.sequence_no_month).trim() !== ''
+          ? String(req.sequence_no_month).trim()
+          : '—';
+    }
+
+    document.getElementById('quick-req-cust-id').textContent = req.customer_id || '—';
     document.getElementById('quick-req-customer').textContent = req.customer_name || '—';
-    document.getElementById('quick-req-phone').textContent = req.customer_id || '—';
-    document.getElementById('quick-req-model').textContent = req.model_name || req.vehicle_model_code || '—';
-    document.getElementById('quick-req-deadline').textContent = req.requested_delivery_time ? fmtDt(req.requested_delivery_time) : '—';
+    document.getElementById('quick-req-phone').textContent =
+      (req.customer_phone || req.phone || req.phone_masked || '').toString().trim() || '—';
+    document.getElementById('quick-req-address').textContent =
+      (req.customer_address || req.address || req.address_masked || '').toString().trim() || '—';
+
+    document.getElementById('quick-req-veh-id').textContent = req.vehicle_id || '—';
+    document.getElementById('quick-req-model').textContent = _reqSvcModel(req);
     document.getElementById('quick-req-vin').textContent = req.vin_number ? req.vin_number.slice(-6) : (req.vin_masked || '—');
+    document.getElementById('quick-req-deadline').textContent = req.requested_delivery_time ? fmtDt(req.requested_delivery_time) : '—';
+
+    const svcEl = document.getElementById('quick-req-services');
+    if (svcEl) svcEl.innerHTML = _quickReqServicesHtml(req);
+
     document.getElementById('quick-req-team').textContent = ws.technician_team || '—';
-    document.getElementById('quick-req-services').textContent = req.job_items || '—';
-    
     document.getElementById('quick-req-manager').textContent = ws.approved_by || '—';
     document.getElementById('quick-req-manager-time').textContent = ws.approved_at ? fmtDt(ws.approved_at) : '—';
     document.getElementById('quick-req-tech').textContent = ws.assigned_technician_name || techId;
     document.getElementById('quick-req-tech-phone').textContent = '—';
     document.getElementById('quick-req-tech-time').textContent = ws.completed_at ? fmtDt(ws.completed_at) : '—';
-    
-    document.getElementById('quick-req-source').textContent = req.source_channel || '—';
-    document.getElementById('quick-req-ticket').textContent = req.request_no || '—';
-    document.getElementById('quick-req-contract').textContent = req.contract_no || '—';
-    document.getElementById('quick-req-date').textContent = req.request_date || '—';
-    document.getElementById('quick-req-ocr-img').innerHTML = req.ocr_source_image ? `<a href="/${req.ocr_source_image}" target="_blank" style="color:var(--primary)">Xem ảnh</a>` : '—';
-    document.getElementById('quick-req-ids').textContent = (req.customer_id || '') + ' / ' + (req.vehicle_id || '');
-    document.getElementById('quick-req-address').textContent = '—'; // no address field currently
-    document.getElementById('quick-req-sales').textContent = req.sales_consultant || '—';
     
     document.getElementById('quick-req-modal').style.display = 'flex';
   } catch(e) {
@@ -3975,6 +5394,17 @@ async function xemNhanhDonThiCong(requestId, workstreamId) {
 // LỆNH THI CÔNG (JOB CARDS)
 // ═══════════════════════════════════════════════════════════════════════════════
 let currentJobId = null;
+
+function parseCompletionPhotos(jc) {
+  const raw = jc && jc.completion_photos_json;
+  if (!raw || typeof raw !== 'string') return [];
+  try {
+    const x = JSON.parse(raw);
+    return Array.isArray(x) ? x.filter((u) => u && typeof u === 'string') : [];
+  } catch (_e) {
+    return [];
+  }
+}
 
 async function taiLenhThiCong() {
   const jobs = await fetch('/api/job-cards').then(r => r.json());
@@ -3993,7 +5423,10 @@ async function taiLenhThiCong() {
       </div>
     </div>`;
   }).join('');
-  if (currentJobId) { const sel = jobs.find(j => j.job_card_id === currentJobId); if (sel) hienThiLenh(sel); }
+  if (currentJobId) {
+    const sel = jobs.find((j) => j.job_card_id === currentJobId);
+    if (sel) await hienThiLenh(sel);
+  }
 }
 
 window.chonLenh = async function(jcId) {
@@ -4001,7 +5434,7 @@ window.chonLenh = async function(jcId) {
   await taiLenhThiCong();
 };
 
-function hienThiLenh(jc) {
+async function hienThiLenh(jc) {
   document.getElementById('no-job-selected').style.display = 'none';
   document.getElementById('job-detail-board').style.display = 'block';
   document.getElementById('jc-id').textContent = jc.job_card_id;
@@ -4025,38 +5458,149 @@ function hienThiLenh(jc) {
   document.querySelectorAll('.tl-line').forEach((l, i) => { l.className = 'tl-line' + (i < curTl ? ' done' : ''); });
 
   const isPpf = jc.workstream_type === 'PPF_INSTALLATION';
-  document.getElementById('jc-info-grid').innerHTML = `
-    <div class="ji-row"><span>KTV phụ trách</span><strong>${jc.technician_name} (${jc.technician_id})</strong></div>
-    <div class="ji-row"><span>Đội thi công</span><strong>${jc.technician_team || '—'}</strong></div>
-    <div class="ji-row"><span>Loại thi công</span><strong>${isPpf ? '🛡 Dán Phim PPF' : jc.workstream_type ? '🪟 Phim Cách Nhiệt' : '—'}</strong></div>
-    <div class="ji-row"><span>Loại phim</span><strong>${jc.material_code || '—'}</strong></div>
-    <div class="ji-row"><span>Kích thước block</span><strong>${jc.planned_cut_block || '—'}</strong></div>
-    <div class="ji-row"><span>Nguồn vật tư</span><strong>${jc.allocated_source_id || '—'}</strong></div>
-    <div class="ji-row"><span>Hạn giao xe</span><strong class="highlight-red">${fmtDt(jc.requested_delivery_time)}</strong></div>
-    <div class="ji-row"><span>Bắt đầu lúc</span><strong>${fmtDt(jc.started_at)}</strong></div>
-    <div class="ji-row"><span>Hoàn tất lúc</span><strong>${fmtDt(jc.completed_at)}</strong></div>
-    <div class="ji-row"><span>Xác nhận thực tế</span><strong>${TRANG_THAI_VI[jc.actual_confirmation_status] || jc.actual_confirmation_status}</strong></div>`;
+  const nCompl = parseCompletionPhotos(jc).length;
+
+  const infoEl = document.getElementById('jc-info-grid');
+  infoEl.className = 'job-info-grid jc-info-grid-2col';
+
+  let reqDetail = null;
+  const rid = String(jc.request_id || '').trim();
+  if (rid) {
+    try {
+      reqDetail = await fetchJSON(`/api/requests/${encodeURIComponent(rid)}`);
+    } catch (_) {
+      reqDetail = null;
+    }
+  }
+  const maDon = reqDetail
+    ? String(reqDetail.request_no || reqDetail.contract_no || '').trim() || rid || '—'
+    : rid || '—';
+  const soKhung = reqDetail
+    ? String(reqDetail.vin_masked || reqDetail.vin_number || '').trim() || '—'
+    : '—';
+  const tvbh = reqDetail ? String(reqDetail.sales_consultant || '').trim() || '—' : '—';
+  const sttNam =
+    reqDetail != null && reqDetail.sequence_no != null && String(reqDetail.sequence_no).trim() !== ''
+      ? String(reqDetail.sequence_no).trim()
+      : '—';
+  const sttThang =
+    reqDetail != null && reqDetail.sequence_no_month != null && String(reqDetail.sequence_no_month).trim() !== ''
+      ? String(reqDetail.sequence_no_month).trim()
+      : '—';
+  const loaiThiCong = isPpf ? 'Dán Phim PPF' : jc.workstream_type ? 'Phim Cách Nhiệt' : '—';
+  const deliveryRaw =
+    String(jc.requested_delivery_time || '').trim() || String(reqDetail?.requested_delivery_time || '').trim() || '';
+
+  infoEl.innerHTML = [
+    jcJobInfoRow('KTV phụ trách', `${_esc(jc.technician_name || '—')} (${_esc(jc.technician_id || '—')})`),
+    jcJobInfoRow('Đội thi công', _esc(jc.technician_team || '—')),
+    jcJobInfoRow('Loại thi công', _esc(loaiThiCong)),
+    jcJobInfoRow('Mã đơn', _esc(maDon)),
+    jcJobInfoRow('Số khung xe', _esc(soKhung)),
+    jcJobInfoRow('Tư vấn bán hàng', _esc(tvbh)),
+    jcJobInfoRow('Số thứ tự (theo năm)', _esc(sttNam)),
+    jcJobInfoRow('Số thứ tự xe (theo tháng)', _esc(sttThang)),
+    jcJobInfoRow('Hạn giao xe', `<span class="jc-job-deadline">${_esc(fmtDt(deliveryRaw || null))}</span>`),
+    jcJobInfoRow('Thời gian giao xe còn', jcDeliveryRemainHtml(deliveryRaw || null)),
+    jcJobInfoRow('Bắt đầu lúc', _esc(fmtDt(jc.started_at))),
+    jcJobInfoRow('Hoàn tất lúc', _esc(fmtDt(jc.completed_at))),
+    jcJobInfoRow(
+      'Xác nhận thực tế',
+      _esc(TRANG_THAI_VI[jc.actual_confirmation_status] || jc.actual_confirmation_status || '—'),
+      true,
+    ),
+    jcJobInfoRow('Ảnh hoàn thành', nCompl > 0 ? `${nCompl} ảnh đã lưu` : 'Chưa có ảnh', true),
+  ].join('');
 
   const wsDetail = document.getElementById('jc-ws-detail');
   if (isPpf) {
     wsDetail.innerHTML = `<div class="ws-job-detail ppf-job">
-      <div style="font-size:12px;font-weight:700;color:var(--red-light);margin-bottom:8px"><i class="fa-solid fa-shield-film"></i> Dán Phim PPF — ${jc.material_code || 'T-TYPE'}</div>
-      <div class="form-grid" style="gap:6px">
-        <div style="font-size:11px;color:var(--text-secondary)">Block kế hoạch:<br><strong style="color:var(--text-primary)">${jc.planned_cut_block || '152x1300'}</strong></div>
-        <div style="font-size:11px;color:var(--text-secondary)">Chiều dài khấu:<br><strong style="color:var(--text-primary)">${jc.planned_deduction_length_m || 13.0} m</strong></div>
+      <div class="jc-wf-main-head jc-wf-ppf-head"><i class="fa-solid fa-shield-film"></i> Dán Phim PPF — ${jc.material_code || 'T-TYPE'}</div>
+      <div class="form-grid jc-wf-ppf-grid" style="gap:6px">
+        <div class="jc-wf-ppf-kv"><span class="jc-wf-ppf-k">Block kế hoạch (cm):</span><strong class="jc-wf-ppf-v">${formatWfPlannedSizeCm(jc.planned_cut_block || '152x1300')}</strong></div>
+        <div class="jc-wf-ppf-kv"><span class="jc-wf-ppf-k">Chiều dài khấu (LOT, m):</span><strong class="jc-wf-ppf-v">${jc.planned_deduction_length_m != null ? Number(jc.planned_deduction_length_m).toFixed(2) : '13.00'} m</strong></div>
       </div>
     </div>`;
   } else if (jc.workstream_type === 'WINDOW_FILM_INSTALLATION') {
-    wsDetail.innerHTML = `<div class="ws-job-detail wf-job">
-      <div style="font-size:12px;font-weight:700;color:var(--blue-light);margin-bottom:8px"><i class="fa-solid fa-window-restore"></i> Dán Phim Cách Nhiệt</div>
-      <div class="wf-material-plan">
-        <div class="wf-plan-row"><span class="job-name">Kính chắn gió trước (Kính lái)</span><span class="mat-code rt40">RT40</span></div>
-        <div class="wf-plan-row"><span class="job-name">Kính hậu</span><span class="mat-code jb20">JB20</span></div>
-        <div class="wf-plan-row"><span class="job-name">Kính cửa trước (2 cánh)</span><span class="mat-code jb20">JB20</span></div>
-        <div class="wf-plan-row"><span class="job-name">Kính cửa sau + tam giác</span><span class="mat-code jb20">JB20</span></div>
-        <div class="wf-plan-row"><span class="job-name">Cửa sổ trời</span><span class="mat-code jb20">JB20</span></div>
-      </div>
+    wsDetail.innerHTML =
+      '<div class="ws-job-detail wf-job"><p class="muted jc-wf-muted-p">Đang tải phân bổ luồng…</p></div>';
+    if (jc.workstream_id) {
+      try {
+        const ws = await fetchJSON(`/api/workstreams/${encodeURIComponent(jc.workstream_id)}`);
+        const canXoaJcDot = ws.status === 'IN_PROGRESS' || ws.status === 'ACTUAL_CONFIRMATION_REQUIRED';
+        const base = ws.wf_allocation;
+        const hist = Array.isArray(ws.extra_cut_history) ? ws.extra_cut_history : [];
+        let exBlock = '';
+        if (ws.extra_cut_requested && hist.length) {
+          const blocks = hist
+            .map((ent, idx) => {
+              if (!ent || typeof ent !== 'object') return '';
+              const exa = ent.wf_allocation;
+              const when = ent.requested_at ? fmtDt(ent.requested_at) : '—';
+              const who = [ent.actor_name, ent.actor_id].filter(Boolean).join(' · ') || '—';
+              const delJ =
+                canXoaJcDot && ent.proposal_id
+                  ? `<button type="button" class="btn btn-outline btn-sm" style="flex-shrink:0;padding:2px 10px;font-size:10px;border-color:rgba(248,113,113,0.45);color:#f87171" onclick="void window.xoaDeXuatCatThem('${_esc(String(ws.workstream_id))}','${_esc(String(ent.proposal_id))}')"><i class="fa-solid fa-trash"></i> Xóa</button>`
+                  : '';
+              const pb = exa ? jcWfPhanBoBangHtml(`Đợt ${idx + 1} — hạng mục &amp; nguồn`, exa) : '';
+              const kt = exa
+                ? jcWfKiemTraTungHangMucCardSection(exa, {
+                    title: `Đợt ${idx + 1} — kiểm tra hạng mục`,
+                    icon: 'fa-scissors',
+                    iconColor: '#fbbf24',
+                  })
+                : '';
+              const rs = jcExtraCutReasonHtml(ent.reason);
+              return `<div class="jc-wf-hist-block" style="margin-bottom:14px;padding-bottom:12px;border-bottom:1px solid rgba(251,191,36,0.15)">
+              <div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px">
+              <div class="jc-wf-hist-meta">${idx + 1}. ${_esc(when)} · ${_esc(who)}</div>${delJ}</div>
+              ${pb}${kt}${rs}
+            </div>`;
+            })
+            .join('');
+          exBlock = `<div style="margin-top:10px;padding-top:12px;border-top:1px solid rgba(251,191,36,0.28)">
+          <div class="jc-wf-extra-title"><i class="fa-solid fa-scissors" style="margin-right:6px"></i> Lịch sử cắt bổ sung (${hist.length} đợt)</div>
+          ${blocks}
+          <p class="muted jc-wf-hist-footnote">Hoàn tất luồng: trừ kho theo tất cả đợt có bảng phân bổ. Có thể xóa từng đợt khi đang thi công để kiểm tồn cộng dồn lại.</p>
+        </div>`;
+        } else if (ws.extra_cut_requested) {
+          const exAll = collectExtraCutWfAllocations(ws);
+          const ex = exAll[0];
+          const exKiemTra = ex
+            ? jcWfKiemTraTungHangMucCardSection(ex, {
+                title: 'Kiểm tra từng hạng mục (cắt bổ sung)',
+                icon: 'fa-scissors',
+                iconColor: '#fbbf24',
+              })
+            : '';
+          const legJ =
+            canXoaJcDot && ex
+              ? `<div style="display:flex;justify-content:flex-end;margin-bottom:6px"><button type="button" class="btn btn-outline btn-sm" style="padding:2px 10px;font-size:10px;border-color:rgba(248,113,113,0.45);color:#f87171" onclick="void window.xoaDeXuatCatThem('${_esc(String(ws.workstream_id))}','LEGACY-SNAPSHOT')"><i class="fa-solid fa-trash"></i> Xóa đăng ký cắt thêm</button></div>`
+              : '';
+          exBlock =
+            ex
+              ? `<div style="margin-top:10px;padding-top:12px;border-top:1px solid rgba(251,191,36,0.28)">
+          <div class="jc-wf-extra-title"><i class="fa-solid fa-scissors" style="margin-right:6px"></i> Cắt bổ sung — KTV đã xác nhận</div>
+          ${legJ}
+          ${jcWfPhanBoBangHtml('2. Nhóm hạng mục &amp; nguồn yêu cầu cắt bổ sung (KTV)', ex)}
+          ${exKiemTra || ''}
+          ${jcExtraCutReasonHtml(ws.extra_cut_reason)}
+        </div>`
+              : `<p class="muted jc-wf-muted-strong"><i class="fa-solid fa-scissors"></i> Đã đăng ký cắt thêm — chưa có bảng phân bổ.</p>${jcExtraCutReasonHtml(ws.extra_cut_reason)}`;
+        }
+        wsDetail.innerHTML = `<div class="ws-job-detail wf-job">
+      <div class="jc-wf-main-head jc-wf-wf-head"><i class="fa-solid fa-window-restore"></i> Dán Phim Cách Nhiệt — theo luồng</div>
+      ${jcWfPhanBoBangHtml('1. Nhóm hạng mục &amp; nguồn ban đầu (đã phê duyệt)', base)}
+      ${exBlock}
+      ${jcWfTongHopNguonHtml(base, ws.extra_cut_requested ? collectExtraCutWfAllocations(ws) : null)}
     </div>`;
+      } catch (e) {
+        wsDetail.innerHTML = `<div class="ws-job-detail wf-job"><p class="muted jc-wf-muted-p jc-wf-err">Không tải được chi tiết luồng: ${_esc(e.message || String(e))}</p></div>`;
+      }
+    } else {
+      wsDetail.innerHTML =
+        '<div class="ws-job-detail wf-job"><p class="muted jc-wf-muted-p">Chưa liên kết workstream.</p></div>';
+    }
   } else { wsDetail.innerHTML = ''; }
 
   const az = document.getElementById('jc-action-zone');
@@ -4067,11 +5611,30 @@ function hienThiLenh(jc) {
   } else if (jc.status === 'IN_PROGRESS') {
     az.innerHTML = `<div class="hitl-alert tech"><i class="fa-solid fa-wrench"></i><div><strong>Đang thi công — ${isPpf ? 'Đội PPF' : 'Đội Cách Nhiệt'}</strong><p>Đã bắt đầu lúc ${fmtDt(jc.started_at)}. Nhấn hoàn tất sau khi thi công xong.</p></div></div>
       <button class="btn btn-green btn-full" onclick="yeuCauHoanTatLenh('${jc.job_card_id}')"><i class="fa-solid fa-flag-checkered"></i> Đã thi công xong — Yêu cầu xác nhận</button>
-      ${jc.workstream_id ? `<button class="btn btn-primary btn-full" style="margin-top:8px" onclick="moFormXacNhan('${jc.workstream_id}')"><i class="fa-solid fa-ruler"></i> Nhập kích thước thực tế & Hoàn tất</button>` : ''}`;
+      ${
+        jc.workstream_id
+          ? `<div class="jc-action-stack">
+      <div class="jc-action-row jc-action-row--triple jc-action-row--job-three">
+        <button type="button" class="btn btn-outline jc-btn-extra-cut" onclick="moDangKyCatThem('${jc.workstream_id}')"><i class="fa-solid fa-scissors" aria-hidden="true"></i><span>Đăng ký cắt thêm (giữa ca)</span></button>
+        <button type="button" class="btn btn-outline jc-btn-photo" onclick="moHinhAnhHoanThanh('${jc.job_card_id}')"><i class="fa-solid fa-camera" aria-hidden="true"></i><span>Hình ảnh hoàn thành${nCompl ? ` (${nCompl})` : ''}</span></button>
+        <button type="button" class="btn btn-primary jc-btn-actual" onclick="moFormXacNhan('${jc.workstream_id}')"><i class="fa-solid fa-ruler" aria-hidden="true"></i><span>Xác nhận sử dụng thực tế &amp; Hoàn tất</span></button>
+      </div>
+    </div>`
+          : ''
+      }`;
   } else if (jc.status === 'ACTUAL_CONFIRMATION_REQUIRED') {
-    az.innerHTML = `<div class="exception-box"><i class="fa-solid fa-clipboard-list"></i><h3>Cần xác nhận kích thước thực tế</h3>
-      <p>KTV phải nhập số liệu thực tế trước khi hệ thống trừ kho ảo và đóng lệnh.</p>
-      ${jc.workstream_id ? `<button class="btn btn-primary" style="margin-top:8px" onclick="moFormXacNhan('${jc.workstream_id}')"><i class="fa-solid fa-ruler"></i> Nhập kích thước thực tế</button>` : ''}
+    az.innerHTML = `<div class="exception-box"><i class="fa-solid fa-clipboard-list"></i><h3>Cần hoàn tất trước khi chốt lệnh</h3>
+      <p class="jc-exception-hint">KTV cần <strong>xác nhận kích thước thực tế</strong> và <strong>ít nhất một ảnh hoàn thành</strong> — sau đó hệ thống mới trừ kho ảo và đóng luồng.</p>
+      <p class="muted jc-exception-photo-line">Đã lưu <strong>${nCompl}</strong> ảnh hoàn thành.</p>
+      ${
+        jc.workstream_id
+          ? `<div class="jc-action-row jc-action-row--triple jc-action-row--job-three">
+        <button type="button" class="btn btn-outline jc-btn-extra-cut" onclick="moDangKyCatThem('${jc.workstream_id}')"><i class="fa-solid fa-scissors" aria-hidden="true"></i><span>Đăng ký cắt thêm</span></button>
+        <button type="button" class="btn btn-outline jc-btn-photo" onclick="moHinhAnhHoanThanh('${jc.job_card_id}')"><i class="fa-solid fa-camera" aria-hidden="true"></i><span>Hình ảnh hoàn thành${nCompl ? ` (${nCompl})` : ''}</span></button>
+        <button type="button" class="btn btn-primary jc-btn-actual" onclick="moFormXacNhan('${jc.workstream_id}')"><i class="fa-solid fa-ruler" aria-hidden="true"></i><span>Xác nhận sử dụng thực tế</span></button>
+      </div>`
+          : ''
+      }
     </div>`;
   } else if (jc.status === 'COMPLETED_BY_TECHNICIAN') {
     az.innerHTML = `<div class="success-box"><div class="success-icon"><i class="fa-solid fa-circle-check"></i></div>
@@ -4080,6 +5643,98 @@ function hienThiLenh(jc) {
     </div>`;
   }
 }
+
+window.moHinhAnhHoanThanh = async function (jcId) {
+  document.getElementById('completion-photo-modal')?.remove();
+  const wrap = document.createElement('div');
+  wrap.className = 'modal-overlay';
+  wrap.id = 'completion-photo-modal';
+  wrap.innerHTML = `
+    <div class="demo-modal jc-completion-modal" style="max-width:520px">
+      <div class="demo-modal-header">
+        <i class="fa-solid fa-camera" style="color:var(--blue-light)"></i>
+        <div>
+          <h3>Hình ảnh hoàn thành</h3>
+          <p style="font-size:12px;color:var(--text-secondary);margin-top:4px">Chụp hoặc chọn ảnh minh chứng đã hoàn tất thi công (tối đa 12 ảnh, mỗi file ≤ 8 MB).</p>
+        </div>
+      </div>
+      <div class="demo-modal-body" style="padding:16px 20px">
+        <div id="completion-photo-list" class="jc-completion-thumb-grid"></div>
+        <input type="file" id="completion-photo-file" class="jc-completion-file-input" accept="image/*" capture="environment" />
+        <button type="button" class="btn btn-primary jc-completion-pick-btn" style="margin-top:12px">
+          <i class="fa-solid fa-upload"></i><span>Chọn / chụp ảnh</span>
+        </button>
+        <p id="completion-photo-msg" class="muted" style="font-size:11px;margin-top:10px"></p>
+      </div>
+      <div class="demo-modal-footer" style="display:flex;justify-content:flex-end">
+        <button type="button" class="btn btn-outline" onclick="document.getElementById('completion-photo-modal')?.remove()">Đóng</button>
+      </div>
+    </div>`;
+  document.body.appendChild(wrap);
+
+  const listEl = document.getElementById('completion-photo-list');
+  const msgEl = document.getElementById('completion-photo-msg');
+  const fileInp = document.getElementById('completion-photo-file');
+  const pickBtn = wrap.querySelector('.jc-completion-pick-btn');
+  if (pickBtn && fileInp) {
+    pickBtn.addEventListener('click', () => fileInp.click());
+  }
+
+  async function renderThumbs() {
+    let photos = [];
+    try {
+      const jobs = await fetch('/api/job-cards').then((r) => r.json());
+      const jc = Array.isArray(jobs) ? jobs.find((j) => j.job_card_id === jcId) : null;
+      photos = jc ? parseCompletionPhotos(jc) : [];
+    } catch (_e) {
+      photos = [];
+    }
+    if (!listEl) return;
+    listEl.innerHTML =
+      photos.length === 0
+        ? '<p class="muted" style="grid-column:1/-1;font-size:11px;margin:0">Chưa có ảnh.</p>'
+        : photos
+            .map(
+              (u) =>
+                `<div class="jc-completion-thumb"><img src="${_esc(u)}" alt="Ảnh hoàn thành" loading="lazy" /></div>`,
+            )
+            .join('');
+  }
+
+  await renderThumbs();
+
+  if (fileInp) {
+    fileInp.addEventListener('change', async () => {
+      const f = fileInp.files && fileInp.files[0];
+      fileInp.value = '';
+      if (!f) return;
+      if (msgEl) msgEl.textContent = 'Đang tải lên…';
+      try {
+        const fd = new FormData();
+        fd.append('file', f);
+        const r = await fetch(`/api/job-cards/${encodeURIComponent(jcId)}/completion-photos`, {
+          method: 'POST',
+          body: fd,
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          const det = d.detail;
+          let m = `Lỗi ${r.status}`;
+          if (typeof det === 'string') m = det;
+          else if (det && typeof det === 'object' && det.message) m = String(det.message);
+          throw new Error(m);
+        }
+        if (msgEl) msgEl.textContent = d.detail || 'Đã lưu.';
+        toast('success', 'Ảnh hoàn thành', d.detail || 'Đã lưu.');
+        await renderThumbs();
+        if (typeof taiLenhThiCong === 'function') await taiLenhThiCong();
+      } catch (e) {
+        if (msgEl) msgEl.textContent = e.message || String(e);
+        toast('error', 'Không tải được ảnh', e.message || String(e));
+      }
+    });
+  }
+};
 
 window.batDauLenh = async function(jcId) {
   try {
@@ -4131,7 +5786,7 @@ async function loadMaterialPreferences() {
             (p) => `<tr>
         <td><strong>${_esc(p.preference_id)}</strong></td>
         <td>${_esc(p.film_type)}</td>
-        <td>${_esc(p.job_item)}</td>
+        <td>${_esc(_wfJobLabelVi(p.job_item))}</td>
         <td>${_esc(p.preferred_material_code)}</td>
         <td>${_esc(p.material_name || '—')}</td>
         <td>${p.priority ?? '—'}</td>
@@ -4178,21 +5833,60 @@ window.toggleMatPref = async function (pid, act) {
   }
 };
 
-window.openMatPrefModal = function (preferenceId) {
+window.openMatPrefModal = async function (preferenceId) {
   const isEdit = !!preferenceId;
+  let mcOptions = '<option value="">— Chọn mã vật tư —</option>';
+  const seen = new Set();
+  try {
+    const r = await fetch('/api/inventory/material-codes');
+    const arr = await r.json();
+    if (Array.isArray(arr)) {
+      arr
+        .filter((mc) => String(mc || '').trim())
+        .forEach((mc) => {
+          const v = String(mc).trim();
+          if (seen.has(v)) return;
+          seen.add(v);
+          mcOptions += `<option value="${_esc(v)}">${_esc(v)}</option>`;
+        });
+    }
+  } catch (e) {
+    console.warn('openMatPrefModal material-codes', e);
+  }
+
+  function _ensureMatPrefMcOption(code) {
+    const c = String(code || '').trim();
+    if (!c) return;
+    const sel = document.getElementById('mpf-mc');
+    if (!sel) return;
+    const exists = Array.from(sel.options).some((o) => o.value === c);
+    if (!exists) {
+      sel.insertAdjacentHTML(
+        'beforeend',
+        `<option value="${_esc(c)}">${_esc(c)} — (chưa có trong tồn kho hiện tại)</option>`,
+      );
+    }
+    sel.value = c;
+  }
+
   openInvModal(
-    isEdit ? `Sửa cấu hình ${preferenceId}` : 'Thêm vật tư ưu tiên',
+    isEdit ? `Sửa cấu hình — ${_esc(preferenceId)}` : 'Thêm cấu hình vật tư ưu tiên',
     `<div class="form-grid">
-      <div class="field-group"><label>preference_id</label><input id="mpf-pid" class="field-input" value="${_esc(preferenceId || '')}" ${isEdit ? 'readonly' : ''} placeholder="MATPREF-…" /></div>
-      <div class="field-group"><label>film_type <span class="req">*</span></label><input id="mpf-ft" class="field-input" placeholder="Phim cách nhiệt hoặc PPF" /></div>
-      <div class="field-group"><label>job_item <span class="req">*</span></label><input id="mpf-ji" class="field-input" placeholder="WINDSHIELD" /></div>
-      <div class="field-group"><label>preferred_material_code <span class="req">*</span></label><input id="mpf-mc" class="field-input" /></div>
-      <div class="field-group"><label>material_name</label><input id="mpf-mn" class="field-input" /></div>
-      <div class="field-group"><label>priority</label><input type="number" id="mpf-pr" class="field-input" value="1" min="1" /></div>
-      <div class="field-group"><label>effective_from</label><input id="mpf-ef" class="field-input" /></div>
-      <div class="field-group"><label>effective_to</label><input id="mpf-et" class="field-input" /></div>
-      <div class="field-group full-width"><label>note</label><input id="mpf-note" class="field-input" /></div>
-      <div class="field-group full-width"><label>reason (bắt buộc khi sửa) <span class="req">*</span></label><input id="mpf-reason" class="field-input" placeholder="Audit" /></div>
+      <div class="field-group"><label>Mã cấu hình</label><input id="mpf-pid" class="field-input" value="${_esc(preferenceId || '')}" ${isEdit ? 'readonly' : ''} placeholder="VD: MATPREF-WF-KL" /></div>
+      <div class="field-group"><label>Loại phim <span class="req">*</span></label><input id="mpf-ft" class="field-input" placeholder="VD: WINDOW_FILM, PPF" /></div>
+      <div class="field-group"><label>Hạng mục / vùng thi công <span class="req">*</span></label>
+        <input id="mpf-ji" class="field-input" list="mpf-job-datalist" autocomplete="off" placeholder="Chọn gợi ý hoặc gõ mã (VD: WINDSHIELD)" /></div>
+      <div class="field-group full-width"><p class="muted" style="font-size:11px;margin:0;line-height:1.45">Danh sách gợi ý theo hạng mục phim cách nhiệt và vùng PPF trong hệ thống. Bạn vẫn có thể <strong>nhập tay</strong> mã khác nếu nghiệp vụ cần.</p></div>
+      <div class="field-group"><label>Mã vật tư ưu tiên <span class="req">*</span></label>
+        <select id="mpf-mc" class="field-input">${mcOptions}</select></div>
+      <div class="field-group"><label>Tên vật tư (hiển thị)</label><input id="mpf-mn" class="field-input" placeholder="Tên gợi nhớ cho báo cáo / tra cứu" /></div>
+      <div class="field-group"><label>Mức ưu tiên</label><input type="number" id="mpf-pr" class="field-input" value="1" min="1" title="Số nhỏ hơn = ưu tiên cao hơn (theo cấu hình hệ thống)" /></div>
+      <div class="field-group"><label>Hiệu lực từ</label><input id="mpf-ef" class="field-input" placeholder="dd/mm/yyyy hoặc để trống" autocomplete="off" /></div>
+      <div class="field-group"><label>Hiệu lực đến</label><input id="mpf-et" class="field-input" placeholder="dd/mm/yyyy hoặc để trống" autocomplete="off" /></div>
+      <div class="field-group full-width"><p class="muted" style="font-size:11px;margin:0;line-height:1.45">Có thể <strong>để trống</strong> cả hai ô nếu không giới hạn thời gian. Nếu nhập ngày, khuyến nghị định dạng <strong>dd/mm/yyyy</strong> (ví dụ <strong>08/06/2026</strong>).</p></div>
+      <div class="field-group full-width"><label>Ghi chú</label><input id="mpf-note" class="field-input" /></div>
+      <div class="field-group full-width"><label>Lý do thay đổi <span class="req">*</span> <span class="muted" style="font-weight:400">(bắt buộc khi sửa)</span></label><input id="mpf-reason" class="field-input" placeholder="VD: Điều chỉnh theo audit / đổi định mức" /></div>
+      ${_matPrefJobItemDatalistHtml()}
     </div>`,
     `<button type="button" class="btn btn-outline" onclick="closeInvModal()">Đóng</button>
      <button type="button" class="btn btn-primary" onclick="submitMatPref(${isEdit ? 'true' : 'false'})">${isEdit ? 'Cập nhật' : 'Tạo'}</button>`,
@@ -4205,7 +5899,7 @@ window.openMatPrefModal = function (preferenceId) {
         if (!p) return;
         document.getElementById('mpf-ft').value = p.film_type || '';
         document.getElementById('mpf-ji').value = p.job_item || '';
-        document.getElementById('mpf-mc').value = p.preferred_material_code || '';
+        _ensureMatPrefMcOption(p.preferred_material_code);
         document.getElementById('mpf-mn').value = p.material_name || '';
         document.getElementById('mpf-pr').value = String(p.priority || 1);
         document.getElementById('mpf-ef').value = p.effective_from || '';
@@ -4213,6 +5907,9 @@ window.openMatPrefModal = function (preferenceId) {
         document.getElementById('mpf-note').value = p.note || '';
       })
       .catch(() => {});
+  } else {
+    const sel = document.getElementById('mpf-mc');
+    if (sel && sel.options.length > 1) sel.selectedIndex = 1;
   }
 };
 
@@ -4220,13 +5917,18 @@ window.submitMatPref = async function (isEdit) {
   const pid = (document.getElementById('mpf-pid')?.value || '').trim();
   const reason = (document.getElementById('mpf-reason')?.value || '').trim();
   if (isEdit && !reason) {
-    toast('warning', 'Thiếu lý do', 'reason bắt buộc khi sửa');
+    toast('warning', 'Thiếu lý do', 'Vui lòng nhập lý do thay đổi (phục vụ audit).');
+    return;
+  }
+  const preferred_material_code = document.getElementById('mpf-mc').value.trim();
+  if (!preferred_material_code) {
+    toast('warning', 'Thiếu mã vật tư', 'Chọn mã vật tư ưu tiên trong danh sách kho.');
     return;
   }
   const body = {
     film_type: document.getElementById('mpf-ft').value.trim(),
     job_item: document.getElementById('mpf-ji').value.trim(),
-    preferred_material_code: document.getElementById('mpf-mc').value.trim(),
+    preferred_material_code,
     material_name: document.getElementById('mpf-mn').value.trim() || undefined,
     priority: parseInt(document.getElementById('mpf-pr').value, 10) || 1,
     effective_from: document.getElementById('mpf-ef').value.trim() || undefined,
@@ -4351,21 +6053,25 @@ async function loadOffcuts() {
   document.getElementById('inv-table-offcuts').innerHTML = rows.length ? rows.map(o => {
     const e = eff(o);
     const q = o.quality_status || '—';
+    const by = (o.import_performed_by && String(o.import_performed_by).trim()) ? _esc(o.import_performed_by) : '—';
+    const idDisp = _lockedImportDateDisplay(o.import_date, o.import_performed_at);
     return `<tr>
-      <td><strong>${o.offcut_id}</strong></td>
-      <td>${o.material_code}</td>
-      <td>${o.width_m}×${o.length_m} m</td>
-      <td>${o.area_m2}</td>
-      <td><span class="status-badge status-new" style="font-size:10px">${q}</span></td>
+      <td><strong>${_esc(o.offcut_id)}</strong></td>
+      <td>${_esc(String(o.material_code ?? ''))}</td>
+      <td>${_esc(String(o.width_m ?? ''))}×${_esc(String(o.length_m ?? ''))} m</td>
+      <td>${o.area_m2 ?? '—'}</td>
+      <td><span class="status-badge status-new" style="font-size:10px">${_esc(q)}</span></td>
       <td>${lotStatusChip(e)}</td>
       <td>${o.is_locked ? '<span class="locked-badge"><i class="fa-solid fa-lock" style="margin-right:4px;"></i>Khóa</span>' : '—'}</td>
-      <td><small>${o.storage_location || '—'}</small></td>
+      <td><small>${_esc(String(o.storage_location || '—'))}</small></td>
+      <td><small>${by}</small></td>
+      <td><small>${idDisp}</small></td>
       <td style="white-space:nowrap">
-        <button class="btn btn-outline btn-sm" onclick="openManualIssueOffcutModal('${o.offcut_id}')">Xuất</button>
-        <button class="btn btn-danger btn-sm" onclick="openClearOffcutModal('${o.offcut_id}')">Clear</button>
-        ${o.is_locked ? `<button class="btn btn-outline btn-sm" onclick="openReleaseLockModal('OFFCUT','${o.offcut_id}')"><i class="fa-solid fa-unlock"></i> Mở khóa</button>` : ''}
+        <button class="btn btn-outline btn-sm" onclick="openManualIssueOffcutModal(${JSON.stringify(String(o.offcut_id ?? '')).replace(/"/g, '&quot;')})">Xuất</button>
+        <button class="btn btn-danger btn-sm" onclick="openClearOffcutModal(${JSON.stringify(String(o.offcut_id ?? '')).replace(/"/g, '&quot;')})">Clear</button>
+        ${o.is_locked ? `<button class="btn btn-outline btn-sm" onclick="openReleaseLockModal(${JSON.stringify('OFFCUT').replace(/"/g, '&quot;')}, ${JSON.stringify(String(o.offcut_id ?? '')).replace(/"/g, '&quot;')})"><i class="fa-solid fa-unlock"></i> Mở khóa</button>` : ''}
       </td></tr>`;
-  }).join('') : '<tr><td colspan="9" class="text-center muted">Không có mảnh dư.</td></tr>';
+  }).join('') : '<tr><td colspan="11" class="text-center muted">Không có mảnh dư.</td></tr>';
 }
 
 async function loadInventoryTransactions() {
@@ -4391,22 +6097,155 @@ async function loadInventoryTransactions() {
   </tr>`).join('') : '<tr><td colspan="8" class="text-center muted">Chưa có giao dịch.</td></tr>';
 }
 
+function _fmtInvDim(v) {
+  const n = Number(v);
+  if (Number.isNaN(n)) return '—';
+  return String(Math.round(n * 1000) / 1000);
+}
+
+function _qualityStatusVi(code) {
+  const u = String(code || '').trim().toUpperCase();
+  if (!u) return '—';
+  const m = { GOOD: 'Tốt', NORMAL: 'Bình thường', POOR: 'Kém' };
+  const lab = m[u] || u;
+  return lab === u ? u : `${lab} (${u})`;
+}
+
+/** Ngày nhập kho: ưu tiên trường import_date; nếu trống thì lấy thời điểm bút toán nhập đầu tiên. */
+function _lockedImportDateDisplay(importDate, performedAtIso) {
+  const d = String(importDate ?? '').trim();
+  if (d) return _esc(d);
+  const iso = String(performedAtIso ?? '').trim();
+  if (iso) return _esc(fmtDt(iso));
+  return '—';
+}
+
 async function renderLockedItems() {
-  const [lots, ocs] = await Promise.all([
-    fetch('/api/inventory/lots?is_locked=true').then(r => r.json()),
-    fetch('/api/inventory/offcuts?is_locked=true').then(r => r.json()),
-  ]);
+  const host = document.getElementById('inv-locked-list');
+  if (!host) return;
+  let lots = [];
+  let offcuts = [];
+  try {
+    const r = await fetch('/api/inventory/locked-catalog');
+    if (!r.ok) throw new Error(String(r.status));
+    const j = await r.json();
+    lots = j.lots || [];
+    offcuts = j.offcuts || [];
+  } catch (e) {
+    console.warn('locked-catalog', e);
+    try {
+      const [a, b] = await Promise.all([
+        fetch('/api/inventory/lots?is_locked=true').then((x) => x.json()),
+        fetch('/api/inventory/offcuts?is_locked=true').then((x) => x.json()),
+      ]);
+      lots = Array.isArray(a) ? a : [];
+      offcuts = Array.isArray(b) ? b : [];
+    } catch (e2) {
+      host.innerHTML = '<p class="muted pad-20">Không tải được danh sách đang khóa.</p>';
+      return;
+    }
+  }
+
+  if (!lots.length && !offcuts.length) {
+    host.innerHTML = '<p class="muted pad-20">Không có bản ghi đang khóa.</p>';
+    return;
+  }
+
+  const lotEff = (l) => l.effective_status || (l.is_locked ? 'LOCKED' : 'ACTIVE');
+  const ocEff = (o) => o.effective_status || o.offcut_status || o.status || 'AVAILABLE';
+
+  const lotRows = lots.map((l) => {
+    const rem = _fmtInvDim(l.remaining_length_m);
+    const wid = _fmtInvDim(l.original_width_m);
+    const olen = _fmtInvDim(l.original_length_m);
+    const loc = (l.storage_location && String(l.storage_location).trim()) ? _esc(l.storage_location) : '—';
+    const rid = (l.locked_by_request_id && String(l.locked_by_request_id).trim()) ? _esc(l.locked_by_request_id) : '—';
+    const wsid = (l.locked_by_workstream_id && String(l.locked_by_workstream_id).trim()) ? _esc(l.locked_by_workstream_id) : '—';
+    const nm = String(l.material_name ?? '').trim();
+    const nmDisp = nm
+      ? `<span title="${_esc(nm)}">${_esc(nm.length > 40 ? `${nm.slice(0, 38)}…` : nm)}</span>`
+      : '—';
+    const ft = (l.film_type && String(l.film_type).trim()) ? _esc(l.film_type) : '—';
+    const by = (l.import_performed_by && String(l.import_performed_by).trim()) ? _esc(l.import_performed_by) : '—';
+    const idDt = _lockedImportDateDisplay(l.import_date, l.import_performed_at);
+    return `<tr>
+      <td><strong>${_esc(l.lot_id)}</strong></td>
+      <td>${_esc(l.material_code)}</td>
+      <td style="max-width:160px">${nmDisp}</td>
+      <td><small>${ft}</small></td>
+      <td>${lotStatusChip(lotEff(l))}</td>
+      <td><strong>${rem}</strong></td>
+      <td>${wid}</td>
+      <td>${olen}</td>
+      <td><small>${loc}</small></td>
+      <td><small>${rid}</small></td>
+      <td><small>${wsid}</small></td>
+      <td><small>${idDt}</small></td>
+      <td><small>${by}</small></td>
+      <td class="inv-locked-col-act"><button type="button" class="btn btn-outline btn-sm" onclick="openReleaseLockModal(${JSON.stringify('LOT')}, ${JSON.stringify(l.lot_id)})">Mở khóa</button></td>
+    </tr>`;
+  });
+
+  const ocRows = offcuts.map((o) => {
+    const w = _fmtInvDim(o.width_m);
+    const len = _fmtInvDim(o.length_m);
+    const ar = _fmtInvDim(o.area_m2);
+    const loc = (o.storage_location && String(o.storage_location).trim()) ? _esc(o.storage_location) : '—';
+    const pl = (o.parent_lot_id && String(o.parent_lot_id).trim()) ? _esc(o.parent_lot_id) : '—';
+    const rid = (o.locked_by_request_id && String(o.locked_by_request_id).trim()) ? _esc(o.locked_by_request_id) : '—';
+    const wsid = (o.locked_by_workstream_id && String(o.locked_by_workstream_id).trim()) ? _esc(o.locked_by_workstream_id) : '—';
+    const qs = _esc(_qualityStatusVi(o.quality_status));
+    const nm = String(o.material_name ?? '').trim();
+    const nmDisp = nm
+      ? `<span title="${_esc(nm)}">${_esc(nm.length > 36 ? `${nm.slice(0, 34)}…` : nm)}</span>`
+      : '—';
+    const ft = (o.film_type && String(o.film_type).trim()) ? _esc(o.film_type) : '—';
+    const cfr = (o.created_from_request_id && String(o.created_from_request_id).trim()) ? _esc(o.created_from_request_id) : '—';
+    const by = (o.import_performed_by && String(o.import_performed_by).trim()) ? _esc(o.import_performed_by) : '—';
+    const idDt = _lockedImportDateDisplay(o.import_date, o.import_performed_at);
+    return `<tr>
+      <td><strong>${_esc(o.offcut_id)}</strong></td>
+      <td>${_esc(o.material_code)}</td>
+      <td style="max-width:140px">${nmDisp}</td>
+      <td><small>${ft}</small></td>
+      <td>${lotStatusChip(ocEff(o))}</td>
+      <td><strong>${w}</strong>×<strong>${len}</strong></td>
+      <td>${ar}</td>
+      <td><small>${qs}</small></td>
+      <td><small>${loc}</small></td>
+      <td><small>${pl}</small></td>
+      <td><small>${cfr}</small></td>
+      <td><small>${rid}</small></td>
+      <td><small>${wsid}</small></td>
+      <td><small>${idDt}</small></td>
+      <td><small>${by}</small></td>
+      <td class="inv-locked-col-act"><button type="button" class="btn btn-outline btn-sm" onclick="openReleaseLockModal(${JSON.stringify('OFFCUT')}, ${JSON.stringify(o.offcut_id)})">Mở khóa</button></td>
+    </tr>`;
+  });
+
   const parts = [];
-  if (lots.length) parts.push(`<h4 class="inv-locked-h">LOT</h4><ul class="inv-locked-ul">${lots.map(l => `<li><strong>${l.lot_id}</strong> — ${l.material_code} — còn ${l.remaining_length_m}m
-    <button class="btn btn-outline btn-sm" style="margin-left:8px" onclick="openReleaseLockModal('LOT','${l.lot_id}')">Mở khóa</button></li>`).join('')}</ul>`);
-  if (ocs.length) parts.push(`<h4 class="inv-locked-h">Mảnh dư</h4><ul class="inv-locked-ul">${ocs.map(o => `<li><strong>${o.offcut_id}</strong> — ${o.material_code}
-    <button class="btn btn-outline btn-sm" style="margin-left:8px" onclick="openReleaseLockModal('OFFCUT','${o.offcut_id}')">Mở khóa</button></li>`).join('')}</ul>`);
-  document.getElementById('inv-locked-list').innerHTML = parts.length ? parts.join('') : '<p class="muted pad-20">Không có bản ghi đang khóa.</p>';
+  if (lotRows.length) {
+    parts.push(`<div class="inv-locked-table-wrap"><h4 class="inv-locked-h">Cuộn LOT</h4><div class="table-wrap"><table class="data-table inv-locked-data-table"><thead><tr>
+      <th>Mã LOT</th><th>Mã vật tư</th><th>Tên vật tư</th><th>Loại phim</th><th>Trạng thái tồn</th>
+      <th>Còn (m)</th><th>Rộng (m)</th><th>Dài gốc (m)</th><th>Vị trí</th>
+      <th>Đơn đang khóa</th><th>Luồng khóa</th><th>Ngày nhập kho</th><th>Người nhập kho</th>
+      <th class="inv-locked-col-act">Thao tác</th>
+    </tr></thead><tbody>${lotRows.join('')}</tbody></table></div></div>`);
+  }
+  if (ocRows.length) {
+    parts.push(`<div class="inv-locked-table-wrap"><h4 class="inv-locked-h">Mảnh dư</h4><div class="table-wrap"><table class="data-table inv-locked-data-table"><thead><tr>
+      <th>Mã mảnh dư</th><th>Mã vật tư</th><th>Tên vật tư</th><th>Loại phim</th><th>Trạng thái tồn</th>
+      <th>R×D (m)</th><th>Diện tích (m²)</th><th>Chất lượng</th><th>Vị trí</th><th>Lô cha</th>
+      <th>Đơn tạo mảnh</th><th>Đơn đang khóa</th><th>Luồng khóa</th><th>Ngày nhập kho</th><th>Người nhập kho</th>
+      <th class="inv-locked-col-act">Thao tác</th>
+    </tr></thead><tbody>${ocRows.join('')}</tbody></table></div></div>`);
+  }
+  host.innerHTML = parts.join('');
 }
 
 function closeInvModal() { document.getElementById('inv-modal-overlay')?.remove(); }
 
-function openInvModal(title, innerHtml, footerHtml) {
+function openInvModal(title, innerHtml, footerHtml, afterOpen) {
   closeInvModal();
   const m = document.createElement('div');
   m.className = 'modal-overlay inv-modal-overlay';
@@ -4418,6 +6257,9 @@ function openInvModal(title, innerHtml, footerHtml) {
     <div class="inv-modal-foot">${footerHtml}</div></div>`;
   m.addEventListener('click', ev => { if (ev.target === m) closeInvModal(); });
   document.body.appendChild(m);
+  if (typeof afterOpen === 'function') {
+    try { afterOpen(m); } catch (e) { console.warn('openInvModal afterOpen', e); }
+  }
 }
 
 window.openImportLotModal = function() {
@@ -4466,34 +6308,70 @@ window.submitImportLot = async function() {
   } catch (e) { toast('error', 'Lỗi', e.message); }
 };
 
-window.openImportOffcutModal = function() {
-  openInvModal('Nhập mảnh dư thủ công', `
-    <p class="muted" style="font-size:12px;margin-bottom:10px">Nếu không có parent_lot_id thì <strong>created_reason</strong> bắt buộc.</p>
+window.openImportOffcutModal = async function () {
+  let mcOptions = '<option value="">— Chọn mã vật tư —</option>';
+  try {
+    const r = await fetch('/api/inventory/material-codes');
+    const arr = await r.json();
+    if (Array.isArray(arr)) {
+      mcOptions += arr
+        .filter((mc) => String(mc || '').trim())
+        .map((mc) => {
+          const v = String(mc).trim();
+          return `<option value="${_esc(v)}">${_esc(v)}</option>`;
+        })
+        .join('');
+    }
+  } catch (e) {
+    console.warn('openImportOffcutModal material-codes', e);
+  }
+  openInvModal(
+    'Nhập mảnh dư thủ công',
+    `
+    <p class="muted" style="font-size:12px;margin-bottom:10px">Nếu không nhập <strong>mã lô cha</strong> thì bắt buộc nhập <strong>lý do tạo</strong> mảnh dư.</p>
     <div class="form-grid">
-      <div class="field-group"><label>offcut_id <span class="req">*</span></label><input id="ioc-id" class="field-input"></div>
-      <div class="field-group"><label>parent_lot_id</label><input id="ioc-pl" class="field-input" placeholder="LOT-JB20-001"></div>
-      <div class="field-group"><label>material_code <span class="req">*</span></label><input id="ioc-mc" class="field-input" value="JB20"></div>
-      <div class="field-group"><label>width_m / length_m <span class="req">*</span></label>
-        <input type="number" id="ioc-w" class="field-input" value="1.52" step="0.01" style="width:48%">
-        <input type="number" id="ioc-l" class="field-input" value="1.2" step="0.01" style="width:48%"></div>
-      <div class="field-group"><label>quality_status <span class="req">*</span></label>
-        <select id="ioc-qs" class="field-input"><option>GOOD</option><option>NORMAL</option><option>POOR</option></select></div>
-      <div class="field-group"><label>storage_location <span class="req">*</span></label><input id="ioc-sl" class="field-input" value="OFFCUT-RACK-C"></div>
-      <div class="field-group full-width"><label>created_reason (khi không có parent)</label><input id="ioc-cr" class="field-input"></div>
-      <div class="field-group"><label>performed_by</label><input id="ioc-by" class="field-input" value="AD-001"></div>
-      <div class="field-group full-width"><label>note</label><input id="ioc-note" class="field-input"></div>
-    </div>`, `<button type="button" class="btn btn-outline" onclick="closeInvModal()">Hủy</button>
-    <button type="button" class="btn btn-primary" onclick="submitImportOffcut()">Lưu</button>`);
+      <div class="field-group"><label>Mã mảnh dư <span class="req">*</span></label><input id="ioc-id" class="field-input" placeholder="VD: SUBLOT-JB20-001"></div>
+      <div class="field-group"><label>Mã lô cha</label><input id="ioc-pl" class="field-input" placeholder="VD: LOT-JB20-001"></div>
+      <div class="field-group"><label>Mã vật tư <span class="req">*</span></label>
+        <select id="ioc-mc" class="field-input">${mcOptions}</select></div>
+      <div class="field-group"><label>Chiều rộng (m) <span class="req">*</span></label>
+        <input type="number" id="ioc-w" class="field-input" value="1.52" step="0.01" min="0.01"></div>
+      <div class="field-group"><label>Chiều dài (m) <span class="req">*</span></label>
+        <input type="number" id="ioc-l" class="field-input" value="1.2" step="0.01" min="0.01"></div>
+      <div class="field-group"><label>Trạng thái chất lượng <span class="req">*</span></label>
+        <select id="ioc-qs" class="field-input">
+          <option value="GOOD">Tốt (GOOD)</option>
+          <option value="NORMAL" selected>Bình thường (NORMAL)</option>
+          <option value="POOR">Kém (POOR)</option>
+        </select></div>
+      <div class="field-group"><label>Vị trí lưu kho <span class="req">*</span></label><input id="ioc-sl" class="field-input" value="OFFCUT-RACK-C" placeholder="VD: OFFCUT-RACK-C"></div>
+      <div class="field-group full-width"><label>Lý do tạo <span class="muted" style="font-weight:400">(khi không có lô cha)</span></label><input id="ioc-cr" class="field-input" placeholder="VD: Nhập thừa từ cắt thử"></div>
+      <div class="field-group"><label>Người thực hiện</label><input id="ioc-by" class="field-input" value="AD-001"></div>
+      <div class="field-group full-width"><label>Ghi chú</label><input id="ioc-note" class="field-input"></div>
+    </div>`,
+    `<button type="button" class="btn btn-outline" onclick="closeInvModal()">Hủy</button>
+    <button type="button" class="btn btn-primary" onclick="submitImportOffcut()">Lưu</button>`,
+    () => {
+      const sel = document.getElementById('ioc-mc');
+      if (!sel) return;
+      const want = 'JB20';
+      const opt = Array.from(sel.options).find((o) => o.value === want);
+      if (opt) sel.value = want;
+      else if (sel.options.length > 1) sel.selectedIndex = 1;
+    },
+  );
 };
 
 window.submitImportOffcut = async function() {
   const parent_lot_id = document.getElementById('ioc-pl').value.trim();
   const created_reason = document.getElementById('ioc-cr').value.trim();
-  if (!parent_lot_id && !created_reason) { toast('warning', 'Thiếu lý do', 'Nhập parent_lot_id hoặc created_reason.'); return; }
+  const material_code = document.getElementById('ioc-mc').value.trim();
+  if (!material_code) { toast('warning', 'Thiếu mã vật tư', 'Chọn mã vật tư trong danh sách kho.'); return; }
+  if (!parent_lot_id && !created_reason) { toast('warning', 'Thiếu lý do', 'Nhập mã lô cha hoặc lý do tạo mảnh dư.'); return; }
   const payload = {
     offcut_id: document.getElementById('ioc-id').value.trim(),
     parent_lot_id: parent_lot_id || null,
-    material_code: document.getElementById('ioc-mc').value.trim(),
+    material_code,
     width_m: parseFloat(document.getElementById('ioc-w').value),
     length_m: parseFloat(document.getElementById('ioc-l').value),
     quality_status: document.getElementById('ioc-qs').value,
@@ -4654,11 +6532,11 @@ let _rlType = 'LOT', _rlId = '';
 window.openReleaseLockModal = function(st, sid) {
   _rlType = st || 'LOT';
   _rlId = sid || '';
-  openInvModal('Mở khóa Soft Lock', `
+  openInvModal('Mở khóa tạm (kho)', `
     <div class="form-grid">
       <div class="field-group"><label>Loại nguồn</label>
-        <select id="rl-st" class="field-input"><option value="LOT" ${_rlType==='LOT'?'selected':''}>LOT</option><option value="OFFCUT" ${_rlType==='OFFCUT'?'selected':''}>OFFCUT</option></select></div>
-      <div class="field-group"><label>Mã nguồn <span class="req">*</span></label><input id="rl-sid" class="field-input" value="${_rlId}"></div>
+        <select id="rl-st" class="field-input"><option value="LOT" ${_rlType==='LOT'?'selected':''}>Cuộn LOT</option><option value="OFFCUT" ${_rlType==='OFFCUT'?'selected':''}>Mảnh dư</option></select></div>
+      <div class="field-group"><label>Mã nguồn <span class="req">*</span></label><input id="rl-sid" class="field-input" value="${_esc(_rlId)}"></div>
       <div class="field-group full-width"><label>Lý do <span class="req">*</span></label><input id="rl-reason" class="field-input"></div>
       <div class="field-group"><label>Thực hiện bởi</label><input id="rl-by" class="field-input" value="Admin"></div>
       <div class="field-group"><label>Mã yêu cầu liên quan</label><input id="rl-rid" class="field-input" placeholder="REQ-..."></div>
@@ -4940,6 +6818,12 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   _wireReasonModalOnce();
+  document.querySelector('#tab-workstreams table.data-table thead')?.addEventListener('click', (ev) => {
+    const th = ev.target.closest('th.ws-sortable');
+    if (!th) return;
+    const k = th.getAttribute('data-ws-sort');
+    if (k && typeof window.wsToggleWorkstreamSort === 'function') window.wsToggleWorkstreamSort(k);
+  });
 });
 
 

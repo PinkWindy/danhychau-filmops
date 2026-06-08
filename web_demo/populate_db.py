@@ -27,6 +27,7 @@ def map_lot_id(old_id):
     val = val.replace("LOT-FILMA-001", "LOT-JB20-001")
     val = val.replace("LOT-FILMA-002", "LOT-JB20-002")
     val = val.replace("LOT-FILMB-001", "LOT-JB20-003")
+    val = val.replace("LOT-FILMC-001", "LOT-RS20-001")
     return val
 
 def map_offcut_id(old_id):
@@ -36,6 +37,7 @@ def map_offcut_id(old_id):
     val = val.replace("SUBLOT-FILMA-001", "SUBLOT-JB20-001")
     val = val.replace("SUBLOT-FILMA-002", "SUBLOT-JB20-002")
     val = val.replace("SUBLOT-FILMB-001", "SUBLOT-JB20-003")
+    val = val.replace("SUBLOT-FILMC-001", "SUBLOT-RS20-001")
     return val
 
 
@@ -751,7 +753,7 @@ def clean_and_load_csv():
             planned_cut_block="152x132",
             planned_deduction_length_m=1.32,
             allocated_source_type="LOT",
-            allocated_source_id="LOT-FILMC-001",
+            allocated_source_id="LOT-RS20-001",
             created_at="2026-06-03 15:45:00"
         ),
         DbRequest(

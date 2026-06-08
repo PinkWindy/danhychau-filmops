@@ -9,7 +9,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@700;800;900&display=swap" rel="stylesheet">
 <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-<link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="/static/style.css?v=14">
 </head>
 <body>
 
@@ -253,7 +253,7 @@
             <div class="confidence-bar"><div class="confidence-fill" id="confidence-fill" style="width:0%"></div></div>
             <span id="confidence-pct">0%</span>
           </div>
-          <div class="ocr-fields" id="ocr-fields-form"></div>
+          <div id="ocr-fields-form" class="ocr-fields-form-root"></div>
           <div id="ocr-services-box" style="padding:0 16px 12px">
             <div class="hitl-alert">
               <i class="fa-solid fa-layer-group"></i>
@@ -263,17 +263,18 @@
               </div>
             </div>
           </div>
-          <div class="ocr-actions" style="display:flex; gap:10px; flex-wrap:wrap">
-            <button class="btn btn-green" id="btn-confirm-ocr" style="flex:1">
+          <div class="ocr-actions" style="display:flex; gap:10px; flex-wrap:wrap; align-items:center">
+            <button type="button" class="btn btn-green" id="btn-confirm-ocr" style="flex:1; min-width:140px">
               <i class="fa-solid fa-check-circle"></i> Xác nhận & Tạo đơn thi công
             </button>
-            <button class="btn btn-outline btn-danger" id="btn-cancel-ocr">
+            <button type="button" class="btn btn-outline btn-danger" id="btn-cancel-ocr" title="">
               <i class="fa-solid fa-xmark"></i> Hủy phiếu
             </button>
-            <button class="btn btn-outline btn-warning" id="btn-rollback-ocr" style="display:none; flex:1">
-              <i class="fa-solid fa-rotate-left"></i> Hủy xác nhận (Rollback)
+            <button type="button" class="btn btn-outline btn-warning" id="btn-rollback-ocr" style="display:none" title="">
+              <i class="fa-solid fa-rotate-left"></i> Hủy xác nhận (Rollback đơn)
             </button>
           </div>
+          <p id="ocr-actions-hint" class="muted" style="font-size:12px;padding:4px 16px 16px;margin:0;line-height:1.5"></p>
         </div>
       </div>
       <div id="ocr-empty-state" style="display:flex;align-items:center;justify-content:center;min-height:300px">
@@ -444,6 +445,7 @@
                 <span id="board-req-status" class="status-badge"></span>
                 <span id="board-multi-ws-badge" style="display:none" class="status-badge ws-type-ppf">Đa luồng thi công</span>
               </div>
+              <p id="board-req-refs" class="muted" style="font-size:12px;margin:8px 0 0;line-height:1.55;display:none"></p>
             </div>
             <div style="display:flex;gap:8px">
               <button class="btn btn-outline btn-sm" id="btn-run-step">
@@ -475,23 +477,47 @@
 
           <!-- Khu vực thao tác -->
           <div class="work-area">
-            <div class="detail-card">
-              <h4><i class="fa-solid fa-car"></i> Thông Tin Xe & Khách Hàng</h4>
-              <div class="detail-grid">
-                <span class="dl">Đại lý</span><span class="dv" id="det-dealer">—</span>
-                <span class="dl">Kênh tạo</span><span class="dv" id="det-source-channel">—</span>
-                <span class="dl">Số phiếu YC</span><span class="dv" id="det-request-no">—</span>
-                <span class="dl">Số HĐ</span><span class="dv" id="det-contract-no">—</span>
-                <span class="dl">Ngày yêu cầu</span><span class="dv" id="det-request-date">—</span>
-                <span class="dl">Ảnh OCR gốc</span><span class="dv" id="det-ocr-image">—</span>
-                <span class="dl">Mã KH / Xe</span><span class="dv" id="det-ids"><span id="det-customer-id">—</span> · <span id="det-vehicle-id">—</span></span>
-                <span class="dl">Khách hàng</span><span class="dv" id="det-customer">—</span>
-                <span class="dl">Điện thoại</span><span class="dv" id="det-customer-phone">—</span>
-                <span class="dl">Địa chỉ</span><span class="dv" id="det-customer-address">—</span>
-                <span class="dl">Dòng xe</span><span class="dv" id="det-model">—</span>
-                <span class="dl">Tư vấn khách hàng / TVBH</span><span class="dv" id="det-sales-consultant">—</span>
-                <span class="dl">Số VIN</span><span class="dv" id="det-vin">—</span>
-                <span class="dl">Hạn giao xe</span><span class="dv highlight-red" id="det-deadline">—</span>
+            <div class="detail-card req-detail-master">
+              <h4 class="req-detail-main-title"><i class="fa-solid fa-address-card"></i> Thông tin xe &amp; khách hàng</h4>
+              <p class="req-detail-lead muted">Bố cục theo nhóm — dễ quét nhanh giống màn kiểm tra OCR.</p>
+              <div class="req-detail-stack">
+                <div class="ocr-form-section">
+                  <h4 class="ocr-form-section-title"><i class="fa-solid fa-building"></i> Đại lý &amp; phiếu yêu cầu</h4>
+                  <div class="req-section-body detail-grid">
+                    <span class="dl">Đại lý</span><span class="dv" id="det-dealer">—</span>
+                    <span class="dl">Kênh tạo</span><span class="dv" id="det-source-channel">—</span>
+                    <span class="dl">Số phiếu / YC</span><span class="dv" id="det-request-no">—</span>
+                    <span class="dl">Số hợp đồng (Số HĐ)</span><span class="dv" id="det-contract-no">—</span>
+                    <span class="dl">Ngày yêu cầu</span><span class="dv" id="det-request-date">—</span>
+                    <span class="dl">Ảnh OCR gốc</span><span class="dv" id="det-ocr-image">—</span>
+                    <span class="dl">Tư vấn bán hàng (TVBH)</span><span class="dv" id="det-sales-consultant">—</span>
+                  </div>
+                </div>
+                <div class="ocr-form-section">
+                  <h4 class="ocr-form-section-title"><i class="fa-solid fa-list-ol"></i> Theo dõi</h4>
+                  <div class="req-section-body detail-grid">
+                    <span class="dl">Số thứ tự (trong năm)</span><span class="dv" id="det-sequence-year">—</span>
+                    <span class="dl">Số thứ tự / tháng</span><span class="dv" id="det-sequence-month">—</span>
+                  </div>
+                </div>
+                <div class="ocr-form-section">
+                  <h4 class="ocr-form-section-title"><i class="fa-solid fa-user"></i> Khách hàng</h4>
+                  <div class="req-section-body detail-grid">
+                    <span class="dl">Mã khách hàng</span><span class="dv"><span id="det-customer-id">—</span></span>
+                    <span class="dl">Tên khách hàng</span><span class="dv" id="det-customer">—</span>
+                    <span class="dl">Điện thoại</span><span class="dv" id="det-customer-phone">—</span>
+                    <span class="dl">Địa chỉ</span><span class="dv" id="det-customer-address">—</span>
+                  </div>
+                </div>
+                <div class="ocr-form-section">
+                  <h4 class="ocr-form-section-title"><i class="fa-solid fa-car"></i> Xe</h4>
+                  <div class="req-section-body detail-grid">
+                    <span class="dl">Mã hồ sơ xe</span><span class="dv"><span id="det-vehicle-id">—</span></span>
+                    <span class="dl">Dòng xe</span><span class="dv" id="det-model">—</span>
+                    <span class="dl">Số VIN</span><span class="dv" id="det-vin">—</span>
+                    <span class="dl">Hạn giao xe</span><span class="dv highlight-red" id="det-deadline">—</span>
+                  </div>
+                </div>
               </div>
               <div class="cutting-group-box" id="cutting-group-box" style="display:none">
                 <i class="fa-solid fa-layer-group cg-icon"></i>
@@ -514,7 +540,7 @@
             <div class="detail-card" id="det-mat-app-card" style="display:none;margin-top:10px">
               <h4><i class="fa-solid fa-boxes-stacked"></i> Vật tư áp dụng</h4>
               <div id="det-mat-app-warn" class="hitl-alert" style="display:none;margin-bottom:8px;border-color:rgba(255,193,7,0.45);background:rgba(255,193,7,0.1)"></div>
-              <div id="det-mat-app-body" style="font-size:12px"></div>
+              <div id="det-mat-app-body" style="font-size:14px"></div>
             </div>
 
             <div class="detail-card" id="det-audit-card" style="display:none;margin-top:10px">
@@ -538,7 +564,7 @@
                   <i class="fa-solid fa-layer-group"></i>
                   <div>
                     <strong>Phê duyệt từng luồng thi công</strong>
-                    <p>Mỗi luồng có thể phê duyệt độc lập. Sau khi duyệt → Soft Lock tự động tạo & lệnh thi công gửi cho KTV.</p>
+                    <p>Mỗi luồng có thể phê duyệt độc lập. Sau khi duyệt → Soft Lock tự động tạo & lệnh thi công gửi cho KTV. <strong>Nút phê duyệt / chỉnh sửa</strong> nằm ở phần <strong>Tiến độ từng luồng thi công</strong> bên dưới — ô tóm tắt phía trên có nút <em>Xem chi tiết &amp; thao tác</em> để cuộn xuống đúng thẻ luồng.</p>
                   </div>
                 </div>
                 <div id="ws-approval-cards"></div>
@@ -637,9 +663,9 @@
       <p>Dán Phim PPF & Dán Phim Cách Nhiệt — xem và thao tác theo từng luồng</p>
     </div>
     <div class="panel">
-      <div class="panel-header">
+      <div class="panel-header ws-panel-head">
         <h3><i class="fa-solid fa-list"></i> Danh sách luồng thi công</h3>
-        <div style="display:flex;gap:8px">
+        <div class="ws-table-toolbar">
           <select id="ws-filter-type" class="field-input" style="width:200px;padding:6px 10px;font-size:12px">
             <option value="">Tất cả loại</option>
             <option value="PPF_INSTALLATION">Dán Phim PPF</option>
@@ -653,17 +679,48 @@
             <option value="IN_PROGRESS">Đang thi công</option>
             <option value="CLOSED">Đã hoàn tất</option>
           </select>
+          <span class="ws-toolbar-label muted">Ngày tạo đơn</span>
+          <label class="ws-date-wrap">Từ
+            <input type="date" id="ws-filter-start-from" class="field-input ws-date-input" autocomplete="off" title="Lọc theo ngày tạo đơn" />
+          </label>
+          <label class="ws-date-wrap">đến
+            <input type="date" id="ws-filter-start-to" class="field-input ws-date-input" autocomplete="off" title="Lọc theo ngày tạo đơn" />
+          </label>
         </div>
       </div>
       <div class="table-wrap">
         <table class="data-table">
           <thead><tr>
-            <th>Mã luồng</th><th>Mã đơn</th><th>Loại thi công</th><th>Đội</th>
-            <th>Loại phim</th>
-            <th>Trạng thái</th><th>Bắt đầu</th><th>Hoàn tất</th><th>Thao tác (Quản lý)</th><th>Thao tác (KTV)</th>
+            <th class="ws-sortable" data-ws-sort="workstream_id" title="Sắp xếp">Mã luồng <i class="fa-solid fa-sort ws-sort-icon" aria-hidden="true"></i></th>
+            <th class="ws-sortable" data-ws-sort="request_id" title="Sắp xếp">Mã đơn <i class="fa-solid fa-sort ws-sort-icon" aria-hidden="true"></i></th>
+            <th class="ws-sortable" data-ws-sort="request_created_at" title="Sắp xếp">Ngày tạo đơn <i class="fa-solid fa-sort ws-sort-icon" aria-hidden="true"></i></th>
+            <th class="ws-sortable" data-ws-sort="workstream_type" title="Sắp xếp">Loại thi công <i class="fa-solid fa-sort ws-sort-icon" aria-hidden="true"></i></th>
+            <th class="ws-sortable" data-ws-sort="technician_name" title="Sắp xếp">Tên KTV <i class="fa-solid fa-sort ws-sort-icon" aria-hidden="true"></i></th>
+            <th class="ws-sortable" data-ws-sort="requested_delivery_time" title="Sắp xếp">Hạn giao xe <i class="fa-solid fa-sort ws-sort-icon" aria-hidden="true"></i></th>
+            <th class="ws-sortable" data-ws-sort="status" title="Sắp xếp">Trạng thái <i class="fa-solid fa-sort ws-sort-icon" aria-hidden="true"></i></th>
+            <th class="ws-sortable" data-ws-sort="started_at" title="Sắp xếp">Bắt đầu <i class="fa-solid fa-sort ws-sort-icon" aria-hidden="true"></i></th>
+            <th class="ws-sortable" data-ws-sort="completed_at" title="Sắp xếp">Hoàn tất <i class="fa-solid fa-sort ws-sort-icon" aria-hidden="true"></i></th>
+            <th class="ws-sortable" data-ws-sort="actions_mgr" title="Sắp xếp theo trạng thái">Thao tác (Quản lý) <i class="fa-solid fa-sort ws-sort-icon" aria-hidden="true"></i></th>
+            <th class="ws-sortable" data-ws-sort="actions_ktv" title="Sắp xếp theo trạng thái">Thao tác (KTV) <i class="fa-solid fa-sort ws-sort-icon" aria-hidden="true"></i></th>
           </tr></thead>
           <tbody id="table-ws-body"></tbody>
         </table>
+      </div>
+      <div class="ws-pagination-bar" id="ws-pagination-wrap">
+        <span id="ws-page-info" class="ws-page-info muted"></span>
+        <div class="ws-pagination-controls">
+          <button type="button" class="btn btn-outline btn-sm" id="ws-page-prev">Trước</button>
+          <button type="button" class="btn btn-outline btn-sm" id="ws-page-next">Sau</button>
+          <label class="ws-page-size-wrap muted">Hiển thị
+            <select id="ws-page-size" class="field-input ws-page-size-select">
+              <option value="10" selected>10</option>
+              <option value="20">20</option>
+              <option value="50">50</option>
+              <option value="100">100</option>
+            </select>
+            / trang
+          </label>
+        </div>
       </div>
     </div>
   </div>
@@ -758,7 +815,7 @@
   <div class="tab-pane" id="tab-inventory">
     <div class="section-header">
       <h2><i class="fa-solid fa-warehouse"></i> Quản Lý Kho — LOT & Mảnh Dư</h2>
-      <p>Nhập / xuất / clear / release lock — mọi thao tác ghi Inventory Transaction & Audit Log.</p>
+      <p>Nhập / xuất / hủy tồn / mở khóa — mọi thao tác ghi sổ giao dịch kho và nhật ký kiểm tra (audit).</p>
       <p style="font-size:11px;opacity:0.88;margin-top:6px"><i class="fa-solid fa-circle-check" style="color:var(--teal-light);margin-right:6px"></i>Inventory Admin smoke test: <strong>18/18 PASS</strong> — báo cáo: <code style="font-size:10px">audit/inventory-admin-test-report.md</code></p>
     </div>
     <div id="inv-kpi-row" class="inv-kpi-row"></div>
@@ -794,6 +851,7 @@
         <option value="">Mọi loại giao dịch</option>
         <option value="IMPORT_LOT">Nhập LOT mới</option>
         <option value="IMPORT_OFFCUT_MANUAL">Nhập mảnh dư thủ công</option>
+        <option value="IMPORT_OFFCUT_WORKSTREAM">Nhập mảnh dư từ hoàn tất luồng (KTV)</option>
         <option value="MANUAL_ISSUE_LOT">Xuất LOT thủ công</option>
         <option value="MANUAL_ISSUE_OFFCUT">Xuất mảnh dư thủ công</option>
         <option value="CLEAR_LOT">Clear LOT (Xóa/Thanh lý)</option>
@@ -867,7 +925,11 @@
       </div>
     </div>
     <div id="inv-panel-locked" class="inv-panel" style="display:none">
-      <div class="panel"><div class="panel-header"><h3><i class="fa-solid fa-lock"></i> LOT / Mảnh dư đang Soft Lock</h3></div>
+      <div class="panel"><div class="panel-header"><h3><i class="fa-solid fa-lock"></i> Cuộn LOT &amp; mảnh dư đang khóa tạm theo luồng</h3></div>
+        <p class="muted" style="font-size:11px;padding:0 16px 8px;line-height:1.45">
+          <strong>Ngày nhập kho</strong> ưu tiên ngày trên chứng từ nhập; nếu không có thì hiển thị thời điểm bút toán nhập đầu tiên trong sổ giao dịch kho.
+          <strong>Người nhập kho</strong> là người thực hiện thao tác nhập LOT, nhập mảnh dư thủ công, hoặc bút toán nhập mảnh dư khi <strong>KTV hoàn tất luồng</strong> (cùng sổ giao dịch kho).
+        </p>
         <div id="inv-locked-list"></div>
       </div>
     </div>
@@ -1064,118 +1126,83 @@
     </div>
   </div>
 
-  <!-- MODAL XEM NHANH ĐƠN THI CÔNG -->
+  <!-- MODAL XEM NHANH ĐƠN THI CÔNG — bố cục panel (giống chi tiết đơn / OCR) -->
   <div class="modal-overlay" id="quick-req-modal" style="display:none; z-index: 9999;">
-    <div class="demo-modal" style="max-width:600px">
+    <div class="demo-modal quick-req-modal" style="max-width: 720px">
       <div class="demo-modal-header" style="display:flex;justify-content:space-between;align-items:flex-start">
-        <h3><i class="fa-solid fa-file-invoice"></i> Chi Tiết Đơn: <span id="quick-req-id"></span></h3>
+        <div>
+          <h3 style="margin-bottom:4px"><i class="fa-solid fa-file-invoice"></i> Chi tiết đơn: <span id="quick-req-id"></span></h3>
+          <p id="quick-req-ws-caption" class="muted" style="font-size:11px;margin:0;line-height:1.45">—</p>
+        </div>
         <button type="button" class="btn btn-icon btn-sm" onclick="document.getElementById('quick-req-modal').style.display='none'"><i class="fa-solid fa-xmark"></i></button>
       </div>
-      <div style="padding: 16px;">
-        <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px;">
+      <div class="quick-req-body">
+        <div class="quick-req-summary">
           <div>
-            <label style="font-size: 11px; color: var(--text-secondary); display:block; margin-bottom: 2px;">Trạng thái</label>
-            <div id="quick-req-status" style="font-weight: bold; font-size: 12px; display: inline-block;"></div>
-          </div>
-          <div>
-            <label style="font-size: 11px; color: var(--text-secondary); display:block; margin-bottom: 2px;">Đại lý</label>
-            <div id="quick-req-dealer" style="font-weight: bold;"></div>
-          </div>
-          <div>
-            <label style="font-size: 11px; color: var(--text-secondary); display:block; margin-bottom: 2px;">Khách hàng</label>
-            <div id="quick-req-customer" style="font-weight: bold;"></div>
-          </div>
-          <div>
-            <label style="font-size: 11px; color: var(--text-secondary); display:block; margin-bottom: 2px;">Điện thoại</label>
-            <div id="quick-req-phone" style="font-weight: bold;"></div>
-          </div>
-          <div>
-            <label style="font-size: 11px; color: var(--text-secondary); display:block; margin-bottom: 2px;">Dòng xe</label>
-            <div id="quick-req-model" style="font-weight: bold;"></div>
-          </div>
-          <div>
-            <label style="font-size: 11px; color: var(--text-secondary); display:block; margin-bottom: 2px;">Hạn giao xe</label>
-            <div id="quick-req-deadline" style="font-weight: bold;"></div>
-          </div>
-          <div>
-            <label style="font-size: 11px; color: var(--text-secondary); display:block; margin-bottom: 2px;">Số VIN (6 số cuối)</label>
-            <div id="quick-req-vin" style="font-weight: bold;"></div>
-          </div>
-          <div>
-            <label style="font-size: 11px; color: var(--text-secondary); display:block; margin-bottom: 2px;">Đội thi công</label>
-            <div id="quick-req-team" style="font-weight: bold;"></div>
+            <span class="dl">Trạng thái đơn</span>
+            <div id="quick-req-status" style="margin-top:4px"></div>
           </div>
         </div>
-        <div style="border-top: 1px solid var(--border-color); padding-top: 12px; margin-top: 12px;">
-           <label style="font-size: 11px; color: var(--text-secondary); display:block; margin-bottom: 4px;">Dịch vụ yêu cầu</label>
-           <div id="quick-req-services" style="font-weight: bold;"></div>
-        </div>
-        <div style="border-top: 1px solid var(--border-color); padding-top: 12px; margin-top: 12px;">
-          <h4 style="font-size: 12px; margin-bottom: 8px; color: var(--text-secondary);">Thông tin phê duyệt & Thi công luồng</h4>
-          <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 12px;">
-            <div>
-              <label style="font-size: 11px; color: var(--text-secondary); display:block; margin-bottom: 2px;">Tên quản lý duyệt</label>
-              <div id="quick-req-manager" style="font-weight: bold;"></div>
-            </div>
-            <div>
-              <label style="font-size: 11px; color: var(--text-secondary); display:block; margin-bottom: 2px;">Thời gian duyệt</label>
-              <div id="quick-req-manager-time" style="font-weight: bold;"></div>
-            </div>
-            <div>
-              <label style="font-size: 11px; color: var(--text-secondary); display:block; margin-bottom: 2px;">Ghi nhận KTV hoàn tất</label>
-              <div id="quick-req-tech" style="font-weight: bold;"></div>
-            </div>
-            <div>
-              <label style="font-size: 11px; color: var(--text-secondary); display:block; margin-bottom: 2px;">SĐT KTV</label>
-              <div id="quick-req-tech-phone" style="font-weight: bold;"></div>
-            </div>
-            <div>
-              <label style="font-size: 11px; color: var(--text-secondary); display:block; margin-bottom: 2px;">Thời gian hoàn tất</label>
-              <div id="quick-req-tech-time" style="font-weight: bold;"></div>
+        <div class="req-detail-stack quick-req-stack">
+          <div class="ocr-form-section">
+            <h4 class="ocr-form-section-title"><i class="fa-solid fa-building"></i> Đại lý &amp; phiếu yêu cầu</h4>
+            <div class="req-section-body detail-grid">
+              <span class="dl">Đại lý</span><span class="dv" id="quick-req-dealer">—</span>
+              <span class="dl">Kênh tạo</span><span class="dv" id="quick-req-source">—</span>
+              <span class="dl">Số phiếu / YC</span><span class="dv" id="quick-req-ticket">—</span>
+              <span class="dl">Số hợp đồng (Số HĐ)</span><span class="dv" id="quick-req-contract">—</span>
+              <span class="dl">Ngày yêu cầu</span><span class="dv" id="quick-req-date">—</span>
+              <span class="dl">Ảnh OCR gốc</span><span class="dv" id="quick-req-ocr-img">—</span>
+              <span class="dl">Tư vấn bán hàng (TVBH)</span><span class="dv" id="quick-req-sales">—</span>
             </div>
           </div>
-        </div>
-        <div style="border-top: 1px solid var(--border-color); padding-top: 12px; margin-top: 12px;">
-           <h4 style="font-size: 12px; margin-bottom: 8px; color: var(--text-secondary);">Thông tin chi tiết khác</h4>
-           <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 12px;">
-              <div>
-                <label style="font-size: 11px; color: var(--text-secondary); display:block; margin-bottom: 2px;">Kênh tạo</label>
-                <div id="quick-req-source" style="font-weight: bold;"></div>
-              </div>
-              <div>
-                <label style="font-size: 11px; color: var(--text-secondary); display:block; margin-bottom: 2px;">Số phiếu YC</label>
-                <div id="quick-req-ticket" style="font-weight: bold;"></div>
-              </div>
-              <div>
-                <label style="font-size: 11px; color: var(--text-secondary); display:block; margin-bottom: 2px;">Số HĐ</label>
-                <div id="quick-req-contract" style="font-weight: bold;"></div>
-              </div>
-              <div>
-                <label style="font-size: 11px; color: var(--text-secondary); display:block; margin-bottom: 2px;">Ngày yêu cầu</label>
-                <div id="quick-req-date" style="font-weight: bold;"></div>
-              </div>
-              <div>
-                <label style="font-size: 11px; color: var(--text-secondary); display:block; margin-bottom: 2px;">Ảnh OCR gốc</label>
-                <div id="quick-req-ocr-img" style="font-weight: bold;"></div>
-              </div>
-              <div>
-                <label style="font-size: 11px; color: var(--text-secondary); display:block; margin-bottom: 2px;">Mã KH / Xe</label>
-                <div id="quick-req-ids" style="font-weight: bold;"></div>
-              </div>
-              <div>
-                <label style="font-size: 11px; color: var(--text-secondary); display:block; margin-bottom: 2px;">Địa chỉ</label>
-                <div id="quick-req-address" style="font-weight: bold;"></div>
-              </div>
-              <div>
-                <label style="font-size: 11px; color: var(--text-secondary); display:block; margin-bottom: 2px;">Tư vấn khách hàng / TVBH</label>
-                <div id="quick-req-sales" style="font-weight: bold;"></div>
-              </div>
-           </div>
+          <div class="ocr-form-section">
+            <h4 class="ocr-form-section-title"><i class="fa-solid fa-list-ol"></i> Theo dõi</h4>
+            <div class="req-section-body detail-grid">
+              <span class="dl">Số thứ tự (trong năm)</span><span class="dv" id="quick-req-seq-year">—</span>
+              <span class="dl">Số thứ tự / tháng</span><span class="dv" id="quick-req-seq-month">—</span>
+            </div>
+          </div>
+          <div class="ocr-form-section">
+            <h4 class="ocr-form-section-title"><i class="fa-solid fa-user"></i> Khách hàng</h4>
+            <div class="req-section-body detail-grid">
+              <span class="dl">Mã khách hàng</span><span class="dv" id="quick-req-cust-id">—</span>
+              <span class="dl">Tên khách hàng</span><span class="dv" id="quick-req-customer">—</span>
+              <span class="dl">Điện thoại</span><span class="dv" id="quick-req-phone">—</span>
+              <span class="dl">Địa chỉ</span><span class="dv" id="quick-req-address">—</span>
+            </div>
+          </div>
+          <div class="ocr-form-section">
+            <h4 class="ocr-form-section-title"><i class="fa-solid fa-car"></i> Xe</h4>
+            <div class="req-section-body detail-grid">
+              <span class="dl">Mã hồ sơ xe</span><span class="dv" id="quick-req-veh-id">—</span>
+              <span class="dl">Dòng xe</span><span class="dv" id="quick-req-model">—</span>
+              <span class="dl">Số VIN (6 số cuối)</span><span class="dv" id="quick-req-vin">—</span>
+              <span class="dl">Hạn giao xe</span><span class="dv highlight-red" id="quick-req-deadline">—</span>
+            </div>
+          </div>
+          <div class="ocr-form-section">
+            <h4 class="ocr-form-section-title"><i class="fa-solid fa-screwdriver-wrench"></i> Dịch vụ yêu cầu</h4>
+            <div class="req-section-body">
+              <div id="quick-req-services" class="quick-req-services-text">—</div>
+            </div>
+          </div>
+          <div class="ocr-form-section">
+            <h4 class="ocr-form-section-title"><i class="fa-solid fa-user-check"></i> Phê duyệt &amp; thi công (luồng này)</h4>
+            <div class="req-section-body detail-grid">
+              <span class="dl">Đội thi công</span><span class="dv" id="quick-req-team">—</span>
+              <span class="dl">Quản lý duyệt</span><span class="dv" id="quick-req-manager">—</span>
+              <span class="dl">Thời gian duyệt</span><span class="dv" id="quick-req-manager-time">—</span>
+              <span class="dl">KTV thực hiện</span><span class="dv" id="quick-req-tech">—</span>
+              <span class="dl">SĐT KTV</span><span class="dv" id="quick-req-tech-phone">—</span>
+              <span class="dl">Thời gian hoàn tất luồng</span><span class="dv" id="quick-req-tech-time">—</span>
+            </div>
+          </div>
         </div>
       </div>
-      <div class="demo-modal-footer" style="display:flex; justify-content:flex-end;">
+      <div class="demo-modal-footer" style="display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px">
         <button class="btn btn-outline" onclick="document.getElementById('quick-req-modal').style.display='none'">Đóng</button>
-        <button class="btn btn-primary" style="margin-left:8px" onclick="document.getElementById('quick-req-modal').style.display='none'; chuyenDenDon(document.getElementById('quick-req-id').textContent)">Xem đầy đủ bên tab Đơn thi công</button>
+        <button class="btn btn-primary" onclick="document.getElementById('quick-req-modal').style.display='none'; chuyenDenDon(document.getElementById('quick-req-id').textContent)">Xem đầy đủ bên tab Đơn thi công</button>
       </div>
     </div>
   </div>
@@ -1535,7 +1562,7 @@
 
 <div id="toast-container"></div>
 <script src="/static/hr.js"></script>
-<script src="/static/workstream_allocation_modal.js"></script>
-<script src="/static/app.js"></script>
+<script src="/static/workstream_allocation_modal.js?v=6"></script>
+<script src="/static/app.js?v=30"></script>
 </body>
 </html>
