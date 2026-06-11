@@ -262,6 +262,13 @@ Nếu thiếu env hoặc token sai → HTTP **403**.
 
 ---
 
+## Phần E1 — Telegram & báo cáo vận hành (tùy chọn)
+
+- Cấu hình biến môi trường: `TELEGRAM_ENABLED`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_GROUP_CHAT_ID`, `TELEGRAM_GROUP_DISPLAY_NAME`, `DYC_PUBLIC_BASE_URL`, `DYC_REPORT_TIMEZONE`, và các biến thời gian báo cáo (`DYC_DAILY_REPORT_TIME`, …). Chi tiết và lệnh pytest: **`RUN_APP.md`** (mục Telegram).
+- Báo cáo định kỳ: dùng **cron bên ngoài** gọi `POST /api/reports/telegram/daily` và `POST /api/reports/telegram/monthly` (phiên Admin), vì instance Free có thể ngủ — scheduler trong process không đảm bảo chạy 24/7.
+
+---
+
 ## Phần E — GitHub (tùy chọn): tự chạy test mỗi khi push
 
 Nếu muốn CI kiểm tra trên GitHub:

@@ -14,10 +14,12 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy.orm import Session
 
 from database import (
+    DbAppUser,
     DbAuditLog,
     DbCustomer,
     DbCuttingGroupMatrix,
     DbDealer,
+    DbFloorMatInventory,
     DbInventoryTransaction,
     DbJobCard,
     DbLotInventory,
@@ -157,6 +159,7 @@ def seed_dealers(db: Session) -> None:
         city="Tp Hồ Chí Minh",
         full_address="Số 264, Đường Trần Hưng Đạo, Phường Cầu Ông Lãnh, Tp Hồ Chí Minh",
         amis_customer_code="ĐL-001",
+        dealer_code="LEX-SG",
         status="ACTIVE",
         address="Số 264, Đường Trần Hưng Đạo, Phường Cầu Ông Lãnh, Tp Hồ Chí Minh",
         created_at=ts,
@@ -172,6 +175,7 @@ def seed_dealers(db: Session) -> None:
         contact_phone="02839123456",
         city="Tp Hồ Chí Minh",
         amis_customer_code="ĐL-002",
+        dealer_code="TOY-BT",
         status="ACTIVE",
         created_at=ts,
     )
@@ -184,6 +188,7 @@ def seed_dealers(db: Session) -> None:
         dealer_group="BMW",
         city="Tp Hồ Chí Minh",
         amis_customer_code="ĐL-003",
+        dealer_code="BMW-PMH",
         status="ACTIVE",
         created_at=ts,
     )
@@ -196,6 +201,7 @@ def seed_dealers(db: Session) -> None:
         dealer_group="Mercedes",
         city="Tp Hồ Chí Minh",
         amis_customer_code="ĐL-004",
+        dealer_code="MER-HCM",
         status="ACTIVE",
         created_at=ts,
     )
@@ -208,6 +214,7 @@ def seed_dealers(db: Session) -> None:
         dealer_group="Direct Retail",
         city="Tp Hồ Chí Minh",
         amis_customer_code="ĐL-005",
+        dealer_code="DIRECT",
         status="ACTIVE",
         created_at=ts,
     )
@@ -622,6 +629,36 @@ def seed_inventory_lots(db: Session) -> None:
             status="ACTIVE",
         ),
         dict(
+            lot_id="LOT-GL-001",
+            material_code="GL-TYPE",
+            material_name="Phim Cường Lực GL-TYPE",
+            film_type="GLASS_FILM",
+            manufacturer="DYC",
+            original_width_m=1.52,
+            original_length_m=20.0,
+            remaining_length_m=20.0,
+            lot_status="NEW",
+            is_opened=False,
+            storage_location="A-RACK-GL-01",
+            import_date=d,
+            status="ACTIVE",
+        ),
+        dict(
+            lot_id="LOT-GL-002",
+            material_code="GL-TYPE",
+            material_name="Phim Cường Lực GL-TYPE",
+            film_type="GLASS_FILM",
+            manufacturer="DYC",
+            original_width_m=1.52,
+            original_length_m=20.0,
+            remaining_length_m=15.0,
+            lot_status="IN_USE",
+            is_opened=True,
+            storage_location="A-RACK-GL-01",
+            import_date=d,
+            status="ACTIVE",
+        ),
+        dict(
             lot_id="LOT-DEMO-LOCKED-001",
             material_code="JB20",
             material_name="Phim JB20 — demo lock",
@@ -632,7 +669,7 @@ def seed_inventory_lots(db: Session) -> None:
             remaining_length_m=10.0,
             lot_status="LOCKED",
             is_locked=True,
-            locked_by_request_id="REQ-DEMO-LOCKED",
+            locked_by_request_id="LEX-SG-030126-123456",
             is_opened=True,
             storage_location="A-RACK-DEMO-LOCK",
             import_date=d,
@@ -744,7 +781,7 @@ def seed_inventory_offcuts(db: Session) -> None:
         quality_status="GOOD",
         offcut_status="RESERVED",
         is_locked=True,
-        locked_by_request_id="REQ-DEMO-LOCKED",
+        locked_by_request_id="LEX-SG-030126-123456",
     )
     oc(
         offcut_id="SUBLOT-SEED-NEW-001",
@@ -894,7 +931,7 @@ def seed_requests_and_workstreams(db: Session) -> None:
     # Stub cho LOT/OFFCUT lock demo
     _merge_request(
         db,
-        request_id="REQ-DEMO-LOCKED",
+        request_id="LEX-SG-030126-123456",
         dealer_id="DEALER_LEXUS_SG",
         customer_id="CUS-DIRECT-001",
         customer_name="Nguyễn Văn An",
@@ -915,7 +952,7 @@ def seed_requests_and_workstreams(db: Session) -> None:
     ]
     _merge_request(
         db,
-        request_id="REQ-DEMO-PENDING-PPF-WF",
+        request_id="LEX-SG-040126-123456",
         dealer_id="DEALER_LEXUS_SG",
         customer_id="CUS-DIRECT-001",
         customer_name="Nguyễn Văn An",
@@ -934,7 +971,7 @@ def seed_requests_and_workstreams(db: Session) -> None:
     _merge_ws(
         db,
         workstream_id="WS-DEMO-PPF-PENDING",
-        request_id="REQ-DEMO-PENDING-PPF-WF",
+        request_id="LEX-SG-040126-123456",
         workstream_type="PPF_INSTALLATION",
         team_type="PPF_TEAM",
         technician_team="PPF_TEAM_A",
@@ -953,7 +990,7 @@ def seed_requests_and_workstreams(db: Session) -> None:
     _merge_ws(
         db,
         workstream_id="WS-DEMO-WF-PENDING",
-        request_id="REQ-DEMO-PENDING-PPF-WF",
+        request_id="LEX-SG-040126-123456",
         workstream_type="WINDOW_FILM_INSTALLATION",
         team_type="WINDOW_FILM_TEAM",
         technician_team="WINDOW_FILM_TEAM_B",
@@ -967,7 +1004,7 @@ def seed_requests_and_workstreams(db: Session) -> None:
     # B — IN_PROGRESS
     _merge_request(
         db,
-        request_id="REQ-DEMO-IN-PROGRESS",
+        request_id="LEX-SG-050126-123456",
         dealer_id="DEALER_LEXUS_SG",
         customer_id="CUS-DIRECT-001",
         vehicle_id="VEH-RX350-DEMO",
@@ -982,7 +1019,7 @@ def seed_requests_and_workstreams(db: Session) -> None:
     _merge_ws(
         db,
         workstream_id="WS-DEMO-PPF-INPROG",
-        request_id="REQ-DEMO-IN-PROGRESS",
+        request_id="LEX-SG-050126-123456",
         workstream_type="PPF_INSTALLATION",
         team_type="PPF_TEAM",
         selected_material_code="T-TYPE",
@@ -994,7 +1031,7 @@ def seed_requests_and_workstreams(db: Session) -> None:
     _merge_ws(
         db,
         workstream_id="WS-DEMO-WF-INPROG",
-        request_id="REQ-DEMO-IN-PROGRESS",
+        request_id="LEX-SG-050126-123456",
         workstream_type="WINDOW_FILM_INSTALLATION",
         team_type="WINDOW_FILM_TEAM",
         selected_material_code="JB20",
@@ -1007,7 +1044,7 @@ def seed_requests_and_workstreams(db: Session) -> None:
     # C — PARTIALLY_COMPLETED
     _merge_request(
         db,
-        request_id="REQ-DEMO-PARTIAL",
+        request_id="LEX-SG-060126-123456",
         dealer_id="DEALER_LEXUS_SG",
         customer_id="CUS-DIRECT-001",
         vehicle_id="VEH-RX350-DEMO",
@@ -1021,7 +1058,7 @@ def seed_requests_and_workstreams(db: Session) -> None:
     _merge_ws(
         db,
         workstream_id="WS-DEMO-PARTIAL-PPF",
-        request_id="REQ-DEMO-PARTIAL",
+        request_id="LEX-SG-060126-123456",
         workstream_type="PPF_INSTALLATION",
         team_type="PPF_TEAM",
         selected_material_code="T-TYPE",
@@ -1034,7 +1071,7 @@ def seed_requests_and_workstreams(db: Session) -> None:
     _merge_ws(
         db,
         workstream_id="WS-DEMO-PARTIAL-WF",
-        request_id="REQ-DEMO-PARTIAL",
+        request_id="LEX-SG-060126-123456",
         workstream_type="WINDOW_FILM_INSTALLATION",
         team_type="WINDOW_FILM_TEAM",
         selected_material_code="JB20",
@@ -1047,7 +1084,7 @@ def seed_requests_and_workstreams(db: Session) -> None:
     # D — CLOSED
     _merge_request(
         db,
-        request_id="REQ-DEMO-CLOSED",
+        request_id="LEX-SG-070126-123456",
         dealer_id="DEALER_LEXUS_SG",
         customer_id="CUS-DIRECT-001",
         vehicle_id="VEH-RX350-DEMO",
@@ -1061,7 +1098,7 @@ def seed_requests_and_workstreams(db: Session) -> None:
     _merge_ws(
         db,
         workstream_id="WS-DEMO-PPF-CLOSED",
-        request_id="REQ-DEMO-CLOSED",
+        request_id="LEX-SG-070126-123456",
         workstream_type="PPF_INSTALLATION",
         team_type="PPF_TEAM",
         selected_material_code="T-TYPE",
@@ -1074,7 +1111,7 @@ def seed_requests_and_workstreams(db: Session) -> None:
     _merge_ws(
         db,
         workstream_id="WS-DEMO-WF-CLOSED",
-        request_id="REQ-DEMO-CLOSED",
+        request_id="LEX-SG-070126-123456",
         workstream_type="WINDOW_FILM_INSTALLATION",
         team_type="WINDOW_FILM_TEAM",
         selected_material_code="JB20",
@@ -1090,7 +1127,7 @@ def seed_requests_and_workstreams(db: Session) -> None:
     warn_e = json.dumps({"warnings": ["MISSING_VEHICLE_NORM", "MISSING_MATERIAL_PREFERENCE"]}, ensure_ascii=False)
     _merge_request(
         db,
-        request_id="REQ-DEMO-NEEDS-REVIEW",
+        request_id="LEX-SG-080126-000001",
         dealer_id="DEALER_LEXUS_SG",
         customer_id="CUS-DIRECT-001",
         vehicle_id="VEH-UNKNOWN-MODEL",
@@ -1106,7 +1143,7 @@ def seed_requests_and_workstreams(db: Session) -> None:
     # F — EXCEPTION_HOLD
     _merge_request(
         db,
-        request_id="REQ-DEMO-EXCEPTION-HOLD",
+        request_id="LEX-SG-090126-123456",
         dealer_id="DEALER_LEXUS_SG",
         customer_id="CUS-DIRECT-001",
         vehicle_id="VEH-RX350-DEMO",
@@ -1126,7 +1163,7 @@ def seed_job_cards(db: Session) -> None:
     _merge_job(
         db,
         job_card_id="JOB-DEMO-PPF-PENDING",
-        request_id="REQ-DEMO-PENDING-PPF-WF",
+        request_id="LEX-SG-040126-123456",
         workstream_id="WS-DEMO-PPF-PENDING",
         workstream_type="PPF_INSTALLATION",
         technician_id="KTV-PPF-01",
@@ -1140,7 +1177,7 @@ def seed_job_cards(db: Session) -> None:
     _merge_job(
         db,
         job_card_id="JOB-DEMO-WF-PENDING",
-        request_id="REQ-DEMO-PENDING-PPF-WF",
+        request_id="LEX-SG-040126-123456",
         workstream_id="WS-DEMO-WF-PENDING",
         workstream_type="WINDOW_FILM_INSTALLATION",
         technician_id="KTV-WF-01",
@@ -1154,7 +1191,7 @@ def seed_job_cards(db: Session) -> None:
     _merge_job(
         db,
         job_card_id="JOB-DEMO-PPF-INPROG",
-        request_id="REQ-DEMO-IN-PROGRESS",
+        request_id="LEX-SG-050126-123456",
         workstream_id="WS-DEMO-PPF-INPROG",
         workstream_type="PPF_INSTALLATION",
         technician_id="KTV-PPF-02",
@@ -1168,7 +1205,7 @@ def seed_job_cards(db: Session) -> None:
     _merge_job(
         db,
         job_card_id="JOB-DEMO-WF-INPROG",
-        request_id="REQ-DEMO-IN-PROGRESS",
+        request_id="LEX-SG-050126-123456",
         workstream_id="WS-DEMO-WF-INPROG",
         workstream_type="WINDOW_FILM_INSTALLATION",
         technician_id="KTV-WF-02",
@@ -1181,7 +1218,7 @@ def seed_job_cards(db: Session) -> None:
     _merge_job(
         db,
         job_card_id="JOB-DEMO-PPF-CLOSED",
-        request_id="REQ-DEMO-CLOSED",
+        request_id="LEX-SG-070126-123456",
         workstream_id="WS-DEMO-PPF-CLOSED",
         workstream_type="PPF_INSTALLATION",
         technician_id="KTV-PPF-03",
@@ -1197,7 +1234,7 @@ def seed_job_cards(db: Session) -> None:
     _merge_job(
         db,
         job_card_id="JOB-DEMO-WF-CLOSED",
-        request_id="REQ-DEMO-CLOSED",
+        request_id="LEX-SG-070126-123456",
         workstream_id="WS-DEMO-WF-CLOSED",
         workstream_type="WINDOW_FILM_INSTALLATION",
         technician_id="KTV-WF-03",
@@ -1226,8 +1263,8 @@ def seed_job_cards(db: Session) -> None:
 
 def seed_inventory_transactions(db: Session) -> None:
     ts = _now_iso()
-    rid_closed = "REQ-DEMO-CLOSED"
-    rid_partial = "REQ-DEMO-PARTIAL"
+    rid_closed = "LEX-SG-070126-123456"
+    rid_partial = "LEX-SG-060126-123456"
 
     def add_txn(tid: str, ttype: str, src_type: str, src_id: str, mc: str, **extra):
         row = db.query(DbInventoryTransaction).filter(DbInventoryTransaction.transaction_id == tid).first()
@@ -1369,7 +1406,7 @@ def seed_inventory_transactions(db: Session) -> None:
         "LOT",
         "LOT-DEMO-LOCKED-001",
         "JB20",
-        related_request_id="REQ-DEMO-LOCKED",
+        related_request_id="LEX-SG-030126-123456",
         before_status="LOCKED",
         after_status="LOCKED",
         reason="Demo release lock ledger (LOT demo lock)",
@@ -1410,7 +1447,7 @@ def seed_inventory_transactions(db: Session) -> None:
         "LOT",
         "LOT-DEMO-LOCKED-001",
         "JB20",
-        related_request_id="REQ-DEMO-LOCKED",
+        related_request_id="LEX-SG-030126-123456",
         reason="Release lock manual demo",
     )
     add_txn(
@@ -1438,17 +1475,17 @@ def seed_audit_logs(db: Session) -> None:
         ("VEHICLE_CREATED", None, "ADMIN", "VEH-RX350-DEMO"),
         ("OCR_DRAFT_CREATED", None, "OCR", "OCR-DRAFT-LEXUS-115-NEW"),
         ("REQUEST_CREATED_FROM_IMAGE", "REQ-TEST-LEXUS-115", "ADMIN", ""),
-        ("REQUEST_MANUAL_CREATED", "REQ-DEMO-PENDING-PPF-WF", "ADMIN", ""),
-        ("WORKSTREAM_CREATED", "REQ-DEMO-PENDING-PPF-WF", "ADMIN", "WS-DEMO-PPF-PENDING"),
-        ("WORKSTREAM_ALLOCATION_UPDATED", "REQ-DEMO-PENDING-PPF-WF", "ADMIN", "WF allocation"),
-        ("WORKSTREAM_APPROVED", "REQ-DEMO-CLOSED", "MGR", "WS-DEMO-PPF-CLOSED"),
-        ("SOFT_LOCK_RECORDED", "REQ-DEMO-PENDING-PPF-WF", "SYSTEM", "LOT soft lock"),
-        ("JOB_ASSIGNED", "REQ-DEMO-IN-PROGRESS", "DISPATCH", "JOB-DEMO-PPF-INPROG"),
-        ("JOB_STARTED", "REQ-DEMO-IN-PROGRESS", "KTV", "JOB-DEMO-PPF-INPROG"),
-        ("MOBILE_TECH_CONFIRMED", "REQ-DEMO-CLOSED", "KTV", "mobile"),
-        ("JOB_COMPLETED_BY_TECH", "REQ-DEMO-CLOSED", "KTV", "JOB-DEMO-WF-CLOSED"),
-        ("INVENTORY_COMMITTED", "REQ-DEMO-CLOSED", "SYSTEM", "committed"),
-        ("REQUEST_CLOSED", "REQ-DEMO-CLOSED", "SYSTEM", "closed"),
+        ("REQUEST_MANUAL_CREATED", "LEX-SG-040126-123456", "ADMIN", ""),
+        ("WORKSTREAM_CREATED", "LEX-SG-040126-123456", "ADMIN", "WS-DEMO-PPF-PENDING"),
+        ("WORKSTREAM_ALLOCATION_UPDATED", "LEX-SG-040126-123456", "ADMIN", "WF allocation"),
+        ("WORKSTREAM_APPROVED", "LEX-SG-070126-123456", "MGR", "WS-DEMO-PPF-CLOSED"),
+        ("SOFT_LOCK_RECORDED", "LEX-SG-040126-123456", "SYSTEM", "LOT soft lock"),
+        ("JOB_ASSIGNED", "LEX-SG-050126-123456", "DISPATCH", "JOB-DEMO-PPF-INPROG"),
+        ("JOB_STARTED", "LEX-SG-050126-123456", "KTV", "JOB-DEMO-PPF-INPROG"),
+        ("MOBILE_TECH_CONFIRMED", "LEX-SG-070126-123456", "KTV", "mobile"),
+        ("JOB_COMPLETED_BY_TECH", "LEX-SG-070126-123456", "KTV", "JOB-DEMO-WF-CLOSED"),
+        ("INVENTORY_COMMITTED", "LEX-SG-070126-123456", "SYSTEM", "committed"),
+        ("REQUEST_CLOSED", "LEX-SG-070126-123456", "SYSTEM", "closed"),
         ("MATERIAL_PREFERENCE_CREATED", None, "ADMIN", "MATPREF-WINDSHIELD"),
         ("VEHICLE_NORM_CREATED", None, "ADMIN", "NORM-STANDARD-RX350-2020-2026"),
         ("LOT_IMPORTED", None, "ADMIN", "LOT-RT40-001"),
@@ -1589,7 +1626,7 @@ def seed_req_20260604_for_inventory_smokes(db: Session) -> None:
     )
     _merge_request(
         db,
-        request_id="REQ-20260604-001",
+        request_id="LEX-SG-040626-123456",
         dealer_id="DEALER_LEXUS_SG",
         customer_id="CUST_001",
         customer_name="Đỗ Minh Khang",
@@ -1621,7 +1658,7 @@ def seed_req_20260604_for_inventory_smokes(db: Session) -> None:
     _merge_ws(
         db,
         workstream_id="WS-PPF-20260604-001",
-        request_id="REQ-20260604-001",
+        request_id="LEX-SG-040626-123456",
         workstream_type="PPF_INSTALLATION",
         team_type="PPF_TEAM",
         technician_team="PPF_TEAM_A",
@@ -1639,7 +1676,7 @@ def seed_req_20260604_for_inventory_smokes(db: Session) -> None:
     _merge_ws(
         db,
         workstream_id="WS-WF-20260604-001",
-        request_id="REQ-20260604-001",
+        request_id="LEX-SG-040626-123456",
         workstream_type="WINDOW_FILM_INSTALLATION",
         team_type="WINDOW_FILM_TEAM",
         technician_team="WINDOW_FILM_TEAM_B",
@@ -1658,6 +1695,20 @@ def seed_req_20260604_for_inventory_smokes(db: Session) -> None:
     )
 
 
+def seed_floor_mat_inventory(db: Session) -> None:
+    """Seed SKU thảm sàn mẫu (idempotent)."""
+    ts = _now_iso()
+    skus = [
+        dict(sku="FM-SEDAN-BASIC", name="Thảm sàn Sedan Basic (4 miếng)", unit="bộ", qty_total=20, qty_reserved=0, min_stock=3, supplier="DYC Supply", note="Phù hợp xe sedan cỡ trung"),
+        dict(sku="FM-SUV-STANDARD", name="Thảm sàn SUV Standard (4+1 miếng)", unit="bộ", qty_total=15, qty_reserved=0, min_stock=3, supplier="DYC Supply", note="Phù hợp SUV/Crossover"),
+        dict(sku="FM-LUXURY-5D", name="Thảm sàn Luxury 5D (toàn khoang)", unit="bộ", qty_total=8, qty_reserved=0, min_stock=2, supplier="DYC Supply", note="Thảm 5D cao cấp, dày 8mm"),
+    ]
+    for s in skus:
+        row = db.query(DbFloorMatInventory).filter(DbFloorMatInventory.sku == s["sku"]).first()
+        if not row:
+            db.add(DbFloorMatInventory(created_at=ts, **s))
+
+
 def seed_all_demo_data(db: Session) -> Dict[str, Any]:
     """Seed toàn bộ; gọi trong transaction — caller commit/rollback."""
     out: Dict[str, Any] = {}
@@ -1668,6 +1719,7 @@ def seed_all_demo_data(db: Session) -> Dict[str, Any]:
     seed_material_preferences(db)
     seed_inventory_lots(db)
     seed_inventory_offcuts(db)
+    seed_floor_mat_inventory(db)
     seed_ocr_drafts(db)
     seed_requests_and_workstreams(db)
     seed_job_cards(db)
@@ -1679,10 +1731,39 @@ def seed_all_demo_data(db: Session) -> Dict[str, Any]:
 
     _ensure_five_lots_per_material(db)
     # Bắt buộc flush: LOT-LEX-CO-* mới add là pending — query chọn PPF lot sẽ không thấy nếu chưa flush
-    # (fallback LOT-TTYPE-002 chỉ còn 12m < 13m → validate-sources REQ-20260604-001 ERROR).
+    # (fallback LOT-TTYPE-002 chỉ còn 12m < 13m → validate-sources LEX-SG-040626-123456 ERROR).
     db.flush()
     seed_req_20260604_for_inventory_smokes(db)
+    seed_demo_app_users(db)
     return out
+
+
+def seed_demo_app_users(db: Session) -> None:
+    """Tài khoản demo đăng nhập (idempotent theo username). Mật khẩu mặc định: dyc123"""
+    from auth_api import hash_password
+
+    ts = _now_iso()
+    rows = [
+        ("USER-ADMIN", "admin", "Admin Demo", "ADMIN"),
+        ("USER-QL", "quanly", "Quản lý Demo", "MANAGER"),
+        ("USER-KTV", "ktv", "KTV Demo", "TECHNICIAN"),
+    ]
+    pw_hash = hash_password("dyc123")
+    for uid, username, display_name, role in rows:
+        row = db.query(DbAppUser).filter(DbAppUser.username == username).first()
+        if row:
+            continue
+        db.add(
+            DbAppUser(
+                user_id=uid,
+                username=username,
+                password_hash=pw_hash,
+                display_name=display_name,
+                role=role,
+                is_active=True,
+                created_at=ts,
+            )
+        )
 
 
 def summarize_table_counts(db: Session) -> Dict[str, int]:
@@ -1706,6 +1787,7 @@ def summarize_table_counts(db: Session) -> Dict[str, int]:
         "inventory_transactions": cnt(DbInventoryTransaction),
         "audit_logs": cnt(DbAuditLog),
         "notifications": cnt(DbNotification),
+        "app_users": cnt(DbAppUser),
     }
 
 

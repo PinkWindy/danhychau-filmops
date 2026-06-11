@@ -1,0 +1,30 @@
+services:
+  - type: web
+    name: dyc-ops-portal
+    runtime: python
+    buildCommand: pip install -r web_demo/requirements.txt
+    startCommand: cd web_demo && uvicorn main:app --host 0.0.0.0 --port $PORT
+    plan: starter          # $7/tháng — không ngủ, phù hợp production
+    region: singapore
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: dyc-postgres
+          property: connectionString
+      - key: DYC_STARTUP_SEED_DEMO
+        value: "false"
+      - key: ALLOW_DB_RESET
+        value: "false"
+      # Các biến dưới đây điền thủ công trên Render Dashboard sau khi deploy:
+      # ADMIN_RESET_TOKEN     — chuỗi bí mật tự đặt
+      # TELEGRAM_ENABLED      — true / false
+      # TELEGRAM_BOT_TOKEN    — lấy từ @BotFather
+      # TELEGRAM_GROUP_CHAT_ID — ID group Telegram
+      # DYC_PUBLIC_BASE_URL   — https://your-domain.onrender.com
+
+databases:
+  - name: dyc-postgres
+    plan: free             # 1GB miễn phí tháng đầu, sau đó $7/tháng nếu cần
+    region: singapore
+    databaseName: dyc_production
+    user: dyc_admin

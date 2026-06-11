@@ -3,24 +3,54 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>DYC — Hệ Thống Quản Lý Kho Phim</title>
+<title>DYC — Operations Portal | Quản lý kho phim</title>
 <meta name="description" content="Hệ thống quản lý kho phim DYC — PPF & Phim Cách Nhiệt, Đa Đội Thi Công.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@700;800;900&display=swap" rel="stylesheet">
 <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-<link rel="stylesheet" href="/static/style.css?v=14">
+<link rel="stylesheet" href="/static/style.css?v=19">
 </head>
 <body>
+
+<!-- ĐĂNG NHẬP -->
+<div id="login-overlay" class="login-overlay" style="display:none" aria-modal="true" role="dialog">
+  <div class="login-card">
+    <div class="login-brand">
+      <span class="login-brand-dyc">DYC</span>
+      <span class="login-brand-sub">Operations Portal</span>
+    </div>
+    <h1 class="login-title">Đăng nhập</h1>
+    <p class="login-hint">Tài khoản demo — mật khẩu mặc định: <strong>dyc123</strong></p>
+    <form id="login-form" autocomplete="username">
+      <label class="login-label">Tên đăng nhập</label>
+      <input id="login-username" name="username" class="login-input" required placeholder="admin / quanly / ktv" />
+      <label class="login-label">Mật khẩu</label>
+      <input id="login-password" name="password" type="password" class="login-input" required placeholder="dyc123" />
+      <p id="login-error" class="login-error" style="display:none"></p>
+      <button type="submit" class="btn btn-primary btn-full login-submit"><i class="fa-solid fa-right-to-bracket"></i> Đăng nhập</button>
+    </form>
+    <div class="login-quick">
+      <span class="muted" style="font-size:11px">Chọn nhanh:</span>
+      <button type="button" class="btn btn-outline btn-sm" onclick="dycFillLogin('admin','dyc123')">Admin</button>
+      <button type="button" class="btn btn-outline btn-sm" onclick="dycFillLogin('quanly','dyc123')">Quản lý</button>
+      <button type="button" class="btn btn-outline btn-sm" onclick="dycFillLogin('ktv','dyc123')">KTV</button>
+    </div>
+  </div>
+</div>
 
 <!-- THANH ĐIỀU HƯỚNG -->
 <nav class="navbar">
   <div class="nav-container">
     <div class="logo-area">
-      <div class="logo-icon"><i class="fa-solid fa-film"></i></div>
-      <div>
-        <span class="logo-title">DYC</span>
-        <span class="logo-sub">HỆ THỐNG QUẢN LÝ KHO PHIM</span>
+      <div class="dyc-logo-mark">
+        <span class="dyc-logo-text">DYC</span>
+        <span class="dyc-logo-tag">AUTO PARTS &amp; LIFESTYLE</span>
+      </div>
+      <div class="logo-divider" aria-hidden="true"></div>
+      <div class="logo-portal">
+        <span class="logo-portal-title">Operations Portal</span>
+        <span class="logo-portal-sub">Quản lý kho phim</span>
       </div>
     </div>
 
@@ -36,12 +66,17 @@
       <button class="nav-tab" data-tab="lots"><i class="fa-solid fa-scroll"></i> Kho cuộn LOT</button>
       <button class="nav-tab" data-tab="inventory"><i class="fa-solid fa-warehouse"></i> Quản lý kho</button>
       <button class="nav-tab" data-tab="offcuts"><i class="fa-solid fa-scissors"></i> Mảnh dư</button>
+      <button class="nav-tab" data-tab="floormats"><i class="fa-solid fa-border-all"></i> Thảm sàn</button>
       <button class="nav-tab" data-tab="monthly"><i class="fa-solid fa-chart-column"></i> Báo cáo tháng</button>
       <button class="nav-tab" data-tab="hr"><i class="fa-solid fa-users"></i> Nhân sự</button>
       <button class="nav-tab" data-tab="audit"><i class="fa-solid fa-shield-halved"></i> Nhật ký kiểm toán</button>
+      <button type="button" class="nav-tab" data-tab="integrations" data-dyc-require="admin_only" style="display:none"><i class="fa-brands fa-telegram"></i> Telegram</button>
     </div>
 
     <div class="nav-right">
+      <button class="btn btn-outline btn-sm" id="btn-logout" type="button" title="Đăng xuất">
+        <i class="fa-solid fa-right-from-bracket"></i> Đăng xuất
+      </button>
       <button class="btn btn-demo-run btn-sm" id="btn-global-demo">
         <i class="fa-solid fa-rocket"></i> Demo tự động
       </button>
@@ -117,8 +152,8 @@
   <div class="tab-pane active" id="tab-dashboard">
     <div class="hero-section">
       <div class="hero-text">
-        <h1>DYC — Quản Lý Kho Phim Thông Minh</h1>
-        <p>Theo dõi PPF & Phim Cách Nhiệt — 2 đội thi công độc lập, cập nhật theo thời gian thực</p>
+        <h1><span class="hero-accent">DYC</span> Operations Portal</h1>
+        <p>Quản lý kho phim PPF &amp; phim cách nhiệt — theo dõi kho, thi công và đơn hàng theo thời gian thực</p>
       </div>
       <button class="btn btn-demo-run" id="btn-global-demo-2">
         <i class="fa-solid fa-rocket"></i> Chạy Demo Tự Động
@@ -199,6 +234,12 @@
           <h3><i class="fa-solid fa-bell"></i> Thông Báo Gần Nhất</h3>
         </div>
         <div id="dash-notif-quick" style="padding:8px"></div>
+      </div>
+      <div class="panel">
+        <div class="panel-header">
+          <h3><i class="fa-solid fa-building-user"></i> Xe thực hiện theo Đại lý (tháng này)</h3>
+        </div>
+        <div id="dash-dealer-monthly-chart" style="padding:12px"></div>
       </div>
     </div>
   </div>
@@ -298,7 +339,7 @@
         <header class="manual-create-shell__intro">
           <div>
             <h3 class="manual-create-shell__title">Phiếu nhập đơn</h3>
-            <p class="manual-create-shell__lede">Thông tin được nhóm theo thứ tự nghiệp vụ. Ô nhập dùng nền tối đồng nhất; placeholder dễ đọc hơn trên nền đen.</p>
+            <p class="manual-create-shell__lede">Thông tin được nhóm theo thứ tự nghiệp vụ. Ô nhập nền trắng, chữ đậm, viền nhẹ — dễ đọc trên màn hình văn phòng và máy tính bảng.</p>
           </div>
         </header>
         <div class="manual-form manual-form--v2">
@@ -363,7 +404,7 @@
               <span class="manual-step__badge" aria-hidden="true">3</span>
               <div class="manual-step__titles">
                 <h4>Thông tin xe</h4>
-                <p>Dòng xe (gợi ý theo định mức đã khai báo), năm model và loại phim dùng để tra định mức phim cách nhiệt (WF).</p>
+                <p>Chọn dòng xe từ định mức phim cách nhiệt (danh sách không trùng); năm model dùng để tra WF.</p>
               </div>
             </div>
             <div class="manual-step__body">
@@ -377,8 +418,7 @@
               <div class="manual-grid-2">
                 <div class="manual-field">
                   <label class="manual-label" for="mc-veh-model">Dòng xe</label>
-                  <input type="text" id="mc-veh-model" class="manual-control" list="dyc-mc-model-datalist" placeholder="Chọn hoặc gõ mã — danh sách từ Định mức phim" autocomplete="off" />
-                  <span class="manual-field-meta">vehicle_model_code · gợi ý: chỉ các mã đã có định mức (không trùng)</span>
+                  <select id="mc-veh-model" class="manual-control"><option value="">— Chọn —</option></select>
                 </div>
                 <div class="manual-field">
                   <label class="manual-label" for="mc-model-year">Năm model</label>
@@ -394,10 +434,7 @@
                   <input type="text" id="mc-plate" class="manual-control" placeholder="51A-12345" autocomplete="off" />
                   <span class="manual-field-meta">plate_number</span>
                 </div>
-                <div class="manual-field manual-field--full">
-                  <label class="manual-label" for="mc-film-type">Loại phim (tra định mức WF)</label>
-                  <input type="text" id="mc-film-type" class="manual-control" value="Phim cách nhiệt" />
-                </div>
+                <input type="hidden" id="mc-film-type" value="Phim cách nhiệt" />
               </div>
             </div>
           </article>
@@ -405,6 +442,33 @@
           <article class="manual-step" data-step="4">
             <div class="manual-step__head">
               <span class="manual-step__badge" aria-hidden="true">4</span>
+              <div class="manual-step__titles">
+                <h4>Theo dõi</h4>
+                <p>Số thứ tự xe của đại lý — hệ thống tự đếm theo năm &amp; tháng khi tạo đơn.</p>
+              </div>
+            </div>
+            <div class="manual-step__body">
+              <div class="manual-grid-2">
+                <div class="manual-field">
+                  <label class="manual-label" for="mc-seq-year">Số thứ tự (theo năm)</label>
+                  <input type="number" id="mc-seq-year" class="manual-control" readonly
+                    placeholder="Tự động theo đại lý" min="1" tabindex="-1"
+                    title="Tự động đếm số xe của đại lý từ đầu năm đến nay" />
+                </div>
+                <div class="manual-field">
+                  <label class="manual-label" for="mc-seq-month">Số thứ tự (theo tháng)</label>
+                  <input type="number" id="mc-seq-month" class="manual-control" readonly
+                    placeholder="Tự động theo đại lý" min="1" tabindex="-1"
+                    title="Tự động đếm số xe của đại lý từ đầu tháng đến nay" />
+                </div>
+              </div>
+              <p class="manual-inline-hint" id="mc-seq-hint" style="margin-top:6px">Chọn đại lý để hệ thống gợi ý số thứ tự tiếp theo.</p>
+            </div>
+          </article>
+
+          <article class="manual-step" data-step="5">
+            <div class="manual-step__head">
+              <span class="manual-step__badge" aria-hidden="true">5</span>
               <div class="manual-step__titles">
                 <h4>Thời gian &amp; SLA</h4>
                 <p>Để trống — hệ thống đánh dấu cần rà soát trước khi cấp vật tư.</p>
@@ -417,7 +481,7 @@
                   <input type="text" id="mc-req-date" class="manual-control" placeholder="hh:mm dd/mm/yyyy" autocomplete="off" />
                 </div>
                 <div class="manual-field">
-                  <label class="manual-label" for="mc-deliv-date">Hạn giao xe</label>
+                  <label class="manual-label" for="mc-deliv-date">Hạn hoàn tất thi công</label>
                   <input type="text" id="mc-deliv-date" class="manual-control" placeholder="hh:mm dd/mm/yyyy" autocomplete="off" />
                 </div>
               </div>
@@ -429,9 +493,9 @@
             </div>
           </article>
 
-          <article class="manual-step" data-step="5">
+          <article class="manual-step" data-step="6">
             <div class="manual-step__head">
-              <span class="manual-step__badge" aria-hidden="true">5</span>
+              <span class="manual-step__badge" aria-hidden="true">6</span>
               <div class="manual-step__titles">
                 <h4>Dịch vụ thi công</h4>
                 <p>Bật từng nhóm dịch vụ; phim cách nhiệt cho phép chọn chi tiết từng kính.</p>
@@ -444,8 +508,7 @@
                   <span><strong>Dán phim PPF</strong> <span class="manual-service-pill">PPF</span></span>
                 </label>
                 <div id="mc-ppf-box" class="manual-service-card__inner">
-                  <label class="manual-label" for="mc-ppf-type">Loại PPF (thân xe — BODY)</label>
-                  <select id="mc-ppf-type" class="manual-control manual-control--narrow"><option value="T-TYPE">T-TYPE — PPF trong</option><option value="M-TYPE">M-TYPE — PPF mờ</option></select>
+                  <input type="hidden" id="mc-ppf-type" value="T-TYPE" />
                   <p class="manual-inline-hint">Chọn hạng mục thi công — kích thước và mã vật tư cập nhật theo định mức xe và ưu tiên kho.</p>
                   <div class="mc-wf-check-grid manual-wf-grid" aria-label="Hạng mục PPF">
                     <label class="manual-check manual-check--tile"><input type="checkbox" class="mc-ppf-item" value="PPF_BODY" checked /> BODY</label>
@@ -481,34 +544,74 @@
                   </div>
                 </div>
               </div>
+              <div class="manual-service-card manual-service-card--gl">
+                <label class="manual-check manual-check--lead">
+                  <input type="checkbox" id="mc-svc-gl" />
+                  <span><strong>Dán Cường lực</strong> <span class="manual-service-pill manual-service-pill--gl">CL</span></span>
+                </label>
+                <div id="mc-gl-box" class="manual-service-card__inner">
+                  <p class="manual-inline-hint">Chọn vị trí kính dán cường lực.</p>
+                  <div class="mc-wf-check-grid manual-wf-grid">
+                    <label class="manual-check manual-check--tile"><input type="checkbox" class="mc-gl-item" value="GL_WINDSHIELD" checked /> Kính lái</label>
+                    <label class="manual-check manual-check--tile"><input type="checkbox" class="mc-gl-item" value="GL_REAR" checked /> Kính hậu</label>
+                    <label class="manual-check manual-check--tile"><input type="checkbox" class="mc-gl-item" value="GL_SUNROOF" /> Kính trời</label>
+                  </div>
+                  <div id="mc-gl-detail-wrap" class="manual-wf-detail"></div>
+                  <p class="manual-wf-warn" id="mc-gl-warn" style="display:none"></p>
+                </div>
+              </div>
+
+              <!-- Thảm trải sàn -->
+              <div class="manual-service-card manual-service-card--fm">
+                <label class="manual-check manual-check--lead">
+                  <input type="checkbox" id="mc-svc-fm" />
+                  <span><strong>Thảm trải sàn</strong> <span class="manual-service-pill manual-service-pill--fm">FM</span></span>
+                </label>
+                <div id="mc-fm-box" class="manual-service-card__inner">
+                  <p class="manual-inline-hint">Chọn SKU và số lượng thảm trải sàn.</p>
+                  <div id="mc-fm-sku-list" class="mc-fm-sku-list">
+                    <!-- Populated by JS from /api/floor-mats -->
+                    <p class="manual-inline-hint" id="mc-fm-loading">Đang tải danh sách SKU…</p>
+                  </div>
+                  <p class="manual-wf-warn" id="mc-fm-warn" style="display:none"></p>
+                </div>
+              </div>
             </div>
           </article>
 
-          <article class="manual-step" data-step="6">
+          <article class="manual-step" data-step="7" id="mc-step-team" style="display:none">
             <div class="manual-step__head">
-              <span class="manual-step__badge" aria-hidden="true">6</span>
+              <span class="manual-step__badge" aria-hidden="true">7</span>
               <div class="manual-step__titles">
                 <h4>Đội thi công</h4>
-                <p>Gán đội PPF và đội phim cách nhiệt cho luồng vận hành.</p>
+                <p>Chỉ hiện các đội tương ứng với dịch vụ đã chọn.</p>
               </div>
             </div>
             <div class="manual-step__body">
               <div class="manual-grid-2">
-                <div class="manual-field">
+                <div class="manual-field" id="mc-team-field-ppf" style="display:none">
                   <label class="manual-label" for="mc-team-ppf">Đội PPF</label>
                   <select id="mc-team-ppf" class="manual-control"><option>PPF_TEAM_A</option><option>PPF_TEAM_B</option></select>
                 </div>
-                <div class="manual-field">
+                <div class="manual-field" id="mc-team-field-wf" style="display:none">
                   <label class="manual-label" for="mc-team-wf">Đội phim cách nhiệt</label>
                   <select id="mc-team-wf" class="manual-control"><option>WINDOW_FILM_TEAM_B</option><option>WINDOW_FILM_TEAM_A</option></select>
+                </div>
+                <div class="manual-field" id="mc-team-field-gl" style="display:none">
+                  <label class="manual-label" for="mc-team-gl">Đội cường lực</label>
+                  <select id="mc-team-gl" class="manual-control"><option>GLASS_FILM_TEAM_A</option><option>GLASS_FILM_TEAM_B</option></select>
+                </div>
+                <div class="manual-field" id="mc-team-field-fm" style="display:none">
+                  <label class="manual-label" for="mc-team-fm">Đội thảm sàn</label>
+                  <select id="mc-team-fm" class="manual-control"><option>FLOOR_MAT_TEAM_A</option><option>FLOOR_MAT_TEAM_B</option></select>
                 </div>
               </div>
             </div>
           </article>
 
-          <article class="manual-step" data-step="7">
+          <article class="manual-step" data-step="8">
             <div class="manual-step__head">
-              <span class="manual-step__badge" aria-hidden="true">7</span>
+              <span class="manual-step__badge" aria-hidden="true">8</span>
               <div class="manual-step__titles">
                 <h4>Ghi chú nội bộ</h4>
                 <p>Thông tin bổ sung cho điều phối — không in trên phiếu khách nếu không cấu hình.</p>
@@ -657,7 +760,7 @@
                     <span class="dl">Mã hồ sơ xe</span><span class="dv"><span id="det-vehicle-id">—</span></span>
                     <span class="dl">Dòng xe</span><span class="dv" id="det-model">—</span>
                     <span class="dl">Số VIN</span><span class="dv" id="det-vin">—</span>
-                    <span class="dl">Hạn giao xe</span><span class="dv highlight-red" id="det-deadline">—</span>
+                    <span class="dl">Hạn hoàn tất thi công</span><span class="dv highlight-red" id="det-deadline">—</span>
                   </div>
                 </div>
               </div>
@@ -812,6 +915,8 @@
             <option value="">Tất cả loại</option>
             <option value="PPF_INSTALLATION">Dán Phim PPF</option>
             <option value="WINDOW_FILM_INSTALLATION">Dán Phim Cách Nhiệt</option>
+            <option value="GLASS_FILM_INSTALLATION">Dán Cường Lực</option>
+            <option value="FLOOR_MAT_INSTALLATION">Thảm Trải Sàn</option>
           </select>
           <select id="ws-filter-status" class="field-input" style="width:200px;padding:6px 10px;font-size:12px">
             <option value="">Tất cả trạng thái</option>
@@ -838,7 +943,7 @@
             <th class="ws-sortable" data-ws-sort="request_created_at" title="Sắp xếp">Ngày tạo đơn <i class="fa-solid fa-sort ws-sort-icon" aria-hidden="true"></i></th>
             <th class="ws-sortable" data-ws-sort="workstream_type" title="Sắp xếp">Loại thi công <i class="fa-solid fa-sort ws-sort-icon" aria-hidden="true"></i></th>
             <th class="ws-sortable" data-ws-sort="technician_name" title="Sắp xếp">Tên KTV <i class="fa-solid fa-sort ws-sort-icon" aria-hidden="true"></i></th>
-            <th class="ws-sortable" data-ws-sort="requested_delivery_time" title="Sắp xếp">Hạn giao xe <i class="fa-solid fa-sort ws-sort-icon" aria-hidden="true"></i></th>
+            <th class="ws-sortable" data-ws-sort="requested_delivery_time" title="Sắp xếp">Hạn hoàn tất <i class="fa-solid fa-sort ws-sort-icon" aria-hidden="true"></i></th>
             <th class="ws-sortable" data-ws-sort="status" title="Sắp xếp">Trạng thái <i class="fa-solid fa-sort ws-sort-icon" aria-hidden="true"></i></th>
             <th class="ws-sortable" data-ws-sort="started_at" title="Sắp xếp">Bắt đầu <i class="fa-solid fa-sort ws-sort-icon" aria-hidden="true"></i></th>
             <th class="ws-sortable" data-ws-sort="completed_at" title="Sắp xếp">Hoàn tất <i class="fa-solid fa-sort ws-sort-icon" aria-hidden="true"></i></th>
@@ -924,14 +1029,21 @@
     <div class="panel">
       <div class="panel-header" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
         <h3 style="margin:0;"><i class="fa-solid fa-boxes-stacked"></i> Danh Sách Cuộn LOT</h3>
-        <div class="inv-inline-filters" style="display:flex; gap:10px;">
+        <div class="inv-inline-filters" style="display:flex; gap:10px; flex-wrap:wrap;">
+          <select id="kl-film-group" class="field-input" style="max-width:150px;padding:6px 10px;font-size:12px" onchange="taiKhoLot()">
+            <option value="">Tất cả nhóm phim</option>
+            <option value="WINDOW_FILM">Cách nhiệt (PCN)</option>
+            <option value="PPF">Phim PPF</option>
+            <option value="GLASS_FILM">Cường lực (CL)</option>
+          </select>
           <select id="kl-mat" class="field-input" style="max-width:140px;padding:6px 10px;font-size:12px" onchange="taiKhoLot()">
-            <option value="">Tất cả loại phim</option>
+            <option value="">Tất cả vật tư</option>
             <option value="RT40">RT40</option>
             <option value="JB20">JB20</option>
             <option value="T-TYPE">T-TYPE</option>
             <option value="M-TYPE">M-TYPE</option>
             <option value="RS20">RS20</option>
+            <option value="GL-TYPE">GL-TYPE</option>
           </select>
           <select id="kl-status" class="field-input" style="max-width:160px;padding:6px 10px;font-size:12px" onchange="taiKhoLot()">
             <option value="" selected>Mọi trạng thái</option>
@@ -1007,8 +1119,14 @@
     </div>
     <div id="inv-panel-lots" class="inv-panel">
       <div class="panel"><div class="panel-header"><h3><i class="fa-solid fa-scroll"></i> LOT (lọc API)</h3></div>
-        <div class="inv-inline-filters">
+        <div class="inv-inline-filters" style="flex-wrap:wrap;">
           <input type="text" id="inv-lot-q" class="field-input" placeholder="Tìm nhanh (q)" style="max-width:200px;padding:6px 10px;font-size:12px">
+          <select id="inv-lot-film-group" class="field-input" style="max-width:150px;padding:6px 10px;font-size:12px" onchange="loadLots()">
+            <option value="">Tất cả nhóm phim</option>
+            <option value="WINDOW_FILM">Cách nhiệt (PCN)</option>
+            <option value="PPF">Phim PPF</option>
+            <option value="GLASS_FILM">Cường lực (CL)</option>
+          </select>
           <select id="inv-lot-status" class="field-input" style="max-width:160px;padding:6px 10px;font-size:12px" onchange="loadLots()">
             <option value="">Đang hoạt động (NEW, IN_USE, LOCKED)</option>
             <option value="NEW">MỚI (NEW)</option>
@@ -1022,15 +1140,21 @@
           <button type="button" class="btn btn-outline btn-sm" onclick="resetInvLots()"><i class="fa-solid fa-rotate-right"></i> Làm mới</button>
         </div>
         <div class="table-wrap"><table class="data-table">
-          <thead><tr><th>Mã LOT</th><th>Mã Vật Tư</th><th>Còn / Gốc (m)</th><th>Trạng thái</th><th>Khóa</th><th>Vị trí lưu trữ</th><th>Người nhập kho</th><th>Ngày nhập kho</th><th>Thao tác</th></tr></thead>
+          <thead><tr><th>Mã LOT</th><th>Mã Vật Tư</th><th>Nhóm phim</th><th>Còn / Gốc (m)</th><th>Trạng thái</th><th>Khóa</th><th>Vị trí lưu trữ</th><th>Người nhập kho</th><th>Ngày nhập kho</th><th>Thao tác</th></tr></thead>
           <tbody id="inv-table-lots"></tbody>
         </table></div>
       </div>
     </div>
     <div id="inv-panel-offcuts" class="inv-panel" style="display:none">
       <div class="panel"><div class="panel-header"><h3><i class="fa-solid fa-scissors"></i> Mảnh dư (Quản lý)</h3></div>
-        <div class="inv-inline-filters">
+        <div class="inv-inline-filters" style="flex-wrap:wrap;">
           <input type="text" id="inv-oc-q" class="field-input" placeholder="Tìm (q)" style="max-width:200px;padding:6px 10px;font-size:12px">
+          <select id="inv-oc-film-group" class="field-input" style="max-width:150px;padding:6px 10px;font-size:12px" onchange="loadOffcuts()">
+            <option value="">Tất cả nhóm phim</option>
+            <option value="WINDOW_FILM">Cách nhiệt (PCN)</option>
+            <option value="PPF">Phim PPF</option>
+            <option value="GLASS_FILM">Cường lực (CL)</option>
+          </select>
           <select id="inv-oc-status" class="field-input" style="max-width:180px;padding:6px 10px;font-size:12px" onchange="loadOffcuts()">
             <option value="" selected>Đang hoạt động</option>
             <option value="AVAILABLE">SẴN SÀNG (AVAILABLE)</option>
@@ -1042,7 +1166,7 @@
           <button type="button" class="btn btn-outline btn-sm" onclick="resetInvOffcuts()"><i class="fa-solid fa-rotate-right"></i> Làm mới</button>
         </div>
         <div class="table-wrap"><table class="data-table">
-          <thead><tr><th>Mã mảnh dư</th><th>Mã vật tư</th><th>Kích thước (R×D)</th><th>Diện tích (m²)</th><th>Chất lượng</th><th>Trạng thái</th><th>Đang khóa</th><th>Vị trí</th><th>Người nhập</th><th>Ngày nhập</th><th>Thao tác</th></tr></thead>
+          <thead><tr><th>Mã mảnh dư</th><th>Mã vật tư</th><th>Nhóm phim</th><th>Kích thước (R×D)</th><th>Diện tích (m²)</th><th>Chất lượng</th><th>Trạng thái</th><th>Đang khóa</th><th>Vị trí</th><th>Người nhập</th><th>Ngày nhập</th><th>Thao tác</th></tr></thead>
           <tbody id="inv-table-offcuts"></tbody>
         </table></div>
       </div>
@@ -1085,8 +1209,14 @@
     </div>
     <div class="panel">
       <div class="panel-header"><h3><i class="fa-solid fa-puzzle-piece"></i> Danh Sách Mảnh Dư</h3></div>
-      <div class="inv-inline-filters" style="padding: 0 16px 16px; display: flex; gap: 8px;">
+      <div class="inv-inline-filters" style="padding: 0 16px 16px; display: flex; gap: 8px; flex-wrap:wrap;">
         <input type="text" id="oc-q" class="field-input" placeholder="Tìm nhanh (q)" style="max-width:200px;padding:6px 10px;font-size:12px">
+        <select id="oc-film-group" class="field-input" style="max-width:150px;padding:6px 10px;font-size:12px" onchange="taiManhDu()">
+          <option value="">Tất cả nhóm phim</option>
+          <option value="WINDOW_FILM">Cách nhiệt (PCN)</option>
+          <option value="PPF">Phim PPF</option>
+          <option value="GLASS_FILM">Cường lực (CL)</option>
+        </select>
         <select id="oc-status" class="field-input" style="max-width:180px;padding:6px 10px;font-size:12px" onchange="taiManhDu()">
           <option value="" selected>Đang hoạt động</option>
           <option value="ALL">Mọi trạng thái</option>
@@ -1101,11 +1231,59 @@
       <div class="table-wrap">
         <table class="data-table">
           <thead><tr>
-            <th>Mã mảnh dư</th><th>LOT gốc</th><th>Loại phim</th><th>Rộng (m)</th>
-            <th>Dài (m)</th><th>Diện tích (m²)</th><th>Đang khóa</th><th>Vị trí</th><th>Người nhập</th><th>Ngày nhập</th><th>Trạng thái</th>
+            <th>Mã mảnh dư</th><th>LOT gốc</th><th>Nhóm phim</th><th>Mã vật tư</th>
+            <th>Rộng (m)</th><th>Dài (m)</th><th>Diện tích (m²)</th><th>Đang khóa</th><th>Vị trí</th><th>Người nhập</th><th>Ngày nhập</th><th>Trạng thái</th>
           </tr></thead>
           <tbody id="table-offcuts-body"></tbody>
         </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════════ THẢM SÀN ════════════════ -->
+  <div class="tab-pane" id="tab-floormats">
+    <div class="section-header">
+      <h2><i class="fa-solid fa-border-all"></i> Kho Thảm Trải Sàn</h2>
+      <p>Quản lý tồn kho thảm sàn theo số lượng (bộ/cái). Theo dõi tồn thực, số lượng đang giữ chỗ và ngưỡng cảnh báo thấp.</p>
+    </div>
+
+    <div class="panel" style="margin-bottom:16px">
+      <div class="panel-header" style="display:flex;align-items:center;justify-content:space-between">
+        <h3><i class="fa-solid fa-cubes-stacked"></i> Danh Sách SKU Thảm Sàn</h3>
+        <button type="button" class="btn btn-primary btn-sm" id="btn-fm-add-sku"><i class="fa-solid fa-plus"></i> Thêm SKU</button>
+      </div>
+      <div class="inv-inline-filters" style="padding:0 16px 16px;display:flex;gap:8px;flex-wrap:wrap">
+        <input type="text" id="fm-q" class="field-input" placeholder="Tìm nhanh SKU / tên…" style="max-width:220px;padding:6px 10px;font-size:12px" oninput="renderFloorMatsTable()">
+        <button type="button" class="btn btn-outline btn-sm" onclick="loadFloorMats()"><i class="fa-solid fa-rotate-right"></i> Làm mới</button>
+      </div>
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead><tr>
+            <th>SKU</th><th>Tên sản phẩm</th><th>Đơn vị</th>
+            <th>Tồn thực</th><th>Đang giữ</th><th>Khả dụng</th>
+            <th>Ngưỡng TT</th><th>Nhà cung cấp</th><th>Ghi chú</th><th>Thao tác</th>
+          </tr></thead>
+          <tbody id="table-floormats-body"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-header"><h3><i class="fa-solid fa-right-left"></i> Nhập Kho Thảm Sàn</h3></div>
+      <div style="padding:16px;display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">
+        <div class="manual-field" style="min-width:180px">
+          <label class="manual-label">SKU</label>
+          <select id="fm-import-sku" class="manual-control"></select>
+        </div>
+        <div class="manual-field" style="min-width:100px">
+          <label class="manual-label">Số lượng</label>
+          <input type="number" id="fm-import-qty" class="manual-control" min="1" value="1" />
+        </div>
+        <div class="manual-field" style="min-width:200px">
+          <label class="manual-label">Ghi chú</label>
+          <input type="text" id="fm-import-note" class="manual-control" placeholder="Lý do nhập kho…" />
+        </div>
+        <button type="button" class="btn btn-primary" id="btn-fm-import"><i class="fa-solid fa-arrow-down-to-line"></i> Nhập kho</button>
       </div>
     </div>
   </div>
@@ -1150,7 +1328,7 @@
     <div class="panel" style="margin-top: 20px;">
       <div class="panel-header" style="display: flex; justify-content: space-between; align-items: center;">
         <h3><i class="fa-solid fa-address-book"></i> Quản lý danh sách nhân sự</h3>
-        <button class="btn btn-primary btn-sm" onclick="openStaffModal()"><i class="fa-solid fa-plus"></i> Thêm nhân viên</button>
+        <button type="button" class="btn btn-primary btn-sm" data-dyc-require="hr_write" onclick="openStaffModal()"><i class="fa-solid fa-plus"></i> Thêm nhân viên</button>
       </div>
       <div class="table-wrap">
         <table class="data-table">
@@ -1168,8 +1346,6 @@
             <!-- Data loaded here via JS -->
           </tbody>
         </table>
-          </tbody>
-        </table>
       </div>
     </div>
 
@@ -1177,7 +1353,7 @@
     <div class="panel" style="margin-top: 20px;">
       <div class="panel-header" style="display: flex; justify-content: space-between; align-items: center;">
         <h3><i class="fa-solid fa-users-gear"></i> Quản lý đội nhóm</h3>
-        <button class="btn btn-primary btn-sm" onclick="openTeamModal()"><i class="fa-solid fa-plus"></i> Thêm đội</button>
+        <button type="button" class="btn btn-primary btn-sm" data-dyc-require="hr_write" onclick="openTeamModal()"><i class="fa-solid fa-plus"></i> Thêm đội</button>
       </div>
       <div class="table-wrap">
         <table class="data-table">
@@ -1320,7 +1496,7 @@
               <span class="dl">Mã hồ sơ xe</span><span class="dv" id="quick-req-veh-id">—</span>
               <span class="dl">Dòng xe</span><span class="dv" id="quick-req-model">—</span>
               <span class="dl">Số VIN (6 số cuối)</span><span class="dv" id="quick-req-vin">—</span>
-              <span class="dl">Hạn giao xe</span><span class="dv highlight-red" id="quick-req-deadline">—</span>
+              <span class="dl">Hạn hoàn tất thi công</span><span class="dv highlight-red" id="quick-req-deadline">—</span>
             </div>
           </div>
           <div class="ocr-form-section">
@@ -1383,7 +1559,7 @@
       </div>
       <div style="padding: 16px;">
         <input type="hidden" id="team-member-team-id">
-        <div class="form-group" style="margin-bottom: 12px; display: flex; gap: 8px; align-items: flex-end;">
+        <div class="form-group" data-hr-assign-only style="margin-bottom: 12px; display: flex; gap: 8px; align-items: flex-end;">
           <div style="flex: 1;">
             <label style="display:block; margin-bottom: 4px; font-weight: bold; font-size: 13px;">Chọn nhân viên</label>
             <select id="team-member-staff-select" class="field-input">
@@ -1419,8 +1595,14 @@
     </div>
   </div>
 
-  <!-- ════════════════ BÁO CÁO THÁNG ════════════════ -->
+  <!-- ════════════════ BÁO CÁO THÁNG (+ báo cáo ngày) ════════════════ -->
   <div class="tab-pane" id="tab-monthly">
+    <div class="monthly-subtabs inv-toolbar" style="margin-bottom:16px;flex-wrap:wrap;gap:8px;align-items:center">
+      <button type="button" class="btn btn-primary btn-sm monthly-subtab active" data-monthly-sub="monthly" id="btn-monthly-sub-monthly"><i class="fa-solid fa-chart-column"></i> Báo cáo tháng</button>
+      <button type="button" class="btn btn-outline btn-sm monthly-subtab" data-monthly-sub="daily" id="btn-monthly-sub-daily"><i class="fa-solid fa-calendar-day"></i> Báo cáo ngày</button>
+    </div>
+
+    <div id="monthly-pane-monthly" class="monthly-subpane">
     <div class="section-header">
       <h2><i class="fa-solid fa-chart-column"></i> Báo Cáo Tháng — Chỉ Số Đa Luồng</h2>
       <p>Phân tích PPF & Phim Cách Nhiệt — Đúng hạn, Tiêu hao vật tư, Hiệu suất đội</p>
@@ -1459,6 +1641,75 @@
         </table>
       </div>
     </div>
+    </div>
+
+    <div id="monthly-pane-daily" class="monthly-subpane daily-dash-root" style="display:none">
+      <div class="daily-dash-hero">
+        <p class="daily-dash-kicker">Báo cáo điều hành · Asia/Ho_Chi_Minh</p>
+        <h2 class="daily-dash-title">Theo dõi trong ngày <span id="daily-dash-date-label" class="daily-dash-date-accent"></span></h2>
+        <p class="daily-dash-lead">Bảng theo xe đồng bộ cột quản lý hằng ngày (STT, khung thời gian, tư vấn, số khung, PPF/PCN, hoàn tất, ghi chú luồng). KPI và cảnh báo vận hành bên dưới.</p>
+      </div>
+      <div class="panel daily-report-toolbar daily-dash-toolbar">
+        <div class="daily-toolbar-inner">
+          <label class="daily-toolbar-label muted">Chọn ngày (D)</label>
+          <input type="date" id="daily-report-date" class="field-input daily-dash-date-input">
+          <button type="button" class="btn btn-primary btn-sm" id="btn-daily-report-view"><i class="fa-solid fa-eye"></i> Xem báo cáo</button>
+          <button type="button" class="btn btn-outline btn-sm" id="btn-daily-report-html"><i class="fa-solid fa-file-arrow-down"></i> Tải báo cáo HTML</button>
+          <button type="button" class="btn btn-outline btn-sm" id="btn-daily-report-refresh"><i class="fa-solid fa-rotate"></i> Làm mới</button>
+        </div>
+      </div>
+      <p id="daily-report-error" class="daily-dash-error muted" style="display:none"></p>
+      <div id="daily-report-kpis" class="monthly-kpis daily-dash-kpis"></div>
+
+      <div class="panel daily-dash-manager-card">
+        <div class="panel-header daily-dash-manager-head">
+          <div>
+            <h3>Theo dõi theo xe / đơn</h3>
+            <p class="daily-dash-manager-sub muted">Hạn giao trong ngày D và các đơn còn luồng đang mở · cột gần với mẫu báo cáo tháng của quản lý</p>
+          </div>
+        </div>
+        <div class="table-wrap daily-manager-table-wrap">
+          <table class="data-table daily-manager-table" id="daily-manager-table">
+            <thead><tr>
+              <th class="daily-col-stt">STT</th>
+              <th class="daily-col-stt2">STT tháng</th>
+              <th>Ngày thực hiện / hạn</th>
+              <th>Mã đơn</th>
+              <th>Tư vấn bán hàng</th>
+              <th>Số khung</th>
+              <th>Dòng xe</th>
+              <th class="daily-col-check">PPF</th>
+              <th class="daily-col-check">PCN</th>
+              <th class="daily-col-check">Hoàn thành</th>
+              <th>Hạn ngày D</th>
+              <th>Ghi chú (luồng)</th>
+              <th class="daily-col-link">Chi tiết</th>
+            </tr></thead>
+            <tbody id="daily-manager-body"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="daily-dash-secondary">
+        <div class="panel daily-dash-side-card"><div class="panel-header"><h3>Việc đang mở</h3></div><div id="daily-sec-open" class="daily-sec-body daily-dash-side-body"></div></div>
+        <div class="panel daily-dash-side-card"><div class="panel-header"><h3>Hạn giao xe (ngày D)</h3></div><div id="daily-sec-due" class="daily-sec-body daily-dash-side-body"></div></div>
+        <div class="panel daily-dash-side-card"><div class="panel-header"><h3>Hoàn tất hôm qua (D−1)</h3></div><div id="daily-sec-done" class="daily-sec-body daily-dash-side-body"></div></div>
+        <div class="panel daily-dash-side-card daily-dash-warn-card"><div class="panel-header"><h3>Cảnh báo</h3></div><div id="daily-sec-warn" class="daily-sec-body daily-dash-side-body"></div></div>
+      </div>
+
+      <div class="panel daily-dash-detail-card">
+        <div class="panel-header"><h3>Chi tiết theo luồng (kỹ thuật)</h3><p class="muted" style="font-size:12px;margin:4px 0 0;font-weight:400">Đầy đủ mã luồng, KTV, SLA — giữ nguyên dữ liệu hệ thống</p></div>
+        <div class="table-wrap daily-detail-table-wrap">
+          <table class="data-table" id="daily-detail-table">
+            <thead><tr>
+              <th>Mã đơn</th><th>Mã luồng</th><th>Loại</th><th>Xe</th><th>VIN</th><th>Dealer/KH</th><th>KTV/Đội</th>
+              <th>Trạng thái</th><th>Hạn giao</th><th>Bắt đầu</th><th>Hoàn tất</th><th>SLA</th><th>Cảnh báo</th><th>Chi tiết</th>
+            </tr></thead>
+            <tbody id="daily-detail-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
   </div>
 
   <!-- ════════════════ NHẬT KÝ KIỂM TOÁN ════════════════ -->
@@ -1488,6 +1739,79 @@
           </tr></thead>
           <tbody id="table-audit-body"></tbody>
         </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════════ TELEGRAM (Admin) ════════════════ -->
+  <div class="tab-pane" id="tab-integrations">
+    <div class="section-header">
+      <h2><i class="fa-brands fa-telegram"></i> Telegram — DYC Vận hành Group</h2>
+      <p>Thông báo vận hành qua Bot API; token chỉ cấu hình trên server (Render env). Báo cáo định kỳ gọi <code>POST /api/reports/telegram/daily</code> và <code>…/monthly</code> từ cron bên ngoài.</p>
+    </div>
+    <div class="panel" style="margin-bottom:16px">
+      <div class="panel-header"><h3>Trạng thái cấu hình</h3></div>
+      <div style="padding:12px 16px;font-size:13px" id="telegram-status-body">Đang tải…</div>
+      <div style="padding:0 16px 12px;display:flex;gap:8px;flex-wrap:wrap">
+        <button type="button" class="btn btn-primary btn-sm" id="btn-telegram-refresh"><i class="fa-solid fa-rotate"></i> Làm mới</button>
+        <button type="button" class="btn btn-outline btn-sm" id="btn-telegram-test"><i class="fa-solid fa-paper-plane"></i> Gửi tin thử</button>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+        <h3><i class="fa-solid fa-list"></i> Telegram message logs</h3>
+        <button type="button" class="btn btn-outline btn-sm" id="btn-telegram-logs-refresh"><i class="fa-solid fa-rotate"></i> Tải lại</button>
+      </div>
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead><tr>
+            <th>id</th><th>event</th><th>status</th><th>request</th><th>workstream</th><th>dedupe</th><th>preview</th><th>created</th><th></th>
+          </tr></thead>
+          <tbody id="table-telegram-logs-body"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- PANEL RESET DỮ LIỆU -->
+    <div class="panel" style="margin-top:16px;border:1px solid rgba(239,68,68,0.35)">
+      <div class="panel-header" style="background:rgba(239,68,68,0.06)">
+        <h3 style="color:#ef4444"><i class="fa-solid fa-triangle-exclamation"></i> Quản lý dữ liệu & Reset</h3>
+      </div>
+      <div style="padding:12px 16px">
+        <p style="font-size:12px;color:var(--text-secondary);margin-bottom:12px">
+          Yêu cầu biến môi trường <code>ALLOW_DB_RESET=true</code> trên server và nhập đúng <strong>Admin Token</strong> để thực hiện.
+        </p>
+        <div style="margin-bottom:12px">
+          <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">Admin Reset Token</label>
+          <input type="password" id="reset-admin-token" class="field-input" placeholder="Nhập ADMIN_RESET_TOKEN đã cấu hình trên Render" style="max-width:400px;font-size:12px">
+        </div>
+        <div style="display:flex;flex-direction:column;gap:10px;max-width:600px">
+          <!-- L1 -->
+          <div style="border:1px solid var(--border);border-radius:6px;padding:10px 14px;display:flex;justify-content:space-between;align-items:center;gap:12px">
+            <div>
+              <div style="font-weight:600;font-size:13px">L1 — Xóa Logs & Thông báo</div>
+              <div style="font-size:11px;color:var(--text-secondary);margin-top:2px">Xóa audit log, thông báo, Telegram log. Giữ nguyên tất cả dữ liệu nghiệp vụ.</div>
+            </div>
+            <button type="button" class="btn btn-outline btn-sm" onclick="adminReset('l1')" style="white-space:nowrap;border-color:#f59e0b;color:#f59e0b">Xóa logs</button>
+          </div>
+          <!-- L2 -->
+          <div style="border:1px solid var(--border);border-radius:6px;padding:10px 14px;display:flex;justify-content:space-between;align-items:center;gap:12px">
+            <div>
+              <div style="font-weight:600;font-size:13px">L2 — Xóa dữ liệu vận hành</div>
+              <div style="font-size:11px;color:var(--text-secondary);margin-top:2px">Xóa đơn, luồng, lệnh, giao dịch kho, OCR draft, logs. <strong>Giữ</strong>: đại lý, kho LOT, định mức, users.</div>
+            </div>
+            <button type="button" class="btn btn-outline btn-sm" onclick="adminReset('l2')" style="white-space:nowrap;border-color:#ef4444;color:#ef4444">Xóa vận hành</button>
+          </div>
+          <!-- L3 -->
+          <div style="border:1px solid rgba(239,68,68,0.5);border-radius:6px;padding:10px 14px;display:flex;justify-content:space-between;align-items:center;gap:12px;background:rgba(239,68,68,0.04)">
+            <div>
+              <div style="font-weight:600;font-size:13px;color:#ef4444">L3 — Full Reset + Seed Demo</div>
+              <div style="font-size:11px;color:var(--text-secondary);margin-top:2px">Xóa TẤT CẢ và nạp lại dữ liệu demo chuẩn. Không thể hoàn tác.</div>
+            </div>
+            <button type="button" class="btn btn-sm" onclick="adminReset('l3')" style="white-space:nowrap;background:#ef4444;color:#fff;border:none">Full Reset</button>
+          </div>
+        </div>
+        <div id="reset-result" style="margin-top:12px;font-size:12px;display:none"></div>
       </div>
     </div>
   </div>
@@ -1703,8 +2027,13 @@
 </footer>
 
 <div id="toast-container"></div>
-<script src="/static/hr.js"></script>
-<script src="/static/workstream_allocation_modal.js?v=6"></script>
-<script src="/static/app.js?v=30"></script>
+<div class="dyc-fab-stack" id="dyc-fab-stack" aria-label="Thao tác nhanh">
+  <button type="button" class="dyc-fab" id="dyc-fab-notif" title="Thông báo" aria-label="Mở thông báo"><i class="fa-solid fa-bell"></i></button>
+  <button type="button" class="dyc-fab" id="dyc-fab-reports" title="Báo cáo tháng / ngày" aria-label="Mở báo cáo"><i class="fa-solid fa-chart-column"></i></button>
+  <button type="button" class="dyc-fab" id="dyc-fab-telegram" title="Telegram (Admin)" aria-label="Telegram"><i class="fa-brands fa-telegram"></i></button>
+</div>
+<script src="/static/hr.js?v=2"></script>
+<script src="/static/workstream_allocation_modal.js?v=7"></script>
+<script src="/static/app.js?v=36"></script>
 </body>
 </html>

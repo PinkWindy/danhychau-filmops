@@ -347,10 +347,13 @@
   window.savePpfPreflightEditor = async function () {
     const ctx = window.__ppfEditorCtx;
     if (!ctx) return;
+    if (typeof window.dycPerm === 'function' && !window.dycPerm('can_write_allocation')) {
+      if (typeof toast === 'function') toast('warning', 'Quyền', 'Tài khoản không được lưu phân bổ LOT.');
+      return;
+    }
     const reason = document.getElementById('ppf-alloc-reason')?.value?.trim() || '';
     const payload = readAllocFromDom(ctx.alloc);
     payload.change_reason = reason;
-    payload.actor = 'QL-002';
     payload.technician_team = document.getElementById('ppf-edit-team')?.value;
     payload.assigned_technician_name = document.getElementById('ppf-edit-tech')?.value;
     const full = (payload.items || []).find((x) => x.item_code === 'FULL_VEHICLE_PPF' && x.is_selected);
@@ -365,6 +368,7 @@
     try {
       const res = await fetch(`/api/workstreams/${ctx.wsId}/ppf-allocation`, {
         method: 'PUT',
+        credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });

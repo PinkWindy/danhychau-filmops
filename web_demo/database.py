@@ -80,6 +80,7 @@ class DbDealer(Base):
     city = Column(String)
     full_address = Column(Text)
     amis_customer_code = Column(String)
+    dealer_code = Column(String)  # Mã ngắn dùng trong mã đơn: VD LEX-SG, BKH
 
 
 class DbCustomer(Base):
@@ -139,7 +140,7 @@ class DbLotInventory(Base):
     lot_id = Column(String, primary_key=True, index=True)
     material_code = Column(String, nullable=False)
     material_name = Column(String)          # "Phim PPF T-TYPE Solar Gard"
-    film_type = Column(String)              # PPF | WINDOW_FILM | OTHER
+    film_type = Column(String)              # PPF | WINDOW_FILM | GLASS_FILM | OTHER
     manufacturer = Column(String)
     supplier = Column(String)
     invoice_no = Column(String)
@@ -154,6 +155,9 @@ class DbLotInventory(Base):
     locked_by_request_id = Column(String)
     locked_by_workstream_id = Column(String)
     import_date = Column(String)
+    # Ghi đè hiển thị / chỉnh sửa meta nhập kho (nếu null → lấy từ bút toán IMPORT_LOT đầu tiên)
+    import_performed_by = Column(String)
+    import_performed_at = Column(String)
     status = Column(String, default="ACTIVE")   # legacy — keep for compat
     note = Column(Text)
 
@@ -165,7 +169,7 @@ class DbOffcutInventory(Base):
     parent_offcut_id = Column(String)
     material_code = Column(String, nullable=False)
     material_name = Column(String)
-    film_type = Column(String)
+    film_type = Column(String)              # PPF | WINDOW_FILM | GLASS_FILM | OTHER
     width_m = Column(Float)
     length_m = Column(Float)
     area_m2 = Column(Float)
@@ -290,13 +294,13 @@ class DbMaterialPreference(Base):
 class DbWorkstream(Base):
     """
     One workstream per service type per request.
-    Types: PPF_INSTALLATION, WINDOW_FILM_INSTALLATION
+    Types: PPF_INSTALLATION, WINDOW_FILM_INSTALLATION, GLASS_FILM_INSTALLATION, FLOOR_MAT_INSTALLATION
     """
     __tablename__ = "workstreams"
     workstream_id = Column(String, primary_key=True, index=True)
     request_id = Column(String, index=True)
-    workstream_type = Column(String)       # PPF_INSTALLATION | WINDOW_FILM_INSTALLATION
-    team_type = Column(String)             # PPF_TEAM | WINDOW_FILM_TEAM
+    workstream_type = Column(String)       # PPF_INSTALLATION | WINDOW_FILM_INSTALLATION | GLASS_FILM_INSTALLATION | FLOOR_MAT_INSTALLATION
+    team_type = Column(String)             # PPF_TEAM | WINDOW_FILM_TEAM | GLASS_FILM_TEAM | FLOOR_MAT_TEAM
     technician_team = Column(String)       # PPF_TEAM_A | WINDOW_FILM_TEAM_B
     assigned_technician_id = Column(String)
     assigned_technician_name = Column(String)
@@ -348,6 +352,7 @@ class DbWorkstream(Base):
     extra_cut_reason = Column(Text)
     extra_cut_wf_allocation_json = Column(Text)  # JSON: phân bổ cắt thêm WF (cùng schema wf_allocation items)
     extra_cut_history_json = Column(Text)  # JSON array: mỗi lần đề xuất (thời điểm, KTV, lý do, wf_allocation)
+    floor_mat_plan_json = Column(Text)    # JSON: [{sku, qty}] cho FLOOR_MAT_INSTALLATION
     # Approval
     approved_by = Column(String)
     approved_at = Column(String)
@@ -517,6 +522,37 @@ class DbNotification(Base):
     created_at = Column(String)
 
 
+class DbAppUser(Base):
+    """Người dùng đăng nhập web (demo: Admin / Quản lý / KTV)."""
+    __tablename__ = "app_users"
+    user_id = Column(String, primary_key=True, index=True)
+    username = Column(String, unique=True, nullable=False, index=True)
+    password_hash = Column(String, nullable=False)
+    display_name = Column(String)
+    role = Column(String, nullable=False)  # ADMIN | MANAGER | TECHNICIAN
+    is_active = Column(Boolean, default=True)
+    created_at = Column(String)
+
+
+class DbTelegramMessageLog(Base):
+    """Log gửi Telegram — dedupe, audit, gửi lại khi FAILED."""
+    __tablename__ = "telegram_message_logs"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    event_type = Column(String, nullable=False, index=True)
+    request_id = Column(String, index=True)
+    workstream_id = Column(String, index=True)
+    job_card_id = Column(String, index=True)
+    telegram_group_name = Column(String)
+    telegram_chat_id = Column(String)
+    message_text = Column(Text)
+    telegram_message_id = Column(String)
+    send_status = Column(String, nullable=False, index=True)  # SENT | FAILED | SKIPPED
+    error_message = Column(Text)
+    dedupe_key = Column(Text, nullable=False, index=True)
+    created_at = Column(String, nullable=False)
+    sent_at = Column(String)
+
+
 class DbStaff(Base):
     __tablename__ = "staff"
     staff_id = Column(String, primary_key=True, index=True)
@@ -548,6 +584,34 @@ class DbTeamMember(Base):
     created_at = Column(String)
 
 
+class DbFloorMatInventory(Base):
+    """Kho thảm trải sàn — quản lý theo số lượng (bộ/cái), không theo LOT/offcut."""
+    __tablename__ = "floor_mat_inventory"
+    sku           = Column(String, primary_key=True)
+    name          = Column(String, nullable=False)
+    unit          = Column(String, default="bộ")    # cái | bộ
+    qty_total     = Column(Integer, default=0)       # Tổng tồn kho thực
+    qty_reserved  = Column(Integer, default=0)       # Đang giữ chờ thi công
+    min_stock     = Column(Integer, default=5)
+    supplier      = Column(String)
+    note          = Column(Text)
+    created_at    = Column(String)
+
+
+class DbFloorMatTransaction(Base):
+    """Nhật ký giao dịch kho thảm sàn: nhập / giữ chỗ / xác nhận trừ / giải phóng."""
+    __tablename__ = "floor_mat_transactions"
+    tx_id         = Column(String, primary_key=True)
+    sku           = Column(String, nullable=False, index=True)
+    request_id    = Column(String, index=True)
+    workstream_id = Column(String, index=True)
+    tx_type       = Column(String)    # IMPORT | RESERVE | CONFIRM_DEDUCT | RELEASE
+    quantity      = Column(Integer)
+    performed_by  = Column(String)
+    note          = Column(Text)
+    created_at    = Column(String)
+
+
 def _add_column_if_missing(conn, table, col, col_def):
     """SQLite helper: add column only if it doesn't exist yet."""
     cursor = conn.execute(f"PRAGMA table_info({table})")
@@ -576,6 +640,8 @@ def init_db():
             ("locked_by_request_id",    "TEXT"),
             ("locked_by_workstream_id", "TEXT"),
             ("note",                    "TEXT"),
+            ("import_performed_by",     "TEXT"),
+            ("import_performed_at",     "TEXT"),
         ]
         for col, col_def in lot_new_cols:
             _add_column_if_missing(conn, "lot_inventory", col, col_def)
@@ -610,6 +676,7 @@ def init_db():
             ("city", "TEXT"),
             ("full_address", "TEXT"),
             ("amis_customer_code", "TEXT"),
+            ("dealer_code", "TEXT"),
         ]
         for col, col_def in dealer_new_cols:
             _add_column_if_missing(conn, "dealers", col, col_def)
@@ -702,6 +769,7 @@ def init_db():
             ("extra_cut_reason", "TEXT"),
             ("extra_cut_wf_allocation_json", "TEXT"),
             ("extra_cut_history_json", "TEXT"),
+            ("floor_mat_plan_json", "TEXT"),
         ]
         for col, col_def in workstream_new_cols:
             _add_column_if_missing(conn, "workstreams", col, col_def)

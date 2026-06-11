@@ -2,8 +2,9 @@
 """Inventory admin APIs — mounted from main.py. All ops write DbInventoryTransaction + DbAuditLog."""
 import datetime
 import json
+import re
 import uuid
-from typing import Optional
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi import Query as QueryParam
@@ -39,6 +40,27 @@ def _now_iso():
     return datetime.datetime.utcnow().isoformat() + "Z"
 
 
+def _normalize_lot_import_date(s: str) -> str:
+    """Chấp nhận yyyy-mm-dd hoặc dd/mm/yyyy → yyyy-mm-dd."""
+    s = (s or "").strip()
+    if not s:
+        raise HTTPException(400, "import_date không được để trống")
+    if re.match(r"^\d{4}-\d{2}-\d{2}$", s):
+        try:
+            datetime.datetime.strptime(s, "%Y-%m-%d")
+            return s
+        except ValueError:
+            raise HTTPException(400, "import_date không hợp lệ (yyyy-mm-dd)")
+    m = re.match(r"^(\d{1,2})/(\d{1,2})/(\d{4})$", s)
+    if m:
+        d, mo, y = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        try:
+            return datetime.date(y, mo, d).isoformat()
+        except ValueError:
+            raise HTTPException(400, "import_date không hợp lệ (dd/mm/yyyy)")
+    raise HTTPException(400, "import_date: nhập yyyy-mm-dd hoặc dd/mm/yyyy")
+
+
 def _norm_lot_status(lot: DbLotInventory) -> str:
     s = (lot.lot_status or lot.status or "ACTIVE").upper()
     if s == "ACTIVE":
@@ -65,7 +87,7 @@ def _norm_offcut_status(o: DbOffcutInventory) -> str:
 
 def assert_source_valid_for_wf6_commit(db: Session, ws: DbWorkstream):
     """Raise HTTPException if allocated LOT/OFFCUT cannot be committed (cleared / insufficient)."""
-    if ws.workstream_type == "WINDOW_FILM_INSTALLATION" and getattr(ws, "wf_allocation_json", None):
+    if ws.workstream_type in ("WINDOW_FILM_INSTALLATION", "GLASS_FILM_INSTALLATION") and getattr(ws, "wf_allocation_json", None):
         try:
             wf_alloc = json.loads(ws.wf_allocation_json)
         except json.JSONDecodeError:
@@ -442,6 +464,24 @@ def _orm_columns_dict(obj) -> dict:
     return {c.key: getattr(obj, c.key, None) for c in sa_inspect(obj).mapper.column_attrs}
 
 
+def lots_to_api_dicts(db: Session, rows: List[DbLotInventory]) -> List[dict]:
+    """Dict LOT cho API — import_performed_by/at ưu tiên cột bảng, fallback bút toán IMPORT_LOT đầu tiên."""
+    if not rows:
+        return []
+    ids = [l.lot_id for l in rows]
+    meta = _first_import_actor_by_source(db, ids, ("IMPORT_LOT",))
+    out: List[dict] = []
+    for l in rows:
+        d = _orm_columns_dict(l)
+        m = meta.get(l.lot_id) or {}
+        col_by = (getattr(l, "import_performed_by", None) or "").strip()
+        col_at = (getattr(l, "import_performed_at", None) or "").strip()
+        d["import_performed_by"] = col_by or (m.get("import_performed_by") or "")
+        d["import_performed_at"] = col_at or (m.get("import_performed_at") or "")
+        out.append(d)
+    return out
+
+
 def register_inventory_routes(app, get_db):
     """Call from main.py: register_inventory_routes(app, get_db)"""
 
@@ -502,9 +542,11 @@ def register_inventory_routes(app, get_db):
                 codes.add(s)
         return sorted(codes)
 
-    def _filter_lots(q, material_code, lot_status, is_locked, storage_location, qq):
+    def _filter_lots(q, material_code, lot_status, is_locked, storage_location, qq, film_type=None):
         if material_code:
             q = q.filter(DbLotInventory.material_code == material_code)
+        if film_type:
+            q = q.filter(DbLotInventory.film_type == film_type)
         if storage_location:
             q = q.filter(DbLotInventory.storage_location.isnot(None)).filter(
                 DbLotInventory.storage_location.like(f"%{storage_location}%")
@@ -532,13 +574,17 @@ def register_inventory_routes(app, get_db):
         is_locked: Optional[bool] = None,
         storage_location: Optional[str] = None,
         qq: Optional[str] = QueryParam(None, alias="q"),
+        film_type: Optional[str] = QueryParam(None, description="Lọc theo loại phim: WINDOW_FILM | PPF | GLASS_FILM | OTHER"),
     ):
         qry = db.query(DbLotInventory)
-        return _filter_lots(qry, material_code, lot_status, is_locked, storage_location, qq)
+        rows = _filter_lots(qry, material_code, lot_status, is_locked, storage_location, qq, film_type)
+        return lots_to_api_dicts(db, rows)
 
-    def _filter_offcuts(q, material_code, offcut_status, quality_status, is_locked, storage_location, qq):
+    def _filter_offcuts(q, material_code, offcut_status, quality_status, is_locked, storage_location, qq, film_type=None):
         if material_code:
             q = q.filter(DbOffcutInventory.material_code == material_code)
+        if film_type:
+            q = q.filter(DbOffcutInventory.film_type == film_type)
         if quality_status:
             q = q.filter(DbOffcutInventory.quality_status == quality_status)
         if storage_location:
@@ -569,9 +615,10 @@ def register_inventory_routes(app, get_db):
         is_locked: Optional[bool] = None,
         storage_location: Optional[str] = None,
         qq: Optional[str] = QueryParam(None, alias="q"),
+        film_type: Optional[str] = QueryParam(None, description="Lọc theo loại phim: WINDOW_FILM | PPF | GLASS_FILM | OTHER"),
     ):
         qry = db.query(DbOffcutInventory)
-        rows = _filter_offcuts(qry, material_code, offcut_status, quality_status, is_locked, storage_location, qq)
+        rows = _filter_offcuts(qry, material_code, offcut_status, quality_status, is_locked, storage_location, qq, film_type)
         ids = [o.offcut_id for o in rows]
         meta = _first_import_actor_by_source(db, ids, ("IMPORT_OFFCUT_MANUAL", "IMPORT_OFFCUT_WORKSTREAM"))
         out = []
@@ -593,6 +640,8 @@ def register_inventory_routes(app, get_db):
 
         def lot_row(l):
             m = lot_meta.get(l.lot_id) or {}
+            col_by = (getattr(l, "import_performed_by", None) or "").strip()
+            col_at = (getattr(l, "import_performed_at", None) or "").strip()
             return {
                 "lot_id": l.lot_id,
                 "material_code": l.material_code or "",
@@ -606,8 +655,8 @@ def register_inventory_routes(app, get_db):
                 "locked_by_request_id": (l.locked_by_request_id or "").strip(),
                 "locked_by_workstream_id": (l.locked_by_workstream_id or "").strip(),
                 "import_date": (l.import_date or "").strip(),
-                "import_performed_by": m.get("import_performed_by") or "",
-                "import_performed_at": m.get("import_performed_at") or "",
+                "import_performed_by": col_by or (m.get("import_performed_by") or ""),
+                "import_performed_at": col_at or (m.get("import_performed_at") or ""),
             }
 
         def oc_row(o):
@@ -677,6 +726,8 @@ def register_inventory_routes(app, get_db):
             is_locked=False,
             lot_status="NEW",
             import_date=datetime.date.today().isoformat(),
+            import_performed_by=performed_by,
+            import_performed_at=_now_iso(),
             status="ACTIVE",
             note=data.get("note"),
         )
@@ -720,6 +771,83 @@ def register_inventory_routes(app, get_db):
         db.commit()
         db.refresh(lot)
         return {"status": "success", "lot": lot}
+
+    @router.patch("/lots/{lot_id}/import-meta")
+    def patch_lot_import_meta(lot_id: str, data: dict, db: Session = Depends(get_db)):
+        """Sửa ngày nhập kho / người nhập kho — bắt buộc lý do; ghi inventory_transactions + audit_logs."""
+        lot = db.query(DbLotInventory).filter(DbLotInventory.lot_id == lot_id).first()
+        if not lot:
+            raise HTTPException(404, "LOT không tồn tại")
+        edit_reason = (data.get("edit_reason") or "").strip()
+        if not edit_reason:
+            raise HTTPException(400, "edit_reason bắt buộc")
+        performed_by = (data.get("edited_by") or data.get("performed_by") or "QL-002").strip()
+        new_by = (data.get("import_performed_by") or "").strip()
+        if not new_by:
+            raise HTTPException(400, "import_performed_by bắt buộc")
+        new_date_iso = _normalize_lot_import_date(str(data.get("import_date") or ""))
+
+        meta = _first_import_actor_by_source(db, [lot_id], ("IMPORT_LOT",))
+        m0 = meta.get(lot_id) or {}
+        before = {
+            "import_date": (lot.import_date or "").strip(),
+            "import_performed_by": (getattr(lot, "import_performed_by", None) or "").strip() or (m0.get("import_performed_by") or ""),
+            "import_performed_at": (getattr(lot, "import_performed_at", None) or "").strip() or (m0.get("import_performed_at") or ""),
+        }
+        after = {
+            "import_date": new_date_iso,
+            "import_performed_by": new_by,
+            "import_performed_at": _now_iso(),
+        }
+        ls = _norm_lot_status(lot)
+        rem = float(lot.remaining_length_m or 0)
+
+        lot.import_date = new_date_iso
+        lot.import_performed_by = new_by
+        lot.import_performed_at = after["import_performed_at"]
+
+        before_json = json.dumps(before, ensure_ascii=False)
+        after_json = json.dumps(after, ensure_ascii=False)
+
+        _add_inv_txn(
+            db,
+            transaction_type="LOT_IMPORT_META_CORRECTED",
+            source_type="LOT",
+            source_id=lot_id,
+            material_code=lot.material_code or "",
+            material_name=lot.material_name,
+            width_m=lot.original_width_m,
+            length_m=lot.original_length_m,
+            area_m2=None,
+            quantity_m=rem,
+            balance_unit="METER",
+            before_balance=rem,
+            after_balance=rem,
+            before_status=ls,
+            after_status=ls,
+            reason=edit_reason,
+            related_request_id=None,
+            related_workstream_id=None,
+            related_job_card_id=None,
+            parent_lot_id=None,
+            parent_offcut_id=None,
+            performed_by=performed_by,
+            performed_role="MANAGER",
+            note=json.dumps({"before": before, "after": after}, ensure_ascii=False),
+        )
+        _audit_inv(
+            db,
+            event_type="LOT_IMPORT_META_UPDATED",
+            source_type="LOT",
+            source_id=lot_id,
+            before_value=before_json,
+            after_value=after_json,
+            reason=edit_reason,
+            actor=performed_by,
+        )
+        db.commit()
+        db.refresh(lot)
+        return {"status": "success", "lot": lots_to_api_dicts(db, [lot])[0]}
 
     @router.post("/offcuts/import")
     def import_offcut_manual(data: dict, db: Session = Depends(get_db)):

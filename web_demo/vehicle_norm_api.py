@@ -195,9 +195,17 @@ def register_vehicle_norm_routes(app, get_db):
             "all",
             description="`all` = định mức ∪ hồ sơ xe; `norms` = chỉ DISTINCT vehicle_model_code từ bảng định mức phim",
         ),
+        film_type: Optional[str] = Query(
+            None,
+            description="Khi có giá trị: chỉ lấy DISTINCT vehicle_model_code từ các định mức có film_type khớp (áp dụng phần định mức, không lọc hồ sơ xe).",
+        ),
     ):
         codes: set[str] = set()
-        for (c,) in db.query(DbVehicleFilmNorm.vehicle_model_code).distinct().all():
+        norm_codes_q = db.query(DbVehicleFilmNorm.vehicle_model_code).distinct()
+        ft = (film_type or "").strip()
+        if ft:
+            norm_codes_q = norm_codes_q.filter(DbVehicleFilmNorm.film_type == ft)
+        for (c,) in norm_codes_q.all():
             s = (c or "").strip()
             if s:
                 codes.add(s)

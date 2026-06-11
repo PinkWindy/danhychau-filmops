@@ -223,6 +223,7 @@ def _serialize_dealer(d: DbDealer) -> dict:
         "city": getattr(d, "city", None) or "",
         "full_address": fa or "",
         "amis_customer_code": getattr(d, "amis_customer_code", None) or "",
+        "dealer_code": getattr(d, "dealer_code", None) or "",
         "status": d.status or "ACTIVE",
         "address": d.address,
         "contact_phone": d.contact_phone,
@@ -550,6 +551,7 @@ def register_customer_routes(app, get_db):
             city=city,
             full_address=full_ad,
             amis_customer_code=(data.get("amis_customer_code") or "").strip() or None,
+            dealer_code=(data.get("dealer_code") or "").strip() or None,
         )
         db.add(d)
         _audit(db, None, "DEALER_CREATED", "DEALER", did, None, name, data.get("note") or "", actor)
@@ -580,7 +582,7 @@ def register_customer_routes(app, get_db):
             "dealer_name", "legal_name", "dealer_group", "tax_code", "address",
             "contact_phone", "contact_person", "email", "status", "note",
             "customer_category", "address_no", "street", "ward", "city",
-            "amis_customer_code",
+            "amis_customer_code", "dealer_code",
         ):
             if field in data and data[field] is not None:
                 setattr(d, field, data[field])
@@ -1274,8 +1276,10 @@ def register_customer_routes(app, get_db):
         svc = data.get("service_selection") or {}
         inc_ppf = bool(svc.get("include_ppf"))
         inc_wf = bool(svc.get("include_window_film"))
-        if not inc_ppf and not inc_wf:
-            raise HTTPException(400, "Phải chọn ít nhất một dịch vụ (PPF hoặc phim cách nhiệt)")
+        inc_gl = bool(svc.get("include_glass_film"))
+        inc_fm = bool(svc.get("include_floor_mat"))
+        if not inc_ppf and not inc_wf and not inc_gl and not inc_fm:
+            raise HTTPException(400, "Phải chọn ít nhất một dịch vụ (PPF, phim cách nhiệt, cường lực hoặc thảm sàn)")
         ppf_type = (svc.get("ppf_type") or "").strip()
         if inc_ppf:
             if ppf_type not in ("T-TYPE", "M-TYPE"):
@@ -1305,6 +1309,31 @@ def register_customer_routes(app, get_db):
         if inc_wf and not wf_item_codes:
             raise HTTPException(400, "Chọn ít nhất một hạng mục phim cách nhiệt")
 
+        default_gl_codes = ["GL_WINDSHIELD", "GL_REAR"]
+        raw_gl = svc.get("glass_film_items")
+        gl_item_codes: List[str] = []
+        if raw_gl and len(raw_gl) > 0 and isinstance(raw_gl[0], dict):
+            for x in raw_gl:
+                ji = str((x or {}).get("job_item") or "").strip()
+                if ji:
+                    gl_item_codes.append(ji)
+        elif raw_gl:
+            gl_item_codes = [str(x).strip() for x in raw_gl if str(x).strip()]
+        else:
+            gl_item_codes = list(default_gl_codes)
+        if inc_gl and not gl_item_codes:
+            raise HTTPException(400, "Chọn ít nhất một hạng mục cường lực")
+
+        raw_fm = svc.get("floor_mat_items") or []
+        fm_plan: List[dict] = []
+        for x in raw_fm:
+            sku = str((x or {}).get("sku") or "").strip()
+            qty = int((x or {}).get("qty") or 0)
+            if sku and qty > 0:
+                fm_plan.append({"sku": sku, "qty": qty})
+        if inc_fm and not fm_plan:
+            raise HTTPException(400, "Phải chọn ít nhất một SKU thảm sàn")
+
         requested_at = (data.get("requested_delivery_at") or "").strip()
         needs_review = False
         review_notes = []
@@ -1313,11 +1342,37 @@ def register_customer_routes(app, get_db):
             review_notes.append("Thiếu requested_delivery_at")
 
         actor = data.get("created_by") or "WEB"
-        today = datetime.date.today()
-        cnt = db.query(DbRequest).filter(
-            DbRequest.request_id.like(f"REQ-{today.strftime('%Y%m%d')}-%")
-        ).count()
-        new_req_id = f"REQ-{today.strftime('%Y%m%d')}-{str(cnt + 1).zfill(3)}"
+        ddmmyy = datetime.date.today().strftime("%d%m%y")
+        # Mã đơn: {Mã đại lý}-{ddmmyy}-{6 cuối VIN} hoặc {6 số thứ tự nếu không có VIN}
+        def _dealer_req_code_local(did: str) -> str:
+            """Ưu tiên dealer.dealer_code, fallback rút gọn từ dealer_id."""
+            if did:
+                try:
+                    dlr = db.query(DbDealer).filter(DbDealer.dealer_id == did).first()
+                    if dlr and getattr(dlr, "dealer_code", None):
+                        return dlr.dealer_code.strip()
+                except Exception:
+                    pass
+            raw = (did or "UNK").strip()
+            if raw.upper().startswith("DEALER_"):
+                raw = raw[7:]
+            parts = raw.upper().split("_")
+            if len(parts) >= 2:
+                return f"{parts[0][:3]}-{parts[-1][:3]}"
+            return raw[:8].upper()
+        d_code = _dealer_req_code_local(dealer_id or "")
+        vin_raw = re.sub(r"[^A-Z0-9]", "", (data.get("vin_number") or data.get("vin_masked") or "").upper())
+        if len(vin_raw) >= 6:
+            suffix = vin_raw[-6:]
+        else:
+            cnt = db.query(DbRequest).filter(
+                DbRequest.request_id.like(f"{d_code}-{ddmmyy}-%")
+            ).count()
+            suffix = str(cnt + 1).zfill(6)
+        new_req_id = f"{d_code}-{ddmmyy}-{suffix}"
+        # Đảm bảo không trùng (cùng ngày, cùng VIN)
+        if db.query(DbRequest).filter(DbRequest.request_id == new_req_id).first():
+            new_req_id = f"{new_req_id}-{_uid()[:4]}"
 
         # --- Dealer ---
         if not dealer_id and dealer_name:
@@ -1596,6 +1651,22 @@ def register_customer_routes(app, get_db):
                 None,
             )
 
+        # Auto-assign sequence numbers per dealer:
+        # đếm TỔNG số đơn của đại lý trong năm/tháng hiện tại (kể cả đơn cũ không có sequence_no)
+        utc_now = _now()
+        utc_str = str(utc_now)
+        y_str = utc_str[:4] if len(utc_str) >= 4 else ""
+        ym_str = utc_str[:7] if len(utc_str) >= 7 else ""
+        count_y = 0
+        count_m = 0
+        for _r in db.query(DbRequest).filter(DbRequest.dealer_id == dealer_id).all():
+            _cat = str(getattr(_r, "created_at", "") or "")
+            if y_str and _cat.startswith(y_str):
+                count_y += 1
+            if ym_str and _cat.startswith(ym_str):
+                count_m += 1
+        seq_no_val = str(count_y + 1)
+        seq_no_month_val = str(count_m + 1)
         req = DbRequest(
             request_id=new_req_id,
             request_no=data.get("request_no"),
@@ -1625,6 +1696,8 @@ def register_customer_routes(app, get_db):
             exception_reason="; ".join(review_notes + stock_flags) if (review_notes or stock_flags) else None,
             service_selection_json=json.dumps(svc, ensure_ascii=False),
             norm_application_json=json.dumps(norm_application, ensure_ascii=False) if norm_application else None,
+            sequence_no=seq_no_val,
+            sequence_no_month=seq_no_month_val,
         )
         db.add(req)
 
@@ -1684,6 +1757,53 @@ def register_customer_routes(app, get_db):
             from wf_allocation_service import build_default_wf_allocation
 
             ws_w.wf_allocation_json = json.dumps(build_default_wf_allocation(db, ws_w), ensure_ascii=False)
+
+        if inc_gl:
+            gl_plan = [{"job_item": ji, "material_code": "GL-TYPE"} for ji in gl_item_codes]
+            gl_lot = _pick_lot_for_material(db, "GL-TYPE", 1.0)
+            ws_gl = DbWorkstream(
+                workstream_id=f"WS-GL-{rid_slug}",
+                request_id=new_req_id,
+                workstream_type="GLASS_FILM_INSTALLATION",
+                team_type="GLASS_FILM_TEAM",
+                technician_team=teams.get("glass_film_team") or "GLASS_FILM_TEAM_A",
+                assigned_technician_id="KTV-003",
+                assigned_technician_name="Nguyễn Văn An",
+                selected_material_code="GL-TYPE",
+                material_plan=json.dumps(gl_plan, ensure_ascii=False),
+                planned_cut_block="152x80",
+                planned_deduction_length_m=0.80,
+                allocated_source_type="LOT" if gl_lot else None,
+                allocated_source_id=gl_lot.lot_id if gl_lot else None,
+                status="PENDING_APPROVAL",
+                actual_confirmation_status="PENDING",
+                created_at=_now(),
+            )
+            db.add(ws_gl)
+            created_ws_types.append("GLASS_FILM_INSTALLATION")
+            db.flush()
+            from wf_allocation_service import build_default_wf_allocation
+
+            ws_gl.wf_allocation_json = json.dumps(build_default_wf_allocation(db, ws_gl), ensure_ascii=False)
+
+        if inc_fm:
+            ws_fm = DbWorkstream(
+                workstream_id=f"WS-FM-{rid_slug}",
+                request_id=new_req_id,
+                workstream_type="FLOOR_MAT_INSTALLATION",
+                team_type="FLOOR_MAT_TEAM",
+                technician_team=teams.get("floor_mat_team") or "FLOOR_MAT_TEAM_A",
+                assigned_technician_id="KTV-003",
+                assigned_technician_name="Nguyễn Văn An",
+                selected_material_code=fm_plan[0]["sku"] if fm_plan else None,
+                material_plan=json.dumps(fm_plan, ensure_ascii=False),
+                floor_mat_plan_json=json.dumps(fm_plan, ensure_ascii=False),
+                status="PENDING_APPROVAL",
+                actual_confirmation_status="PENDING",
+                created_at=_now(),
+            )
+            db.add(ws_fm)
+            created_ws_types.append("FLOOR_MAT_INSTALLATION")
 
         _audit(
             db,

@@ -260,7 +260,8 @@ def build_default_wf_allocation(db: Session, ws: DbWorkstream) -> Dict[str, Any]
     plan_by = {str(p.get("job_item")): p for p in plan_list if isinstance(p, dict)}
 
     vm, my = _effective_vm_and_year(db, req)
-    norm_res = resolve_vehicle_norm_with_year_fallback(db, vm, my, "Phim cách nhiệt")
+    norm_film_type = "Cường lực" if (ws.workstream_type or "") == "GLASS_FILM_INSTALLATION" else "Phim cách nhiệt"
+    norm_res = resolve_vehicle_norm_with_year_fallback(db, vm, my, norm_film_type)
     auto_by = {str(x.get("job_item")): x for x in (norm_res.get("auto_fill_items") or []) if x.get("job_item")}
 
     MAIN_DEFAULT = {"WINDSHIELD", "REAR_WINDOW", "FRONT_SIDE", "REAR_SIDE_TRIANGLE"}
@@ -472,8 +473,8 @@ def _validate_wf_source_line(
 
 
 def validate_wf_allocation(db: Session, ws: DbWorkstream, alloc: Dict[str, Any], admin_override: bool = False) -> None:
-    if ws.workstream_type != "WINDOW_FILM_INSTALLATION":
-        raise _err("WF_INVALID_ITEM_QUANTITY", "Chỉ áp dụng cho WINDOW_FILM_INSTALLATION.")
+    if ws.workstream_type not in ("WINDOW_FILM_INSTALLATION", "GLASS_FILM_INSTALLATION"):
+        raise _err("WF_INVALID_ITEM_QUANTITY", "Chỉ áp dụng cho WINDOW_FILM_INSTALLATION / GLASS_FILM_INSTALLATION.")
     summary = alloc.get("roll_cut_summary") or compute_wf_roll_cut_summary(alloc)
     for it in alloc.get("items") or []:
         if not it.get("is_selected"):
@@ -595,7 +596,7 @@ def sync_extra_cut_latest_snapshot(ws: DbWorkstream) -> None:
     r = (last.get("reason") or "").strip()
     ws.extra_cut_reason = r if r else None
     wa = last.get("wf_allocation")
-    if getattr(ws, "workstream_type", None) == "WINDOW_FILM_INSTALLATION" and isinstance(wa, dict) and (wa.get("items") or []):
+    if getattr(ws, "workstream_type", None) in ("WINDOW_FILM_INSTALLATION", "GLASS_FILM_INSTALLATION") and isinstance(wa, dict) and (wa.get("items") or []):
         ws.extra_cut_wf_allocation_json = json.dumps(wa, ensure_ascii=False)
     else:
         ws.extra_cut_wf_allocation_json = None
@@ -606,8 +607,8 @@ def validate_wf_extra_cut_allocation(db: Session, ws: DbWorkstream, extra_alloc:
     Đăng ký cắt thêm WF: kiểm tra gộp khổ (roll_cut_summary) + tổng mét theo từng LOT/mảnh dư
     không vượt tồn khi cộng với phân bổ đã duyệt (wf_allocation_json).
     """
-    if ws.workstream_type != "WINDOW_FILM_INSTALLATION":
-        raise _err("WF_INVALID_ITEM_QUANTITY", "Chỉ workstream Phim cách nhiệt.")
+    if ws.workstream_type not in ("WINDOW_FILM_INSTALLATION", "GLASS_FILM_INSTALLATION"):
+        raise _err("WF_INVALID_ITEM_QUANTITY", "Chỉ workstream Phim cách nhiệt / Cường lực.")
     n_items, n_src = _count_sources(extra_alloc)
     if n_items < 1 or n_src < 1:
         raise _err(
@@ -841,8 +842,8 @@ def put_wf_allocation(
     ws = db.query(DbWorkstream).filter(DbWorkstream.workstream_id == ws_id).first()
     if not ws:
         raise HTTPException(404, {"error": "NOT_FOUND", "message": "Workstream không tồn tại."})
-    if ws.workstream_type != "WINDOW_FILM_INSTALLATION":
-        raise HTTPException(400, {"error": "INVALID", "message": "Chỉ workstream Phim cách nhiệt."})
+    if ws.workstream_type not in ("WINDOW_FILM_INSTALLATION", "GLASS_FILM_INSTALLATION"):
+        raise HTTPException(400, {"error": "INVALID", "message": "Chỉ workstream Phim cách nhiệt / Cường lực."})
     # Cho phép chỉnh phân bổ đến khi luồng kết thúc / hủy / đã ghi nhận trừ kho. PENDING_APPROVAL = duyệt mã phim (API khác).
     _BLOCKED_WF_PUT_ALLOC = frozenset(
         {
@@ -1158,3 +1159,123 @@ def wf_allocation_has_multi_sources(ws: DbWorkstream) -> bool:
             if (s.get("source_id") or "").strip() and float(s.get("allocated_length_m") or 0) > 0:
                 n += 1
     return n > 1
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# FLOOR MAT — reserve / confirm_deduct / release helpers
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _fm_uid():
+    import uuid
+    return uuid.uuid4().hex[:10].upper()
+
+
+def _fm_now():
+    import datetime
+    return datetime.datetime.utcnow().isoformat() + "Z"
+
+
+def reserve_floor_mat(db: Session, ws: DbWorkstream) -> None:
+    """Quản lý duyệt đơn → giữ chỗ qty_reserved cho từng SKU trong plan."""
+    from database import DbFloorMatInventory, DbFloorMatTransaction
+
+    raw = getattr(ws, "floor_mat_plan_json", None) or ""
+    if not raw:
+        return
+    try:
+        plan = json.loads(raw)
+    except json.JSONDecodeError:
+        return
+    for item in plan:
+        sku = (item.get("sku") or "").strip()
+        qty = int(item.get("qty") or 0)
+        if not sku or qty <= 0:
+            continue
+        row = db.query(DbFloorMatInventory).filter(DbFloorMatInventory.sku == sku).first()
+        if not row:
+            continue
+        avail = (row.qty_total or 0) - (row.qty_reserved or 0)
+        if avail < qty:
+            raise HTTPException(
+                400,
+                {"error": "FM_INSUFFICIENT_STOCK", "message": f"SKU {sku}: chỉ còn {avail} {row.unit}, cần {qty}."},
+            )
+        row.qty_reserved = (row.qty_reserved or 0) + qty
+        db.add(DbFloorMatTransaction(
+            tx_id=f"FMT-{_fm_uid()}",
+            sku=sku,
+            request_id=ws.request_id,
+            workstream_id=ws.workstream_id,
+            tx_type="RESERVE",
+            quantity=qty,
+            performed_by="SYSTEM",
+            note=f"Giữ chỗ khi duyệt đơn {ws.request_id}",
+            created_at=_fm_now(),
+        ))
+
+
+def confirm_floor_mat_deduct(db: Session, ws: DbWorkstream) -> None:
+    """KTV hoàn tất thi công → trừ qty_total và giải phóng qty_reserved."""
+    from database import DbFloorMatInventory, DbFloorMatTransaction
+
+    raw = getattr(ws, "floor_mat_plan_json", None) or ""
+    if not raw:
+        return
+    try:
+        plan = json.loads(raw)
+    except json.JSONDecodeError:
+        return
+    for item in plan:
+        sku = (item.get("sku") or "").strip()
+        qty = int(item.get("qty") or 0)
+        if not sku or qty <= 0:
+            continue
+        row = db.query(DbFloorMatInventory).filter(DbFloorMatInventory.sku == sku).first()
+        if not row:
+            continue
+        row.qty_total = max(0, (row.qty_total or 0) - qty)
+        row.qty_reserved = max(0, (row.qty_reserved or 0) - qty)
+        db.add(DbFloorMatTransaction(
+            tx_id=f"FMT-{_fm_uid()}",
+            sku=sku,
+            request_id=ws.request_id,
+            workstream_id=ws.workstream_id,
+            tx_type="CONFIRM_DEDUCT",
+            quantity=qty,
+            performed_by="SYSTEM",
+            note=f"Xác nhận trừ kho sau thi công {ws.workstream_id}",
+            created_at=_fm_now(),
+        ))
+
+
+def release_floor_mat(db: Session, ws: DbWorkstream) -> None:
+    """Từ chối / hủy đơn → giải phóng qty_reserved."""
+    from database import DbFloorMatInventory, DbFloorMatTransaction
+
+    raw = getattr(ws, "floor_mat_plan_json", None) or ""
+    if not raw:
+        return
+    try:
+        plan = json.loads(raw)
+    except json.JSONDecodeError:
+        return
+    for item in plan:
+        sku = (item.get("sku") or "").strip()
+        qty = int(item.get("qty") or 0)
+        if not sku or qty <= 0:
+            continue
+        row = db.query(DbFloorMatInventory).filter(DbFloorMatInventory.sku == sku).first()
+        if not row:
+            continue
+        row.qty_reserved = max(0, (row.qty_reserved or 0) - qty)
+        db.add(DbFloorMatTransaction(
+            tx_id=f"FMT-{_fm_uid()}",
+            sku=sku,
+            request_id=ws.request_id,
+            workstream_id=ws.workstream_id,
+            tx_type="RELEASE",
+            quantity=qty,
+            performed_by="SYSTEM",
+            note=f"Giải phóng giữ chỗ khi hủy {ws.workstream_id}",
+            created_at=_fm_now(),
+        ))

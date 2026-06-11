@@ -1,11 +1,41 @@
 __pycache__/
 *.pyc
+*.pyo
 .env
+.env.*
 .venv/
 venv/
+
+# SQLite database files — không commit DB lên git
+*.db
 *.db-journal
+*.db-shm
+*.db-wal
+
+# Backup DB
+web_demo/backups/
+web_demo/backups/**
+
+# Ảnh upload của user
+web_demo/static/uploads/
+web_demo/static/uploads/**
+
+# Pytest cache
+.pytest_cache/
+web_demo/.pytest_cache/
+
+# IDE
 .idea/
 .vscode/
+
+# Node (nếu có tool frontend)
 node_modules/
 dist/
 build/
+
+# Temporary patch/fix scripts (không cần đưa lên production)
+web_demo/patch*.py
+web_demo/fix*.py
+web_demo/patch*.js
+web_demo/fix*.js
+web_demo/static/patch*.js

@@ -3,6 +3,15 @@
    ================================================================ */
 'use strict';
 
+(function () {
+  const orig = window.fetch;
+  window.fetch = function (input, init) {
+    const base = { ...(init || {}) };
+    if (!base.credentials) base.credentials = 'same-origin';
+    return orig.call(this, input, base);
+  };
+})();
+
 function _esc(s) {
   return String(s ?? '')
     .replace(/&/g, '&amp;')
@@ -249,6 +258,8 @@ function setupEditorAddress(prefix) {
 }
 
 const DYC_MODEL_CODES = ['RX300', 'RX350', 'ES250', 'LM500H', 'CAMRY', 'FORTUNER']; // fallback khi API model-options lỗi
+const FILM_TYPE_VI = { WINDOW_FILM: 'Cách nhiệt', PPF: 'PPF', GLASS_FILM: 'Cường lực', OTHER: 'Khác' };
+function filmTypeLabel(ft) { const k = (ft || '').trim().toUpperCase(); return FILM_TYPE_VI[k] || ft || '—'; }
 const DYC_MODEL_YEAR_OPTS = (() => {
   const a = [];
   for (let y = 2013; y <= 2026; y += 1) a.push(y);
@@ -408,21 +419,42 @@ async function refreshModelDatalistFromApi() {
   dl.innerHTML = DYC_MODEL_CODES.map((m) => `<option value="${_esc(m)}"></option>`).join('');
 }
 
-/** Datalist «Dòng xe» trên form Tạo đơn thủ công: chỉ mã đã có trong Định mức phim (DISTINCT, không trùng). */
-async function refreshMcNormModelDatalistFromApi() {
-  let dl = document.getElementById('dyc-mc-model-datalist');
-  if (!dl) {
-    dl = document.createElement('datalist');
-    dl.id = 'dyc-mc-model-datalist';
-    document.body.appendChild(dl);
-  }
+const MC_WF_FILM_TYPE = 'Phim cách nhiệt';
+
+/** Đảm bảo mã từ hồ sơ xe vẫn chọn được khi chưa có trong định mức PCN. */
+function _mcEnsureVehicleModelOption(code) {
+  const sel = document.getElementById('mc-veh-model');
+  if (!sel || sel.tagName !== 'SELECT') return;
+  const c = (code || '').trim();
+  if (!c) return;
+  if ([...sel.options].some((o) => o.value === c)) return;
+  const opt = document.createElement('option');
+  opt.value = c;
+  opt.textContent = `${c} (hồ sơ xe)`;
+  sel.appendChild(opt);
+}
+
+/** Select «Dòng xe» trên form Tạo đơn: DISTINCT từ định mức phim cách nhiệt. */
+async function refreshMcVehicleModelSelectFromApi() {
+  const sel = document.getElementById('mc-veh-model');
+  if (!sel || sel.tagName !== 'SELECT') return;
+  const prev = (sel.value || '').trim();
+  const optsBase = '<option value="">— Chọn —</option>';
   try {
-    const j = await fetch('/api/vehicle-norms/model-options?source=norms').then((r) => r.json());
-    const items = (j.items || []).filter((x) => x != null && String(x).trim() !== '');
-    dl.innerHTML = items.map((m) => `<option value="${_esc(String(m))}"></option>`).join('');
+    const ps = new URLSearchParams({ source: 'norms', film_type: MC_WF_FILM_TYPE });
+    const j = await fetch(`/api/vehicle-norms/model-options?${ps.toString()}`).then((r) => r.json());
+    let items = (j.items || []).filter((x) => x != null && String(x).trim() !== '');
+    if (!items.length) items = [...DYC_MODEL_CODES];
+    sel.innerHTML = optsBase + items.map((m) => `<option value="${_esc(String(m))}">${_esc(String(m))}</option>`).join('');
+    if (prev && [...sel.options].some((o) => o.value === prev)) sel.value = prev;
+    else if (prev) {
+      _mcEnsureVehicleModelOption(prev);
+      sel.value = prev;
+    }
   } catch (e) {
-    console.warn('[dyc-mc-model-datalist] GET model-options?source=norms failed', e);
-    dl.innerHTML = '';
+    console.warn('[mc-veh-model] GET model-options (norms + Phim cách nhiệt) failed', e);
+    sel.innerHTML = optsBase + DYC_MODEL_CODES.map((m) => `<option value="${_esc(m)}">${_esc(m)}</option>`).join('');
+    if (prev && [...sel.options].some((o) => o.value === prev)) sel.value = prev;
   }
 }
 
@@ -682,6 +714,7 @@ const GIAO_DICH_VI = {
   'WORKSTREAM_EDIT_PLANNED_DEDUCTION_LENGTH_M': 'Chỉnh sửa chiều dài khấu',
   'EXTRA_CUT_REGISTERED': 'Đăng ký cắt thêm (KTV)',
   'IMPORT_LOT': 'Nhập LOT',
+  'LOT_IMPORT_META_CORRECTED': 'Điều chỉnh thông tin nhập LOT',
   'IMPORT_OFFCUT_MANUAL': 'Nhập mảnh dư thủ công',
   'IMPORT_OFFCUT_WORKSTREAM': 'Nhập mảnh dư từ hoàn tất luồng (KTV)',
   'MANUAL_ISSUE_LOT': 'Xuất LOT thủ công',
@@ -695,6 +728,7 @@ const GIAO_DICH_VI = {
   'LOT_MANUAL_ISSUED': 'Xuất LOT (audit)',
   'OFFCUT_MANUAL_ISSUED': 'Xuất mảnh dư (audit)',
   'LOT_CLEARED': 'Clear LOT (audit)',
+  'LOT_IMPORT_META_UPDATED': 'Cập nhật meta nhập LOT (audit)',
   'OFFCUT_CLEARED': 'Clear mảnh dư (audit)',
   'SOFT_LOCK_RELEASED_MANUAL': 'Release lock (audit)',
   'REQUEST_MATERIAL_OVERRIDDEN': 'Đổi mã vật tư (Quản lý)',
@@ -720,9 +754,18 @@ function toast(type, title, message, duration = 4000) {
 
 /** Parse JSON an toàn — không gọi .json() trực tiếp khi server có thể trả HTML/text lỗi */
 async function fetchJSON(url, options = {}) {
-  const res = await fetch(url, options);
+  const res = await fetch(url, {
+    credentials: 'same-origin',
+    ...options,
+    headers: { ...(options.headers || {}) },
+  });
   const contentType = res.headers.get('content-type') || '';
   const rawText = await res.text();
+  if (res.status === 401 && !String(url).includes('/api/auth/')) {
+    try {
+      window.dispatchEvent(new CustomEvent('dyc-auth-lost'));
+    } catch (_) { /* ignore */ }
+  }
   let data = null;
   if (contentType.includes('application/json')) {
     try {
@@ -742,6 +785,74 @@ async function fetchJSON(url, options = {}) {
   }
   return data;
 }
+
+/** Phiên đăng nhập (cookie) — role: ADMIN | MANAGER | TECHNICIAN */
+window.__DYC_AUTH__ = window.__DYC_AUTH__ || { user: null, permissions: {} };
+
+window.dycCurrentRole = function dycCurrentRole() {
+  return String(window.__DYC_AUTH__?.user?.role || '').trim().toUpperCase();
+};
+
+/** Quyền từ GET /api/auth/me (permissions). */
+window.dycPerm = function dycPerm(key) {
+  return !!(window.__DYC_AUTH__?.permissions && window.__DYC_AUTH__.permissions[key]);
+};
+
+/** Username đăng nhập (phiên cookie) — dùng mặc định cho form kho / audit hiển thị. */
+window.dycSessionUsername = function dycSessionUsername() {
+  return String(window.__DYC_AUTH__?.user?.username || '').trim();
+};
+
+function applyDycUserChrome() {
+  const u = window.__DYC_AUTH__?.user;
+  const role = window.dycCurrentRole();
+  const av = document.querySelector('.user-info .avatar');
+  const lb = document.querySelector('.user-info .user-label');
+  let initials = '—';
+  if (role === 'ADMIN') initials = 'AD';
+  else if (role === 'MANAGER') initials = 'QL';
+  else if (role === 'TECHNICIAN') initials = 'KT';
+  if (av) av.textContent = initials;
+  if (lb) lb.textContent = u?.display_name || u?.username || '—';
+  const hitl = document.getElementById('btn-hitl-approve');
+  if (hitl) hitl.style.display = window.dycPerm('can_approve_request') ? '' : 'none';
+  document.querySelectorAll('[data-dyc-require="hr_write"]').forEach((el) => {
+    el.style.display = window.dycPerm('can_hr_write') ? '' : 'none';
+  });
+  document.querySelectorAll('[data-dyc-require="admin_only"]').forEach((el) => {
+    el.style.display = window.dycCurrentRole() === 'ADMIN' ? '' : 'none';
+  });
+  const fabTg = document.getElementById('dyc-fab-telegram');
+  if (fabTg) fabTg.style.display = window.dycCurrentRole() === 'ADMIN' ? 'flex' : 'none';
+}
+
+window.ensureDycLoggedIn = async function ensureDycLoggedIn() {
+  const me = await fetch('/api/auth/me', { credentials: 'same-origin' }).then((r) => r.json());
+  if (me.authenticated && me.user) {
+    window.__DYC_AUTH__ = { user: me.user, permissions: me.permissions || {} };
+    applyDycUserChrome();
+    const ov = document.getElementById('login-overlay');
+    if (ov) ov.style.display = 'none';
+    return true;
+  }
+  window.__DYC_AUTH__ = { user: null, permissions: {} };
+  applyDycUserChrome();
+  return false;
+};
+
+window.dycFillLogin = function (u, p) {
+  const iu = document.getElementById('login-username');
+  const ip = document.getElementById('login-password');
+  if (iu) iu.value = u || '';
+  if (ip) ip.value = p || '';
+};
+
+document.addEventListener('dyc-auth-lost', () => {
+  window.__DYC_AUTH__ = { user: null, permissions: {} };
+  const ov = document.getElementById('login-overlay');
+  if (ov) ov.style.display = 'flex';
+  applyDycUserChrome();
+});
 
 const DASH_KPI_DEFAULTS = {
   total_lots: 0,
@@ -765,10 +876,11 @@ function trangThaiBadge(status) {
 
 function loaiLuongBadge(wsType) {
   if (!wsType) return '';
-  const isPpf = wsType === 'PPF_INSTALLATION';
-  const cls = isPpf ? 'ws-type-ppf' : 'ws-type-wf';
-  const label = isPpf ? '🛡 Dán Phim PPF' : '🪟 Phim Cách Nhiệt';
-  return `<span class="status-badge ${cls}">${label}</span>`;
+  if (wsType === 'PPF_INSTALLATION')         return `<span class="status-badge ws-type-ppf">🛡 Dán Phim PPF</span>`;
+  if (wsType === 'WINDOW_FILM_INSTALLATION')  return `<span class="status-badge ws-type-wf">🪟 Phim Cách Nhiệt</span>`;
+  if (wsType === 'GLASS_FILM_INSTALLATION')   return `<span class="status-badge ws-type-gl">💎 Cường Lực</span>`;
+  if (wsType === 'FLOOR_MAT_INSTALLATION')    return `<span class="status-badge ws-type-fm">🏠 Thảm Sàn</span>`;
+  return `<span class="status-badge">${wsType}</span>`;
 }
 
 /** Nhãn tiếng Việt cho job_item / item_code (WF + PPF) */
@@ -1175,9 +1287,9 @@ async function taiThongBao() {
     if (notifs.length === 0) { list.innerHTML = '<p class="text-center muted pad-20" style="font-size:12px">Không có thông báo nào.</p>'; return; }
     list.innerHTML = notifs.map(n => `
       <div class="notif-item ${n.is_read ? '' : 'unread'}" onclick="danhDauDocThongBao('${n.notif_id}',this)">
-        <div class="notif-title"><i class="fa-solid ${typeIcons[n.notif_type] || 'fa-bell'}" style="margin-right:6px"></i>${n.title}</div>
+        <div class="notif-title"><i class="fa-solid ${typeIcons[n.notif_type] || 'fa-bell'}" style="margin-right:6px"></i>${n.title || ''}</div>
         ${n.workstream_type ? `<div style="margin:3px 0">${loaiLuongBadge(n.workstream_type)}</div>` : ''}
-        <div class="notif-body">${n.body}</div>
+        <div class="notif-body">${n.body || ''}</div>
         <div class="notif-time">${fmtDt(n.created_at)}</div>
       </div>`).join('');
   } catch(e) { console.error('Lỗi tải thông báo:', e); }
@@ -1233,7 +1345,11 @@ async function taiTaoDonTay() {
     if ([...sc.options].some(o => o.value === curC)) sc.value = curC;
     if ([...sv.options].some(o => o.value === curV)) sv.value = curV;
   } catch (e) { toast('error', 'Lỗi tải danh mục', e.message); }
+  await refreshMcVehicleModelSelectFromApi();
   await mcPreviewNorm();
+  _mcUpdateTeamVisibility();
+  const curDealer = document.getElementById('mc-dealer-select')?.value || '';
+  await _mcRefreshSeqForDealer(curDealer);
 }
 
 function _mcIsoDelivery() {
@@ -1250,7 +1366,7 @@ async function taiKhachHang() {
   _ensureLocationDatalists();
   _ensureModelDatalist();
   await refreshModelDatalistFromApi();
-  await refreshMcNormModelDatalistFromApi();
+  await refreshMcVehicleModelSelectFromApi();
   let dlGrp = document.getElementById('dyc-dealer-group-datalist');
   if (!dlGrp) {
     dlGrp = document.createElement('datalist');
@@ -1312,11 +1428,12 @@ async function taiKhachHang() {
           <div class="filter-chips-row" id="flt-d-chips"></div>
         </div>
         <div class="table-wrap" style="overflow-x:auto"><table class="data-table" style="font-size:11px"><thead><tr>
-          <th>Loại KH</th><th>Tên khách hàng</th><th>MST</th><th>SĐT</th><th>Địa chỉ</th><th>Đường</th><th>Phường</th><th>TP</th><th>Full</th><th>AMIS</th><th>TT</th><th></th>
+          <th>Loại KH</th><th>Tên khách hàng</th><th>Mã đơn</th><th>MST</th><th>SĐT</th><th>Địa chỉ</th><th>Đường</th><th>Phường</th><th>TP</th><th>Full</th><th>AMIS</th><th>TT</th><th></th>
         </tr></thead><tbody>
         ${rows.map(d => `<tr>
           <td>${_esc(d.customer_category)}</td>
           <td><strong>${_esc(d.dealer_id)}</strong><br/>${_esc(d.customer_name || d.dealer_name)}</td>
+          <td><span style="font-weight:600;color:${d.dealer_code ? '#1a6fc4' : '#bbb'}">${_esc(d.dealer_code) || '—'}</span></td>
           <td>${_esc(d.tax_code)}</td><td>${_esc(d.phone)}</td>
           <td>${_esc(d.address_no)}</td><td>${_esc(d.street)}</td><td>${_esc(d.ward)}</td><td>${_esc(d.city)}</td>
           <td style="max-width:140px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${_esc(d.full_address)}">${_esc(d.full_address)}</td>
@@ -1573,6 +1690,7 @@ const histPropsConfig = {
     { key: 'vehicle_model_code', label: 'Dòng xe' },
     { key: 'vin_number', label: 'Số VIN' },
     { key: 'model_year', label: 'Đời xe' },
+    { key: 'delivery_date', label: 'Ngày giao xe (đại lý → khách)', isDate: true },
     { key: 'dealer_id', label: 'Mã đại lý' },
     { key: 'customer_id', label: 'Mã khách hàng' },
     { key: 'vehicle_status', label: 'Trạng thái xe' },
@@ -1992,7 +2110,14 @@ window.moFormDealer = async function(id) {
       <button type="button" class="btn btn-outline btn-sm" id="ed-d-rebuild-full" style="white-space:nowrap">Tự tạo lại địa chỉ</button>
     </div>
   </div>
-  <div class="dyc-field"><label>Mã AMIS</label><input id="ed-d-amis" value="${_esc(d.amis_customer_code || '')}" /></div>
+  <div class="dyc-form-row-2">
+    <div class="dyc-field"><label>Mã AMIS</label><input id="ed-d-amis" value="${_esc(d.amis_customer_code || '')}" /></div>
+    <div class="dyc-field">
+      <label>Mã đại lý (dùng trong mã đơn) <span style="color:#1a6fc4">★</span></label>
+      <input id="ed-d-code" value="${_esc(d.dealer_code || '')}" placeholder="VD: LEX-SG, BKH, TOY-BT" style="font-weight:600" />
+      <small style="color:#888">Điền ngắn gọn, không dấu, dùng làm tiền tố mã đơn</small>
+    </div>
+  </div>
 </div>`,
     { wide: true },
   );
@@ -2167,6 +2292,7 @@ document.getElementById('modal-quick-ok')?.addEventListener('click', async () =>
         city: document.getElementById('ed-d-city').value.trim() || null,
         full_address: document.getElementById('ed-d-full').value.trim() || null,
         amis_customer_code: document.getElementById('ed-d-amis').value.trim() || null,
+        dealer_code: document.getElementById('ed-d-code')?.value.trim() || null,
         reason,
         updated_by: actor,
       };
@@ -2281,6 +2407,7 @@ document.getElementById('modal-quick-ok')?.addEventListener('click', async () =>
     } else if (_mcQuickMode === 'dealer') {
       const body = {
         dealer_id: document.getElementById('qc-dealer-id').value.trim(),
+        dealer_code: document.getElementById('qc-dealer-code')?.value.trim() || null,
         dealer_name: document.getElementById('qc-dealer-name').value.trim(),
         legal_name: document.getElementById('qc-dealer-legal').value.trim() || null,
         dealer_group: document.getElementById('qc-dealer-group').value.trim() || null,
@@ -2325,7 +2452,7 @@ document.getElementById('modal-quick-ok')?.addEventListener('click', async () =>
         vehicle_model_code: document.getElementById('qc-veh-code').value.trim(),
         model_name: document.getElementById('qc-veh-model').value.trim(),
         vin_number: document.getElementById('qc-veh-vin').value.trim(),
-        delivery_date: document.getElementById('qc-veh-deliv').value || null,
+        delivery_date: null,
         created_by: actor,
         note: document.getElementById('qc-veh-note').value.trim() || null,
       };
@@ -2353,7 +2480,14 @@ document.getElementById('mc-btn-quick-dealer')?.addEventListener('click', async 
     'Tạo đại lý nhanh',
     `
 <div class="dyc-modal-form">
-  <div class="dyc-field"><label>Mã đại lý</label><input id="qc-dealer-id" value="${sug}" /></div>
+  <div class="dyc-form-row-2">
+    <div class="dyc-field"><label>Mã hệ thống (dealer_id)</label><input id="qc-dealer-id" value="${sug}" /></div>
+    <div class="dyc-field">
+      <label>Mã đại lý (dùng trong mã đơn) <span style="color:#1a6fc4">★</span></label>
+      <input id="qc-dealer-code" placeholder="VD: LEX-SG, BKH, TOY-BT" style="font-weight:600" />
+      <small style="color:#888">Ngắn gọn, không dấu, tiền tố mã đơn</small>
+    </div>
+  </div>
   <div class="dyc-field"><label>Tên đại lý</label><input id="qc-dealer-name" /></div>
   <div class="dyc-form-row-2">
     <div class="dyc-field"><label>Tên pháp lý</label><input id="qc-dealer-legal" /></div>
@@ -2427,19 +2561,35 @@ document.getElementById('mc-btn-quick-veh')?.addEventListener('click', () => {
     <div class="dyc-field"><label>Mã dòng xe</label><input id="qc-veh-code" value="LEXUS_RX350" /></div>
     <div class="dyc-field"><label>Tên dòng xe</label><input id="qc-veh-model" value="Lexus RX350" /></div>
   </div>
-  <div class="dyc-form-row-2">
-    <div class="dyc-field"><label>Số VIN</label><input id="qc-veh-vin" /></div>
-    <div class="dyc-field"><label>Ngày giao xe</label><input id="qc-veh-deliv" type="date" /></div>
-  </div>
+  <div class="dyc-field"><label>Số VIN</label><input id="qc-veh-vin" /></div>
   <div class="dyc-field"><label>Ghi chú</label><input id="qc-veh-note" /></div>
 </div>`,
     { wide: true },
   );
 });
 
+async function _mcRefreshSeqForDealer(dealerId) {
+  const seqY = document.getElementById('mc-seq-year');
+  const seqM = document.getElementById('mc-seq-month');
+  const hint = document.getElementById('mc-seq-hint');
+  if (!dealerId) {
+    if (seqY) seqY.value = '';
+    if (seqM) seqM.value = '';
+    if (hint) hint.textContent = 'Chọn đại lý để hệ thống gợi ý số thứ tự tiếp theo.';
+    return;
+  }
+  try {
+    const tc = await fetch(`/api/ocr/tracking-counters?dealer_id=${encodeURIComponent(dealerId)}`).then((r) => r.json());
+    if (seqY) seqY.value = tc.sequence_year_next != null ? String(tc.sequence_year_next) : '';
+    if (seqM) seqM.value = tc.sequence_month_next != null ? String(tc.sequence_month_next) : '';
+    if (hint) hint.textContent = `Đại lý ${dealerId}: xe thứ ${tc.sequence_year_next ?? '?'} trong năm, thứ ${tc.sequence_month_next ?? '?'} trong tháng.`;
+  } catch (_) { /* ignore */ }
+}
+
 document.getElementById('mc-dealer-select')?.addEventListener('change', (e) => {
   const id = e.target.value;
   document.getElementById('mc-dealer-hint').textContent = id ? `Đã chọn: ${id}` : '';
+  _mcRefreshSeqForDealer(id);
 });
 document.getElementById('mc-cust-select')?.addEventListener('change', async (e) => {
   const id = e.target.value;
@@ -2456,6 +2606,7 @@ document.getElementById('mc-veh-select')?.addEventListener('change', async (e) =
   if (!id) return;
   const v = normalizeListResponse(await fetch('/api/vehicles').then((r) => r.json())).items.find((x) => x.vehicle_id === id);
   if (v) {
+    _mcEnsureVehicleModelOption(v.vehicle_model_code || '');
     document.getElementById('mc-veh-model').value = v.vehicle_model_code || '';
     document.getElementById('mc-vin-masked').value = v.vin_masked || '';
     if (v.model_year) document.getElementById('mc-model-year').value = String(v.model_year);
@@ -2506,6 +2657,21 @@ function _mcPpfFmtDims(w, h, sz) {
   return { display: '—', w: '', h: '', rawSz: '' };
 }
 
+const _lotMaterialCodesCache = {};
+async function _fetchLotMaterialCodes(filmType) {
+  if (_lotMaterialCodesCache[filmType]) return _lotMaterialCodesCache[filmType];
+  try {
+    const res = await fetch(`/api/lots?film_type=${encodeURIComponent(filmType)}&limit=200`).then((r) => r.json());
+    const items = res.items || res || [];
+    const codes = [...new Set(items.map((l) => l.material_code).filter(Boolean))];
+    _lotMaterialCodesCache[filmType] = codes;
+    return codes;
+  } catch (e) {
+    console.warn('[_fetchLotMaterialCodes]', filmType, e);
+    return [];
+  }
+}
+
 async function mcRebuildWfDetail() {
   const wrap = document.getElementById('mc-wf-detail-wrap');
   const warnEl = document.getElementById('mc-wf-warn');
@@ -2542,6 +2708,7 @@ async function mcRebuildWfDetail() {
       console.warn('[mcRebuildWfDetail] norm resolve', e);
     }
   }
+  const wfInventoryCodes = await _fetchLotMaterialCodes('WINDOW_FILM');
   let anyMiss = false;
   const rows = await Promise.all(
     checked.map(async (ji) => {
@@ -2556,7 +2723,7 @@ async function mcRebuildWfDetail() {
       window._mcWfDefaults[ji] = defMc;
       const opts = new Set((pr.options || []).map((o) => o.material_code).filter(Boolean));
       if (defMc) opts.add(defMc);
-      ['RT40', 'JB20', 'RS20', 'T-TYPE', 'M-TYPE'].forEach((c) => opts.add(c));
+      wfInventoryCodes.forEach((c) => opts.add(c));
       const optHtml = [...opts]
         .filter(Boolean)
         .map((c) => `<option value="${_esc(c)}"${c === defMc ? ' selected' : ''}>${_esc(c)}</option>`)
@@ -2628,6 +2795,7 @@ async function mcRebuildPpfDetail() {
       console.warn('[mcRebuildPpfDetail] norm resolve', e);
     }
   }
+  const ppfInventoryCodes = await _fetchLotMaterialCodes('PPF');
   let anyMiss = false;
   const rows = await Promise.all(
     checked.map(async (ji) => {
@@ -2645,7 +2813,7 @@ async function mcRebuildPpfDetail() {
       window._mcPpfDefaults[ji] = defMc;
       const opts = new Set((pr.options || []).map((o) => o.material_code).filter(Boolean));
       if (defMc) opts.add(defMc);
-      ['T-TYPE', 'M-TYPE', 'S-TYPE', 'PET-TYPE', 'TPU-TYPE'].forEach((c) => opts.add(c));
+      ppfInventoryCodes.forEach((c) => opts.add(c));
       const optHtml = [...opts]
         .filter(Boolean)
         .map((c) => `<option value="${_esc(c)}"${c === defMc ? ' selected' : ''}>${_esc(c)}</option>`)
@@ -2678,6 +2846,59 @@ async function mcRebuildPpfDetail() {
       warnEl.textContent = '';
     }
   }
+}
+
+async function mcRebuildGlDetail() {
+  const wrap = document.getElementById('mc-gl-detail-wrap');
+  const warnEl = document.getElementById('mc-gl-warn');
+  if (!wrap) return;
+  if (!document.getElementById('mc-svc-gl')?.checked) {
+    wrap.innerHTML = '';
+    if (warnEl) { warnEl.style.display = 'none'; warnEl.textContent = ''; }
+    return;
+  }
+  const checked = [...document.querySelectorAll('.mc-gl-item:checked')].map((x) => x.value);
+  if (!checked.length) {
+    wrap.innerHTML = '<p class="muted" style="margin:0">Chọn ít nhất một vị trí kính cường lực.</p>';
+    if (warnEl) warnEl.style.display = 'none';
+    return;
+  }
+  const GL_LABEL = { GL_WINDSHIELD: 'Kính lái', GL_REAR: 'Kính hậu', GL_SUNROOF: 'Kính trời' };
+  const vmRaw = (document.getElementById('mc-veh-model')?.value || '').trim();
+  const vm = (window.normalizeVehicleModelCode && window.normalizeVehicleModelCode(vmRaw)) || vmRaw;
+  const my = (document.getElementById('mc-model-year')?.value || '').trim();
+  const normMap = {};
+  if (vm) {
+    try {
+      let q = `vehicle_model_code=${encodeURIComponent(vm)}&film_type=${encodeURIComponent('Cường lực')}`;
+      if (my) q += `&model_year=${encodeURIComponent(my)}`;
+      const res = await fetch(`/api/vehicle-norms/resolve?${q}`).then((r) => r.json());
+      (res.auto_fill_items || []).forEach((it) => { normMap[it.job_item] = it; });
+    } catch (e) { console.warn('[mcRebuildGlDetail] norm resolve', e); }
+  }
+  const glInventoryCodes = await _fetchLotMaterialCodes('GLASS_FILM');
+  window._mcGlDefaults = {};
+  const rows = checked.map((ji) => {
+    const nm = normMap[ji] || {};
+    const sz = nm.size || '—';
+    const lab = GL_LABEL[ji] || ji;
+    const defMc = (nm.material_code || '').trim() || (glInventoryCodes[0] || '');
+    window._mcGlDefaults[ji] = defMc;
+    const opts = new Set(glInventoryCodes);
+    if (defMc) opts.add(defMc);
+    const optHtml = [...opts].filter(Boolean)
+      .map((c) => `<option value="${_esc(c)}"${c === defMc ? ' selected' : ''}>${_esc(c)}</option>`)
+      .join('') || `<option value="">—</option>`;
+    return `<tr data-job-item="${_esc(ji)}">
+      <td><strong>${_esc(lab)}</strong><br/><small class="muted">${_esc(ji)}</small></td>
+      <td>${_esc(String(sz))}</td>
+      <td><select class="mc-gl-mat field-input" data-default="${_esc(defMc)}" style="font-size:11px;max-width:140px">${optHtml}</select></td>
+    </tr>`;
+  });
+  wrap.innerHTML = `<div style="overflow-x:auto"><table class="data-table" style="font-size:11px"><thead><tr>
+    <th>Vị trí</th><th>Kích thước định mức</th><th>Mã vật tư</th>
+  </tr></thead><tbody>${rows.join('')}</tbody></table></div>`;
+  if (warnEl) { warnEl.style.display = 'none'; warnEl.textContent = ''; }
 }
 
 async function mcPreviewNorm() {
@@ -2717,11 +2938,37 @@ async function mcPreviewNorm() {
   }
   await mcRebuildWfDetail();
   await mcRebuildPpfDetail();
+  await mcRebuildGlDetail();
 }
 window.mcPreviewNorm = mcPreviewNorm;
-['mc-veh-model', 'mc-model-year', 'mc-film-type', 'mc-svc-wf', 'mc-ppf-type'].forEach(id => {
+['mc-veh-model', 'mc-model-year', 'mc-svc-wf', 'mc-svc-gl'].forEach(id => {
   document.getElementById(id)?.addEventListener('change', () => mcPreviewNorm());
   document.getElementById(id)?.addEventListener('input', () => { clearTimeout(window._mcNormT); window._mcNormT = setTimeout(mcPreviewNorm, 400); });
+});
+document.querySelectorAll('.mc-gl-item').forEach(cb => {
+  cb.addEventListener('change', () => mcRebuildGlDetail());
+});
+
+function _mcUpdateTeamVisibility() {
+  const ppf = document.getElementById('mc-svc-ppf')?.checked || false;
+  const wf  = document.getElementById('mc-svc-wf')?.checked  || false;
+  const gl  = document.getElementById('mc-svc-gl')?.checked  || false;
+  const fm  = document.getElementById('mc-svc-fm')?.checked  || false;
+  const anySelected = ppf || wf || gl || fm;
+  const stepEl = document.getElementById('mc-step-team');
+  if (stepEl) stepEl.style.display = anySelected ? '' : 'none';
+  const show = (id, visible) => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = visible ? '' : 'none';
+  };
+  show('mc-team-field-ppf', ppf);
+  show('mc-team-field-wf',  wf);
+  show('mc-team-field-gl',  gl);
+  show('mc-team-field-fm',  fm);
+}
+
+['mc-svc-ppf', 'mc-svc-wf', 'mc-svc-gl', 'mc-svc-fm'].forEach(id => {
+  document.getElementById(id)?.addEventListener('change', _mcUpdateTeamVisibility);
 });
 
 document.getElementById('mc-btn-submit')?.addEventListener('click', async () => {
@@ -2729,10 +2976,12 @@ document.getElementById('mc-btn-submit')?.addEventListener('click', async () => 
   if (!dealer) { toast('warning', 'Thiếu đại lý', 'Chọn hoặc tạo đại lý nhanh'); return; }
   const vmRaw = document.getElementById('mc-veh-model').value.trim();
   const vm = (window.normalizeVehicleModelCode && window.normalizeVehicleModelCode(vmRaw)) || vmRaw;
-  if (!vm) { toast('warning', 'Thiếu model', 'Nhập vehicle_model_code'); return; }
+  if (!vm) { toast('warning', 'Thiếu dòng xe', 'Chọn dòng xe trong danh sách định mức phim cách nhiệt'); return; }
   const ppf = document.getElementById('mc-svc-ppf').checked;
   const wf = document.getElementById('mc-svc-wf').checked;
-  if (!ppf && !wf) { toast('warning', 'Dịch vụ', 'Chọn ít nhất một dịch vụ'); return; }
+  const gl = document.getElementById('mc-svc-gl')?.checked || false;
+  const fm = document.getElementById('mc-svc-fm')?.checked || false;
+  if (!ppf && !wf && !gl && !fm) { toast('warning', 'Dịch vụ', 'Chọn ít nhất một dịch vụ'); return; }
   if (ppf && !document.getElementById('mc-ppf-type').value) { toast('warning', 'PPF', 'Chọn loại PPF'); return; }
   const wfItems = [...document.querySelectorAll('.mc-wf-item:checked')].map((x) => x.value);
   let windowFilmItems = wfItems;
@@ -2771,6 +3020,17 @@ document.getElementById('mc-btn-submit')?.addEventListener('click', async () => 
         }
       }
     }
+  }
+  let glFilmItems = undefined;
+  if (gl) {
+    const glChk = [...document.querySelectorAll('.mc-gl-item:checked')].map((x) => x.value);
+    if (!glChk.length) { toast('warning', 'Cường lực', 'Chọn ít nhất một vị trí kính cường lực.'); return; }
+    glFilmItems = glChk.map((ji) => ({ job_item: ji, material_code: 'GL-TYPE' }));
+  }
+  let fmPlan = undefined;
+  if (fm) {
+    fmPlan = mcGetFmPlan();
+    if (!fmPlan.length) { toast('warning', 'Thảm sàn', 'Nhập số lượng ít nhất 1 SKU thảm sàn.'); return; }
   }
   let ppfFilmItems = undefined;
   if (ppf) {
@@ -2822,6 +3082,10 @@ document.getElementById('mc-btn-submit')?.addEventListener('click', async () => 
       include_window_film: wf,
       window_film_items: windowFilmItems,
       film_type: document.getElementById('mc-film-type')?.value || 'Phim cách nhiệt',
+      include_glass_film: gl,
+      glass_film_items: Array.isArray(glFilmItems) ? glFilmItems : undefined,
+      include_floor_mat: fm,
+      floor_mat_items: Array.isArray(fmPlan) ? fmPlan : undefined,
       ...(Array.isArray(ppfFilmItems) && ppfFilmItems.length ? { ppf_film_items: ppfFilmItems } : {}),
     },
     model_year: (() => {
@@ -2836,7 +3100,11 @@ document.getElementById('mc-btn-submit')?.addEventListener('click', async () => 
     assigned_teams: {
       ppf_team: document.getElementById('mc-team-ppf').value,
       window_film_team: document.getElementById('mc-team-wf').value,
+      glass_film_team: document.getElementById('mc-team-gl')?.value || 'GLASS_FILM_TEAM_A',
+      floor_mat_team: document.getElementById('mc-team-fm')?.value || 'FLOOR_MAT_TEAM_A',
     },
+    sequence_no: (() => { const v = document.getElementById('mc-seq-year')?.value; const n = parseInt(v, 10); return Number.isFinite(n) ? String(n) : undefined; })(),
+    sequence_no_month: (() => { const v = document.getElementById('mc-seq-month')?.value; const n = parseInt(v, 10); return Number.isFinite(n) ? String(n) : undefined; })(),
     created_by: 'AD-001',
     note: noteMerged,
   };
@@ -2863,7 +3131,117 @@ document.getElementById('mc-btn-reset')?.addEventListener('click', () => {
     fillDefaultDateTimes();
   toast('info', 'Làm mới form', 'Đã xóa các trường nhập tay (không đổi danh mục đã chọn).');
   mcPreviewNorm();
+  _mcUpdateTeamVisibility();
+  const curDealer = document.getElementById('mc-dealer-select')?.value || '';
+  _mcRefreshSeqForDealer(curDealer);
 });
+
+// ─── TELEGRAM (Admin) + deep link từ URL (?tab=&request_id=…) ─────────────────
+async function taiTelegramIntegrations() {
+  const st = document.getElementById('telegram-status-body');
+  const tb = document.getElementById('table-telegram-logs-body');
+  if (!st || !tb) return;
+  try {
+    const s = await fetch('/api/integrations/telegram/status', { credentials: 'same-origin' }).then((r) => {
+      if (r.status === 403) throw new Error('Chỉ Admin xem được cấu hình Telegram.');
+      return r.json();
+    });
+    st.innerHTML = `
+      <div><strong>Group hiển thị:</strong> ${_esc(s.group_display_name || '—')}</div>
+      <div><strong>TELEGRAM_ENABLED:</strong> ${s.telegram_enabled ? 'true' : 'false'}</div>
+      <div><strong>Đã cấu hình bot token:</strong> ${s.has_bot_token ? 'Có' : 'Chưa'}</div>
+      <div><strong>Đã cấu hình chat_id nhóm:</strong> ${s.has_group_chat_id ? 'Có' : 'Chưa'}</div>
+      <div><strong>DYC_PUBLIC_BASE_URL:</strong> ${s.public_base_url_configured ? 'Đã set' : 'Chưa set'}</div>`;
+  } catch (e) {
+    st.textContent = e.message || String(e);
+  }
+  try {
+    const logs = await fetch('/api/integrations/telegram/message-logs?limit=80', { credentials: 'same-origin' }).then((r) => {
+      if (r.status === 403) throw new Error('Chỉ Admin.');
+      return r.json();
+    });
+    const rows = (logs.items || []).map((it) => `
+      <tr>
+        <td>${it.id}</td>
+        <td>${_esc(it.event_type)}</td>
+        <td>${_esc(it.send_status)}</td>
+        <td><small>${_esc(it.request_id || '')}</small></td>
+        <td><small>${_esc(it.workstream_id || '')}</small></td>
+        <td style="max-width:140px;overflow:hidden;text-overflow:ellipsis" title="${_esc(it.dedupe_key || '')}"><small>${_esc(it.dedupe_key || '')}</small></td>
+        <td style="max-width:200px;font-size:11px">${_esc(it.message_preview || '')}</td>
+        <td><small>${_esc(it.created_at || '')}</small></td>
+        <td>${it.send_status === 'FAILED' ? `<button type="button" class="btn btn-outline btn-sm" data-tg-retry="${it.id}">Gửi lại</button>` : ''}</td>
+      </tr>`).join('');
+    tb.innerHTML = rows || '<tr><td colspan="9" class="muted">Chưa có log.</td></tr>';
+    tb.querySelectorAll('[data-tg-retry]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const id = btn.getAttribute('data-tg-retry');
+        try {
+          const r = await fetch(`/api/integrations/telegram/retry/${encodeURIComponent(id)}`, {
+            method: 'POST',
+            credentials: 'same-origin',
+          }).then((x) => x.json());
+          toast(r.ok ? 'success' : 'warning', 'Telegram', r.detail || r.send_status || JSON.stringify(r));
+          await taiTelegramIntegrations();
+        } catch (e) {
+          toast('error', 'Telegram', e.message);
+        }
+      });
+    });
+  } catch (e) {
+    tb.innerHTML = `<tr><td colspan="9">${_esc(e.message || String(e))}</td></tr>`;
+  }
+}
+
+const DYC_VALID_TAB_NAMES = new Set([
+  'dashboard', 'ocr', 'norms', 'manual', 'customers', 'requests', 'workstreams', 'jobcards',
+  'lots', 'inventory', 'offcuts', 'monthly', 'audit', 'integrations', 'hr',
+]);
+
+async function dycApplyDeepLinkFromUrl() {
+  const p = new URLSearchParams(window.location.search);
+  const tab = (p.get('tab') || '').trim();
+  if (!tab || !DYC_VALID_TAB_NAMES.has(tab)) return;
+  const requestId = (p.get('request_id') || '').trim();
+  const workstreamId = (p.get('workstream_id') || '').trim();
+  const jobCardId = (p.get('job_card_id') || '').trim();
+  const month = (p.get('month') || '').trim();
+  if (tab === 'requests' && requestId) {
+    chuyenDenDon(requestId);
+    return;
+  }
+  if (tab === 'workstreams' && workstreamId) {
+    try {
+      const ws = await fetchJSON(`/api/workstreams/${encodeURIComponent(workstreamId)}`);
+      if (ws && ws.request_id) {
+        chuyenDenDon(ws.request_id);
+        setTimeout(() => {
+          if (typeof window.scrollToWsDetail === 'function') window.scrollToWsDetail(workstreamId);
+        }, 700);
+        return;
+      }
+    } catch (e) {
+      console.warn('deep link workstream', e);
+    }
+    document.querySelector('[data-tab="workstreams"]')?.click();
+    return;
+  }
+  if (tab === 'jobcards' && jobCardId) {
+    try {
+      const jc = await fetchJSON(`/api/job-cards/${encodeURIComponent(jobCardId)}`);
+      if (jc && jc.request_id) chuyenDenDon(jc.request_id);
+    } catch (e) {
+      console.warn('deep link jobcard', e);
+    }
+    document.querySelector('[data-tab="jobcards"]')?.click();
+    return;
+  }
+  if (tab === 'monthly' && month) {
+    window.__DYC_MONTHLY_URL_MONTH__ = month;
+  }
+  const btn = document.querySelector(`.nav-tab[data-tab="${tab}"]`);
+  if (btn) btn.click();
+}
 
 // ─── ĐIỀU HƯỚNG ──────────────────────────────────────────────────────────────
 const tabLoaders = {
@@ -2878,9 +3256,16 @@ const tabLoaders = {
   lots: taiKhoLot,
   inventory: taiQuanLyKho,
   offcuts: taiManhDu,
-  monthly: taiBaoCaoThang,
+  floormats: loadFloorMats,
+  monthly: taiBangBaoCaoThangTab,
   audit: taiNhatKy,
-  hr: window.taiNhanSu,
+  integrations: async () => {
+    await taiTelegramIntegrations();
+  },
+  hr: async () => {
+    if (typeof window.taiNhanSu === 'function') await window.taiNhanSu();
+    if (typeof applyDycUserChrome === 'function') applyDycUserChrome();
+  },
 };
 
 document.querySelectorAll('.nav-tab').forEach(tab => {
@@ -2896,6 +3281,83 @@ document.querySelectorAll('.nav-tab').forEach(tab => {
 });
 document.getElementById('hamburger').addEventListener('click', () => {
   document.getElementById('nav-links').classList.toggle('mobile-open');
+});
+
+document.getElementById('btn-telegram-refresh')?.addEventListener('click', () => { void taiTelegramIntegrations(); });
+document.getElementById('btn-telegram-logs-refresh')?.addEventListener('click', () => { void taiTelegramIntegrations(); });
+document.getElementById('btn-telegram-test')?.addEventListener('click', async () => {
+  try {
+    const r = await fetch('/api/integrations/telegram/test-group-message', {
+      method: 'POST',
+      credentials: 'same-origin',
+    }).then((x) => x.json());
+    toast(r.ok ? 'success' : 'warning', 'Telegram', r.detail || r.send_status || JSON.stringify(r));
+    await taiTelegramIntegrations();
+  } catch (e) {
+    toast('error', 'Telegram', e.message || String(e));
+  }
+});
+
+window.adminReset = async function(level) {
+  const token = (document.getElementById('reset-admin-token')?.value || '').trim();
+  if (!token) { toast('warning', 'Reset', 'Vui lòng nhập Admin Token trước.'); return; }
+  const ENDPOINT = {
+    l1: '/api/admin/clear-logs',
+    l2: '/api/admin/clear-operational-data',
+    l3: '/api/admin/reset-database-standard-seed',
+  }[level];
+  const LABEL = { l1: 'Xóa Logs', l2: 'Xóa vận hành', l3: 'Full Reset' }[level];
+  const confirm_msg = level === 'l3'
+    ? 'FULL RESET sẽ xóa TOÀN BỘ dữ liệu và seed lại demo. Không thể hoàn tác.\n\nBạn chắc chắn?'
+    : `${LABEL}: Bạn chắc chắn muốn thực hiện?`;
+  if (!confirm(confirm_msg)) return;
+  const resultEl = document.getElementById('reset-result');
+  resultEl.style.display = 'block';
+  resultEl.style.color = 'var(--text-secondary)';
+  resultEl.textContent = `Đang thực hiện ${LABEL}...`;
+  try {
+    const r = await fetch(ENDPOINT, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'X-Admin-Reset-Token': token },
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || JSON.stringify(data));
+    resultEl.style.color = 'var(--green)';
+    const deleted = data.deleted ? ' | ' + Object.entries(data.deleted).map(([k,v])=>`${k}: ${v}`).join(', ') : '';
+    resultEl.textContent = `✓ ${data.message || LABEL + ' hoàn tất'}${deleted}`;
+    toast('success', LABEL, data.message || 'Hoàn tất');
+    if (typeof taiTongQuan === 'function') await taiTongQuan();
+  } catch(e) {
+    resultEl.style.color = '#ef4444';
+    resultEl.textContent = `Lỗi: ${e.message}`;
+    toast('error', LABEL, e.message);
+  }
+};
+
+document.querySelectorAll('.monthly-subtab').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    const sub = btn.getAttribute('data-monthly-sub') || 'monthly';
+    setMonthlySubtab(sub);
+    void taiBangBaoCaoThangTab();
+  });
+});
+document.getElementById('btn-daily-report-view')?.addEventListener('click', () => { void loadDailyReport(); });
+document.getElementById('btn-daily-report-refresh')?.addEventListener('click', () => { void loadDailyReport(); });
+document.getElementById('btn-daily-report-html')?.addEventListener('click', () => {
+  const inp = document.getElementById('daily-report-date');
+  const d = (inp && inp.value) ? inp.value.trim() : dycIsoDateVietnam();
+  window.location.href = `/api/reports/daily/export-html?date=${encodeURIComponent(d)}`;
+});
+
+document.getElementById('dyc-fab-notif')?.addEventListener('click', () => {
+  document.getElementById('btn-notif-bell')?.click();
+});
+document.getElementById('dyc-fab-reports')?.addEventListener('click', () => {
+  document.querySelector('.nav-tab[data-tab="monthly"]')?.click();
+});
+document.getElementById('dyc-fab-telegram')?.addEventListener('click', () => {
+  document.querySelector('.nav-tab[data-tab="integrations"]')?.click();
 });
 
 // ─── MODAL DEMO ───────────────────────────────────────────────────────────────
@@ -3005,9 +3467,16 @@ async function taiTongQuan() {
           <td><strong>${w.selected_material_code || '—'}</strong></td>
           <td>${w.allocated_source_id || '—'}</td>
           <td style="white-space:nowrap">
-            <button class="btn btn-green btn-sm" onclick="pheDuyetNhanhWs('${w.workstream_id}')">
+            ${(() => {
+      const wf = w.workstream_type === 'WINDOW_FILM_INSTALLATION' || w.workstream_type === 'GLASS_FILM_INSTALLATION';
+      const fm = w.workstream_type === 'FLOOR_MAT_INSTALLATION';
+      const ok = wf ? window.dycPerm('can_post_approve_wf_materials') : window.dycPerm('can_approve_ppf_pending_workstream');
+      return ok
+        ? `<button class="btn btn-green btn-sm" onclick="pheDuyetNhanhWs('${w.workstream_id}')">
               <i class="fa-solid fa-check"></i> Phê duyệt
-            </button>
+            </button>`
+        : '<span class="muted" style="font-size:11px">Không đủ quyền</span>';
+    })()}
             <button class="btn btn-outline btn-sm" style="margin-left:4px" onclick="chuyenDenDon('${w.request_id}')">
               <i class="fa-solid fa-eye"></i> Xem
             </button>
@@ -3023,7 +3492,7 @@ async function taiTongQuan() {
           <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 6px;border-bottom:1px solid var(--border);font-size:12px">
             <div>
               <strong>${w.workstream_id}</strong>
-              <div style="font-size:10px;color:var(--text-secondary)">${w.request_id} | Đội: ${w.technician_team} | KTV: ${w.assigned_technician_name}</div>
+              <div style="font-size:10px;color:var(--text-secondary)">${w.request_id} | Đội: ${w.technician_team || '—'} | KTV: ${w.assigned_technician_name || '—'}</div>
             </div>
             ${loaiLuongBadge(w.workstream_type)}
           </div>`).join('');
@@ -3045,7 +3514,43 @@ async function taiTongQuan() {
         <div class="notif-body">${n.body.substring(0, 90)}${n.body.length > 90 ? '...' : ''}</div>
         <div class="notif-time">${fmtDt(n.created_at)}</div>
       </div>`).join('') || '<p class="text-center muted pad-20" style="font-size:12px">Không có thông báo.</p>';
+
+    // Biểu đồ xe/đại lý tháng này
+    try {
+      const dm = await fetchJSON('/api/dashboard/dealer-monthly');
+      _renderDealerMonthlyChart(dm);
+    } catch (_) { /* ignore chart error */ }
   } catch(e) { toast('error', 'Lỗi tải tổng quan', e.message); }
+}
+
+function _renderDealerMonthlyChart(dm) {
+  const el = document.getElementById('dash-dealer-monthly-chart');
+  if (!el) return;
+  const { month, total, breakdown } = dm;
+  if (!breakdown || !breakdown.length) {
+    el.innerHTML = `<p class="muted" style="font-size:12px;padding:12px">Chưa có dữ liệu xe trong tháng ${month}.</p>`;
+    return;
+  }
+  const COLORS = ['#e53935','#1e88e5','#43a047','#fb8c00','#8e24aa','#00acc1','#f4511e','#6d4c41'];
+  const bars = breakdown.map((d, i) => {
+    const color = COLORS[i % COLORS.length];
+    const w = Math.max(d.pct, 2);
+    return `<div style="margin-bottom:8px">
+      <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px">
+        <span style="font-weight:600;color:var(--text)">${_esc(d.dealer_name)}</span>
+        <span style="color:var(--text-secondary)">${d.count} xe &nbsp;(${d.pct}%)</span>
+      </div>
+      <div style="background:var(--surface-3);border-radius:4px;height:10px;overflow:hidden">
+        <div style="background:${color};height:100%;width:${w}%;border-radius:4px;transition:width 0.4s"></div>
+      </div>
+    </div>`;
+  }).join('');
+  el.innerHTML = `<div style="padding:4px 0">
+    <div style="font-size:11px;color:var(--text-secondary);margin-bottom:10px">
+      Tháng <strong>${month}</strong> — Tổng: <strong>${total} xe</strong>
+    </div>
+    ${bars}
+  </div>`;
 }
 
 window.pheDuyetNhanhWs = async function(wsId) {
@@ -3316,7 +3821,7 @@ window.moPhieuOcr = async function(draftId) {
     { key: 'request_date', label: 'Ngày yêu cầu', val: reqDateVal, conf: 0.9, placeholder: 'hh:mm dd/mm/yyyy' },
     {
       key: 'delivery_time',
-      label: 'Hạn giao xe',
+      label: 'Hạn hoàn tất thi công',
       val: d.extracted_delivery_time ? fmtDt(d.extracted_delivery_time) : '',
       conf: 0.88,
       placeholder: 'hh:mm dd/mm/yyyy',
@@ -4032,7 +4537,7 @@ async function hienThiThePheDuyet(requestId) {
       <div style="font-size:11px;color:var(--text-secondary);margin-bottom:8px">
         ${isPpf ? `Loại phim PPF: <strong style="color:${mauChinh}">${ws.selected_material_code || 'T-TYPE'}</strong> | Kích thước: ${ws.planned_cut_block || '152x1300'}` :
           `Nhóm cắt: ${ws.cut_group_id || '—'} | Kích thước: ${ws.planned_cut_block || '152x143'}`}
-        <br>Đội: ${ws.technician_team} | KTV: ${ws.assigned_technician_name || '—'} | Nguồn: ${ws.allocated_source_id || '—'}
+        <br>Đội: ${ws.technician_team || '—'} | KTV: ${ws.assigned_technician_name || '—'} | Nguồn: ${ws.allocated_source_id || '—'}
         ${ppfAllocHtml}${wfAllocHtml}
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:4px">
@@ -4060,9 +4565,11 @@ async function hienThiTheLuong(requestId) {
 
   container.innerHTML = wss.map(ws => {
     const isPpf = ws.workstream_type === 'PPF_INSTALLATION';
-    const typeClass = isPpf ? 'ppf' : 'wf';
-    const icon = isPpf ? 'fa-shield-film' : 'fa-window-restore';
-    const tenLoai = isPpf ? 'Dán Phim PPF' : 'Dán Phim Cách Nhiệt';
+    const isGl  = ws.workstream_type === 'GLASS_FILM_INSTALLATION';
+    const isFm  = ws.workstream_type === 'FLOOR_MAT_INSTALLATION';
+    const typeClass = isPpf ? 'ppf' : isGl ? 'gl' : isFm ? 'fm' : 'wf';
+    const icon = isPpf ? 'fa-shield-film' : isGl ? 'fa-gem' : isFm ? 'fa-border-all' : 'fa-window-restore';
+    const tenLoai = isPpf ? 'Dán Phim PPF' : isGl ? 'Dán Cường Lực' : isFm ? 'Thảm Trải Sàn' : 'Dán Phim Cách Nhiệt';
     const canXoaDotCatThem = ws.status === 'IN_PROGRESS' || ws.status === 'ACTUAL_CONFIRMATION_REQUIRED';
     const matPlan = ws.material_plan ? (Array.isArray(ws.material_plan) ? ws.material_plan : JSON.parse(ws.material_plan || '[]')) : [];
     const progress = { 'PENDING_APPROVAL':0,'PENDING_TECH_PREFLIGHT':12,'APPROVED':30,'IN_PROGRESS':60,'ACTUAL_CONFIRMATION_REQUIRED':75,'COMPLETED':90,'CLOSED':100 }[ws.status] || 0;
@@ -4103,7 +4610,14 @@ async function hienThiTheLuong(requestId) {
     }
 
     let wfSourceBlock = `<div class="ws-info-row"><span class="ws-label">Nguồn vật tư</span><span class="ws-value">${ws.allocated_source_type || '—'}: ${ws.allocated_source_id || '—'}</span></div>`;
-    if (!isPpf && ws.wf_allocation) {
+    if (isFm) {
+      const fmPlan = Array.isArray(ws.floor_mat_plan) ? ws.floor_mat_plan : [];
+      if (fmPlan.length) {
+        wfSourceBlock = `<div class="ws-info-row"><span class="ws-label">Kế hoạch thảm sàn</span><span class="ws-value" style="font-size:11px">${fmPlan.map(p => `${_esc(p.sku)} × ${p.qty}`).join(', ')}</span></div>`;
+      } else {
+        wfSourceBlock = `<div class="ws-info-row"><span class="ws-label">Thảm sàn</span><span class="ws-value muted">Chưa có kế hoạch</span></div>`;
+      }
+    } else if (!isPpf && ws.wf_allocation) {
       const sec = jcWfKiemTraTungHangMucCardSection(ws.wf_allocation, {});
       if (sec) wfSourceBlock = sec;
     }
@@ -4213,7 +4727,7 @@ async function hienThiTheLuong(requestId) {
         <div class="ws-progress-bar"><div class="ws-progress-fill" style="width:${progress}%"></div></div>
 
         <div class="ws-info-row"><span class="ws-label">Mã luồng</span><span class="ws-value" style="font-size:11px">${ws.workstream_id}</span></div>
-        <div class="ws-info-row"><span class="ws-label">Đội thi công</span><span class="ws-value">${ws.technician_team}</span></div>
+        <div class="ws-info-row"><span class="ws-label">Đội thi công</span><span class="ws-value">${ws.technician_team || '—'}</span></div>
         <div class="ws-info-row"><span class="ws-label">KTV phụ trách</span><span class="ws-value">${ws.assigned_technician_name || '—'}</span></div>
         ${isPpf ? `
         <div class="ws-info-row"><span class="ws-label">Loại PPF</span>
@@ -4228,7 +4742,7 @@ async function hienThiTheLuong(requestId) {
           ${matPlan.map(p => `
             <div class="wf-plan-row">
               <span class="job-name">${_esc(_wfJobLabelVi(p.job_item))}</span>
-              <span class="mat-code ${(p.material_code||'').toLowerCase()}">${p.material_code}</span>
+              <span class="mat-code ${(p.material_code||'').toLowerCase()}">${p.material_code || '—'}</span>
               <small class="muted">${_esc(materialSourceVi(p.material_source || ''))}</small>
             </div>`).join('')}
         </div>` : ''}
@@ -4242,12 +4756,20 @@ async function hienThiTheLuong(requestId) {
         ${ppfExtraCutHist}
       </div>
       <div class="ws-card-actions">
-        ${ws.status === 'PENDING_APPROVAL' ? (isPpf ? `<button class="btn btn-green btn-sm" onclick="pheDuyetWs('${ws.workstream_id}')"><i class="fa-solid fa-check"></i> Phê duyệt</button>` : `<button class="btn btn-green btn-sm" onclick="moModalDuyetMaPhimWF('${ws.workstream_id}')"><i class="fa-solid fa-film"></i> Duyệt mã phim</button>`) : ''}
-        ${!isPpf && ws.status === 'PENDING_TECH_PREFLIGHT' ? `
-          <button class="btn btn-outline btn-sm" onclick="chiinhSuaWs('${ws.workstream_id}')"><i class="fa-solid fa-warehouse"></i> Chỉnh phân bổ LOT</button>
-          <button class="btn btn-green btn-sm" onclick="pheDuyetWs('${ws.workstream_id}')"><i class="fa-solid fa-check"></i> Chốt phân bổ</button>` : ''}
+        ${ws.status === 'PENDING_APPROVAL' && (isPpf || isFm)
+          ? (window.dycPerm('can_approve_ppf_pending_workstream')
+            ? `<button class="btn btn-green btn-sm" onclick="pheDuyetWs('${ws.workstream_id}')"><i class="fa-solid fa-check"></i> Phê duyệt</button>`
+            : '') : ''}
+        ${ws.status === 'PENDING_APPROVAL' && ((!isPpf && !isFm) /* WF or GL */)
+          ? (window.dycPerm('can_post_approve_wf_materials')
+            ? `<button class="btn btn-green btn-sm" onclick="moModalDuyetMaPhimWF('${ws.workstream_id}')"><i class="fa-solid fa-film"></i> Duyệt mã phim</button>`
+            : '') : ''}
+        ${!isPpf && !isFm && ws.status === 'PENDING_TECH_PREFLIGHT' ? `
+          ${window.dycPerm('can_write_allocation') ? `<button class="btn btn-outline btn-sm" onclick="chiinhSuaWs('${ws.workstream_id}')"><i class="fa-solid fa-warehouse"></i> Chỉnh phân bổ LOT</button>` : ''}
+          ${window.dycPerm('can_approve_wf_preflight_commit') ? `<button class="btn btn-green btn-sm" onclick="pheDuyetWs('${ws.workstream_id}')"><i class="fa-solid fa-check"></i> Chốt phân bổ</button>` : ''}` : ''}
         ${ws.status === 'APPROVED' ? `<button class="btn btn-blue btn-sm" onclick="batDauWs('${ws.workstream_id}')"><i class="fa-solid fa-play"></i> KTV bắt đầu</button>` : ''}
-        ${ws.status === 'IN_PROGRESS' || ws.status === 'ACTUAL_CONFIRMATION_REQUIRED' ? `<button class="btn btn-primary btn-sm" onclick="moFormXacNhan('${ws.workstream_id}')"><i class="fa-solid fa-ruler"></i> Nhập thực tế</button><button class="btn btn-outline btn-sm" style="margin-left:6px;border-color:rgba(251,191,36,0.45);color:#fbbf24" onclick="moDangKyCatThem('${ws.workstream_id}')" title="Đăng ký cắt thêm giữa ca"><i class="fa-solid fa-scissors"></i> Cắt thêm</button>` : ''}
+        ${isFm && ws.status === 'IN_PROGRESS' ? `<button class="btn btn-primary btn-sm" onclick="hoanTatThamSan('${ws.workstream_id}')"><i class="fa-solid fa-check"></i> Hoàn tất thảm sàn</button>` : ''}
+        ${!isFm && (ws.status === 'IN_PROGRESS' || ws.status === 'ACTUAL_CONFIRMATION_REQUIRED') ? `<button class="btn btn-primary btn-sm" onclick="moFormXacNhan('${ws.workstream_id}')"><i class="fa-solid fa-ruler"></i> Nhập thực tế</button><button class="btn btn-outline btn-sm" style="margin-left:6px;border-color:rgba(251,191,36,0.45);color:#fbbf24" onclick="moDangKyCatThem('${ws.workstream_id}')" title="Đăng ký cắt thêm giữa ca"><i class="fa-solid fa-scissors"></i> Cắt thêm</button>` : ''}
         <button class="btn btn-outline btn-sm" onclick="chiinhSuaWs('${ws.workstream_id}')"><i class="fa-solid fa-pen"></i> Chỉnh sửa</button>
         ${ws.job_card_id ? `<button class="btn btn-outline btn-sm" onclick="chuyenDenLenh('${ws.job_card_id}')"><i class="fa-solid fa-id-card"></i> Xem lệnh</button>` : ''}
       </div>
@@ -4289,8 +4811,8 @@ window.moModalDuyetMaPhimWF = async function (wsId) {
     toast('error', 'Không tải luồng', e.message);
     return;
   }
-  if (ws.workstream_type !== 'WINDOW_FILM_INSTALLATION') {
-    toast('warning', 'Không áp dụng', 'Chỉ luồng phim cách nhiệt.');
+  if (ws.workstream_type !== 'WINDOW_FILM_INSTALLATION' && ws.workstream_type !== 'GLASS_FILM_INSTALLATION') {
+    toast('warning', 'Không áp dụng', 'Chỉ áp dụng cho luồng phim cách nhiệt hoặc cường lực.');
     return;
   }
   if (ws.status !== 'PENDING_APPROVAL') {
@@ -4479,6 +5001,22 @@ window.batDauWs = async function(wsId) {
     toast('success', '🔧 Bắt đầu thi công', data.detail);
     await taiDonThiCong(); taiThongBao(); taiTongQuan();
   } catch(e) { toast('error', 'Lỗi', e.message); }
+};
+
+window.hoanTatThamSan = async function(wsId) {
+  if (!confirm(`Xác nhận hoàn tất lắp thảm sàn cho luồng ${wsId}?\nHệ thống sẽ trừ kho thảm sàn.`)) return;
+  try {
+    const data = await fetch(`/api/workstreams/${encodeURIComponent(wsId)}/complete`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    }).then(r => r.json());
+    toast('success', '✅ Hoàn tất thảm sàn', data.detail || 'Kho đã trừ.');
+    await taiDonThiCong(); taiThongBao(); taiTongQuan();
+    if (currentRequestId) {
+      try { await hienThiTheLuong(currentRequestId); } catch (_) {}
+    }
+  } catch (e) { toast('error', 'Lỗi hoàn tất thảm sàn', e.message); }
 };
 
 /** Đăng ký cắt thêm giữa ca — tách khỏi modal xác nhận thực tế / hoàn tất. */
@@ -5157,7 +5695,6 @@ async function luuChinhSuaWs(ws, isPpf) {
 
   const payload = {
     reason,
-    actor: 'QL-002',
     planned_cut_block: document.getElementById('edit-cut-block')?.value,
     planned_deduction_length_m: parseFloat(document.getElementById('edit-deduction')?.value || 0),
     allocated_source_type: document.getElementById('edit-source-type')?.value,
@@ -5472,14 +6009,32 @@ async function taiBangLuong() {
     if (!raw) return '—';
     return `<span class="ws-td-deadline">${_esc(fmtDt(raw))}</span>`;
   };
+  // Gán màu nền xen kẽ theo đơn (request_id) + đánh dấu đơn đa luồng
+  const _wsReqOrder = [];
+  const _wsReqIdxMap = {};
+  const _wsReqCount = {};
+  pageRows.forEach(w => {
+    if (!(w.request_id in _wsReqIdxMap)) {
+      _wsReqIdxMap[w.request_id] = _wsReqOrder.length;
+      _wsReqOrder.push(w.request_id);
+    }
+    _wsReqCount[w.request_id] = (_wsReqCount[w.request_id] || 0) + 1;
+  });
+
   tbody.innerHTML =
     pageRows.length === 0
       ? '<tr><td colspan="11" class="text-center muted" style="padding:20px">Không có luồng thi công nào.</td></tr>'
       : pageRows
           .map(
-            (w) => `<tr>
+            (w) => {
+              const _grpIdx = _wsReqIdxMap[w.request_id];
+              const _isMulti = _wsReqCount[w.request_id] > 1;
+              const _rowBg = _grpIdx % 2 !== 0 ? 'background:#eef6ff;' : '';
+              const _leftBorder = _isMulti ? 'border-left:3px solid #1a6fc4;' : 'border-left:3px solid transparent;';
+              const _multiTitle = _isMulti ? ` title="Đơn ${_wsReqCount[w.request_id]} luồng"` : '';
+              return `<tr style="${_rowBg}${_leftBorder}">
         <td><strong class="ws-td-primary">${_esc(w.workstream_id)}</strong></td>
-        <td><a href="#" onclick="xemNhanhDonThiCong('${w.request_id}', '${w.workstream_id}'); return false;" class="ws-td-link">${_esc(w.request_id)}</a></td>
+        <td><a href="#" onclick="xemNhanhDonThiCong('${w.request_id}', '${w.workstream_id}'); return false;" class="ws-td-link"${_multiTitle}>${_esc(w.request_id)}${_isMulti ? ` <span style="font-size:10px;background:#1a6fc4;color:#fff;border-radius:3px;padding:1px 5px;vertical-align:middle">${_wsReqCount[w.request_id]} luồng</span>` : ''}</a></td>
         <td class="ws-td-primary ws-td-dt">${_esc(fmtDt(w.request_created_at))}</td>
         <td>${loaiLuongBadge(w.workstream_type)}</td>
         <td class="ws-td-primary">${_esc(techName(w))}</td>
@@ -5488,16 +6043,18 @@ async function taiBangLuong() {
         <td class="ws-td-primary ws-td-dt">${_esc(fmtDt(w.started_at))}</td>
         <td class="ws-td-primary ws-td-dt">${_esc(fmtDt(w.completed_at))}</td>
         <td style="white-space:nowrap">
-          ${w.status === 'PENDING_APPROVAL' && w.workstream_type === 'WINDOW_FILM_INSTALLATION' ? `<button class="btn btn-green btn-sm" onclick="moModalDuyetMaPhimWF('${w.workstream_id}')">Duyệt mã phim</button>` : ''}
+          ${w.status === 'PENDING_APPROVAL' && (w.workstream_type === 'WINDOW_FILM_INSTALLATION' || w.workstream_type === 'GLASS_FILM_INSTALLATION') && window.dycPerm('can_post_approve_wf_materials') ? `<button class="btn btn-green btn-sm" onclick="moModalDuyetMaPhimWF('${w.workstream_id}')">Duyệt mã phim</button>` : ''}
         </td>
         <td style="white-space:nowrap">
-          ${w.status === 'PENDING_APPROVAL' && w.workstream_type !== 'WINDOW_FILM_INSTALLATION' ? `<button class="btn btn-green btn-sm" onclick="pheDuyetNhanhWs('${w.workstream_id}')">Duyệt</button>` : ''}
-          ${w.status === 'PENDING_TECH_PREFLIGHT' && w.workstream_type === 'WINDOW_FILM_INSTALLATION' ? `<button class="btn btn-outline btn-sm" onclick="chiinhSuaWs('${w.workstream_id}')">LOT</button><button class="btn btn-green btn-sm" style="margin-left:4px" onclick="pheDuyetNhanhWs('${w.workstream_id}')">Chốt</button>` : ''}
+          ${w.status === 'PENDING_APPROVAL' && w.workstream_type !== 'WINDOW_FILM_INSTALLATION' && w.workstream_type !== 'GLASS_FILM_INSTALLATION' && window.dycPerm('can_approve_ppf_pending_workstream') ? `<button class="btn btn-green btn-sm" onclick="pheDuyetNhanhWs('${w.workstream_id}')">Duyệt</button>` : ''}
+          ${w.status === 'PENDING_TECH_PREFLIGHT' && (w.workstream_type === 'WINDOW_FILM_INSTALLATION' || w.workstream_type === 'GLASS_FILM_INSTALLATION') ? `${window.dycPerm('can_write_allocation') ? `<button class="btn btn-outline btn-sm" onclick="chiinhSuaWs('${w.workstream_id}')">LOT</button>` : ''}${window.dycPerm('can_approve_wf_preflight_commit') ? `<button class="btn btn-green btn-sm" style="margin-left:4px" onclick="pheDuyetNhanhWs('${w.workstream_id}')">Chốt</button>` : ''}` : ''}
           ${w.status === 'APPROVED' ? `<button class="btn btn-blue btn-sm" onclick="batDauWs('${w.workstream_id}')">Bắt đầu</button>` : ''}
-          ${w.status === 'IN_PROGRESS' || w.status === 'ACTUAL_CONFIRMATION_REQUIRED' ? `<button class="btn btn-primary btn-sm" onclick="moFormXacNhan('${w.workstream_id}')">Hoàn tất</button><button class="btn btn-outline btn-sm" style="margin-left:4px;border-color:rgba(251,191,36,0.45);color:#fbbf24" onclick="moDangKyCatThem('${w.workstream_id}')" title="Đăng ký cắt thêm"><i class="fa-solid fa-scissors"></i></button>` : ''}
+          ${w.status === 'IN_PROGRESS' && w.workstream_type === 'FLOOR_MAT_INSTALLATION' ? `<button class="btn btn-primary btn-sm" onclick="hoanTatThamSan('${w.workstream_id}')"><i class="fa-solid fa-check"></i> Hoàn tất thảm sàn</button>` : ''}
+          ${(w.status === 'IN_PROGRESS' || w.status === 'ACTUAL_CONFIRMATION_REQUIRED') && w.workstream_type !== 'FLOOR_MAT_INSTALLATION' ? `<button class="btn btn-primary btn-sm" onclick="moFormXacNhan('${w.workstream_id}')">Hoàn tất</button><button class="btn btn-outline btn-sm" style="margin-left:4px;border-color:rgba(251,191,36,0.45);color:#fbbf24" onclick="moDangKyCatThem('${w.workstream_id}')" title="Đăng ký cắt thêm"><i class="fa-solid fa-scissors"></i></button>` : ''}
           <button class="btn btn-outline btn-sm" style="margin-left:4px" onclick="chiinhSuaWs('${w.workstream_id}')"><i class="fa-solid fa-pen"></i></button>
         </td>
-      </tr>`,
+      </tr>`;
+            },
           )
           .join('');
   wsUpdateWorkstreamSortHeaders();
@@ -5527,6 +6084,8 @@ document.getElementById('ws-page-next')?.addEventListener('click', () => {
 function _quickReqWorkstreamLabelVi(t) {
   if (t === 'PPF_INSTALLATION') return 'PPF';
   if (t === 'WINDOW_FILM_INSTALLATION') return 'Phim cách nhiệt';
+  if (t === 'GLASS_FILM_INSTALLATION') return 'Cường lực';
+  if (t === 'FLOOR_MAT_INSTALLATION') return 'Thảm sàn';
   return t || '—';
 }
 
@@ -5664,6 +6223,7 @@ async function taiLenhThiCong() {
     return `<div class="job-card-item ${typeClass} ${j.job_card_id === currentJobId ? 'active' : ''}" onclick="chonLenh('${j.job_card_id}')">
       <div class="jci-id">${j.job_card_id} ${treLich ? '⚠️ Trễ hạn' : ''}</div>
       <div class="jci-detail">${j.technician_name || j.technician_id} | ${j.technician_team || '—'}</div>
+      ${j.request_id ? `<div style="font-size:12px;color:#1a6fc4;margin-top:3px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;letter-spacing:0.3px" title="Đơn thi công: ${_esc(j.request_id)}">📋 ${_esc(j.request_id)}</div>` : ''}
       <div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:4px">
         ${j.workstream_type ? loaiLuongBadge(j.workstream_type) : ''}
         ${trangThaiBadge(j.status)}
@@ -5693,7 +6253,7 @@ async function hienThiLenh(jc) {
 
   const otBadge = document.getElementById('jc-ontime-badge');
   if (jc.is_on_time === true) otBadge.innerHTML = '<span class="status-badge status-approved">✅ Đúng hạn</span>';
-  else if (jc.is_on_time === false) otBadge.innerHTML = `<span class="status-badge status-exception">⚠️ Trễ ${jc.delay_minutes} phút</span>`;
+  else if (jc.is_on_time === false) otBadge.innerHTML = `<span class="status-badge status-exception">⚠️ Trễ ${jc.delay_minutes ?? '?'} phút</span>`;
   else otBadge.innerHTML = '';
 
   const tlMap = { 'PENDING':0,'IN_PROGRESS':1,'ACTUAL_CONFIRMATION_REQUIRED':2,'COMPLETED_BY_TECHNICIAN':3 };
@@ -5747,8 +6307,8 @@ async function hienThiLenh(jc) {
     jcJobInfoRow('Tư vấn bán hàng', _esc(tvbh)),
     jcJobInfoRow('Số thứ tự (theo năm)', _esc(sttNam)),
     jcJobInfoRow('Số thứ tự xe (theo tháng)', _esc(sttThang)),
-    jcJobInfoRow('Hạn giao xe', `<span class="jc-job-deadline">${_esc(fmtDt(deliveryRaw || null))}</span>`),
-    jcJobInfoRow('Thời gian giao xe còn', jcDeliveryRemainHtml(deliveryRaw || null)),
+    jcJobInfoRow('Hạn hoàn tất thi công', `<span class="jc-job-deadline">${_esc(fmtDt(deliveryRaw || null))}</span>`),
+    jcJobInfoRow('Thời gian còn lại', jcDeliveryRemainHtml(deliveryRaw || null)),
     jcJobInfoRow('Bắt đầu lúc', _esc(fmtDt(jc.started_at))),
     jcJobInfoRow('Hoàn tất lúc', _esc(fmtDt(jc.completed_at))),
     jcJobInfoRow(
@@ -6256,33 +6816,39 @@ async function loadLots() {
   const q = new URLSearchParams();
   const qq = document.getElementById('inv-lot-q')?.value?.trim();
   const st = document.getElementById('inv-lot-status')?.value;
+  const fg = document.getElementById('inv-lot-film-group')?.value;
   if (qq) q.set('q', qq);
   if (st) q.set('lot_status', st);
+  if (fg) q.set('film_type', fg);
   const rows = await fetch('/api/inventory/lots?' + q.toString()).then(r => r.json());
-  const eff = (l) => l.lot_status || (l.is_locked ? 'LOCKED' : (l.remaining_length_m <= 0 ? 'DEPLETED' : (l.is_opened ? 'IN_USE' : 'NEW')));
+  const eff = (l) => l.lot_status || (l.is_locked ? 'LOCKED' : ((l.remaining_length_m || 0) <= 0 ? 'DEPLETED' : (l.is_opened ? 'IN_USE' : 'NEW')));
   document.getElementById('inv-table-lots').innerHTML = rows.length ? rows.map(l => {
     const e = eff(l);
     return `<tr>
       <td><strong>${l.lot_id}</strong></td>
-      <td>${l.material_code}</td>
-      <td><strong>${l.remaining_length_m}</strong> / ${l.original_length_m ?? '—'}</td>
+      <td>${l.material_code || '—'}</td>
+      <td><small>${_esc(filmTypeLabel(l.film_type))}</small></td>
+      <td><strong>${l.remaining_length_m ?? '—'}</strong> / ${l.original_length_m ?? '—'}</td>
       <td>${lotStatusChip(e)}</td>
       <td>${l.is_locked ? '<span class="locked-badge"><i class="fa-solid fa-lock" style="margin-right:4px;"></i>Khóa</span>' : '—'}</td>
       <td><small>${l.storage_location || '—'}</small></td>
-      <td><small>Admin</small></td>
+      <td><small>${_esc((l.import_performed_by || '').trim() || '—')}</small></td>
       <td><small>${l.import_date || '—'}</small></td>
       <td style="white-space:nowrap">
-        <button class="btn btn-outline btn-sm" onclick="openManualIssueLotModal('${l.lot_id}')">Xuất</button>
+        <button type="button" class="btn btn-outline btn-sm" onclick='openEditLotImportMetaModal(${JSON.stringify({ lot_id: l.lot_id, import_date: l.import_date || '', import_performed_by: l.import_performed_by || '' })})'>Sửa</button>
+        <button class="btn btn-outline btn-sm" onclick="openManualIssueLotModal(${JSON.stringify(l.lot_id)}, ${JSON.stringify(Number(l.remaining_length_m))})">Xuất</button>
         <button class="btn btn-danger btn-sm" onclick="openClearLotModal('${l.lot_id}')">Clear</button>
         ${l.is_locked ? `<button class="btn btn-outline btn-sm" onclick="openReleaseLockModal('LOT','${l.lot_id}')"><i class="fa-solid fa-unlock"></i> Mở khóa</button>` : ''}
       </td></tr>`;
-  }).join('') : '<tr><td colspan="9" class="text-center muted">Không có LOT.</td></tr>';
+  }).join('') : '<tr><td colspan="10" class="text-center muted">Không có LOT.</td></tr>';
 }
 
 window.resetInvLots = function() {
   const qEl = document.getElementById('inv-lot-q');
+  const fgEl = document.getElementById('inv-lot-film-group');
   const stEl = document.getElementById('inv-lot-status');
   if (qEl) qEl.value = '';
+  if (fgEl) fgEl.value = '';
   if (stEl) stEl.value = 'IN_USE';
   loadLots();
 };
@@ -6291,7 +6857,9 @@ window.resetInvLots = function() {
 async function loadOffcuts() {
   const q = new URLSearchParams();
   const qq = document.getElementById('inv-oc-q')?.value?.trim();
+  const fg = document.getElementById('inv-oc-film-group')?.value;
   if (qq) q.set('q', qq);
+  if (fg) q.set('film_type', fg);
   const rows = await fetch('/api/inventory/offcuts?' + q.toString()).then(r => r.json());
   const eff = (o) => {
     if ((o.area_m2 || 0) <= 0 || (o.length_m || 0) <= 0 || (o.width_m || 0) <= 0) return 'CLEARED';
@@ -6299,15 +6867,16 @@ async function loadOffcuts() {
   };
   document.getElementById('inv-table-offcuts').innerHTML = rows.length ? rows.map(o => {
     const e = eff(o);
-    const q = o.quality_status || '—';
+    const qs = o.quality_status || '—';
     const by = (o.import_performed_by && String(o.import_performed_by).trim()) ? _esc(o.import_performed_by) : '—';
     const idDisp = _lockedImportDateDisplay(o.import_date, o.import_performed_at);
     return `<tr>
       <td><strong>${_esc(o.offcut_id)}</strong></td>
       <td>${_esc(String(o.material_code ?? ''))}</td>
+      <td><small>${_esc(filmTypeLabel(o.film_type))}</small></td>
       <td>${_esc(String(o.width_m ?? ''))}×${_esc(String(o.length_m ?? ''))} m</td>
       <td>${o.area_m2 ?? '—'}</td>
-      <td><span class="status-badge status-new" style="font-size:10px">${_esc(q)}</span></td>
+      <td><span class="status-badge status-new" style="font-size:10px">${_esc(qs)}</span></td>
       <td>${lotStatusChip(e)}</td>
       <td>${o.is_locked ? '<span class="locked-badge"><i class="fa-solid fa-lock" style="margin-right:4px;"></i>Khóa</span>' : '—'}</td>
       <td><small>${_esc(String(o.storage_location || '—'))}</small></td>
@@ -6318,8 +6887,16 @@ async function loadOffcuts() {
         <button class="btn btn-danger btn-sm" onclick="openClearOffcutModal(${JSON.stringify(String(o.offcut_id ?? '')).replace(/"/g, '&quot;')})">Clear</button>
         ${o.is_locked ? `<button class="btn btn-outline btn-sm" onclick="openReleaseLockModal(${JSON.stringify('OFFCUT').replace(/"/g, '&quot;')}, ${JSON.stringify(String(o.offcut_id ?? '')).replace(/"/g, '&quot;')})"><i class="fa-solid fa-unlock"></i> Mở khóa</button>` : ''}
       </td></tr>`;
-  }).join('') : '<tr><td colspan="11" class="text-center muted">Không có mảnh dư.</td></tr>';
+  }).join('') : '<tr><td colspan="12" class="text-center muted">Không có mảnh dư.</td></tr>';
 }
+
+window.resetInvOffcuts = function() {
+  const qEl = document.getElementById('inv-oc-q');
+  const fgEl = document.getElementById('inv-oc-film-group');
+  if (qEl) qEl.value = '';
+  if (fgEl) fgEl.value = '';
+  loadOffcuts();
+};
 
 async function loadInventoryTransactions() {
   const q = new URLSearchParams();
@@ -6636,16 +7213,94 @@ window.submitImportOffcut = async function() {
   } catch (e) { toast('error', 'Lỗi', e.message); }
 };
 
-window.openManualIssueLotModal = function(lotId) {
+window.openEditLotImportMetaModal = function (p) {
+  const lotId = typeof p === 'string' ? p : (p && p.lot_id) || '';
+  if (!lotId) return;
+  const curDate = p && p.import_date != null ? String(p.import_date) : '';
+  const curBy = p && p.import_performed_by != null ? String(p.import_performed_by) : '';
+  openInvModal('Sửa thông tin nhập kho — ' + lotId, `
+    <p class="muted" style="font-size:11px;margin:0 0 8px;line-height:1.45">Chỉnh <strong>người nhập</strong> và <strong>ngày nhập kho</strong>. Bắt buộc nhập <strong>lý do sửa</strong> — hệ thống ghi vào giao dịch kho và nhật ký kiểm toán.</p>
+    <div class="form-grid">
+      <div class="field-group"><label>Người nhập kho <span class="req">*</span></label>
+        <input type="text" id="elm-by" class="field-input" value="${_esc(curBy)}" placeholder="VD: QL-002, Admin" /></div>
+      <div class="field-group"><label>Ngày nhập kho <span class="req">*</span></label>
+        <input type="text" id="elm-date" class="field-input" value="${_esc(curDate)}" placeholder="yyyy-mm-dd hoặc dd/mm/yyyy" /></div>
+      <div class="field-group full-width"><label>Lý do sửa <span class="req">*</span></label>
+        <input type="text" id="elm-reason" class="field-input" placeholder="Bắt buộc — phục vụ audit" /></div>
+      <div class="field-group"><label>Người thực hiện chỉnh</label>
+        <input type="text" id="elm-editor" class="field-input" value="${_esc(window.dycSessionUsername())}" /></div>
+    </div>`,
+    `<button type="button" class="btn btn-outline" onclick="closeInvModal()">Hủy</button>
+    <button type="button" class="btn btn-primary" onclick="submitEditLotImportMeta(${JSON.stringify(lotId)})">Lưu</button>`);
+};
+
+window.submitEditLotImportMeta = async function (lotId) {
+  const import_performed_by = (document.getElementById('elm-by')?.value || '').trim();
+  const import_date = (document.getElementById('elm-date')?.value || '').trim();
+  const edit_reason = (document.getElementById('elm-reason')?.value || '').trim();
+  const edited_by = (document.getElementById('elm-editor')?.value || '').trim() || window.dycSessionUsername() || '—';
+  if (!import_performed_by) {
+    toast('warning', 'Thiếu dữ liệu', 'Nhập người nhập kho.');
+    return;
+  }
+  if (!import_date) {
+    toast('warning', 'Thiếu dữ liệu', 'Nhập ngày nhập kho.');
+    return;
+  }
+  if (!edit_reason) {
+    toast('warning', 'Thiếu lý do', 'Nhập lý do sửa (bắt buộc cho audit).');
+    return;
+  }
+  try {
+    const r = await fetch(`/api/inventory/lots/${encodeURIComponent(lotId)}/import-meta`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ import_performed_by, import_date, edit_reason, edited_by }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(typeof d.detail === 'string' ? d.detail : JSON.stringify(d.detail || d));
+    toast('success', 'Đã cập nhật', lotId);
+    closeInvModal();
+    loadLots();
+    if (typeof taiKhoLot === 'function') taiKhoLot();
+    if (typeof renderLockedItems === 'function') renderLockedItems();
+  } catch (e) {
+    toast('error', 'Lỗi', e.message);
+  }
+};
+
+window.openManualIssueLotModal = function (lotId, maxRemainingM) {
+  const raw = maxRemainingM != null && maxRemainingM !== '' ? Number(maxRemainingM) : NaN;
+  const maxM = Number.isFinite(raw) && raw >= 0 ? raw : null;
+  const maxLabel =
+    maxM == null
+      ? '—'
+      : maxM.toLocaleString('vi-VN', { minimumFractionDigits: 0, maximumFractionDigits: 4 });
+  let lenInputAttrs = 'id="mil-len" class="field-input" step="0.01"';
+  if (maxM != null) {
+    if (maxM > 0) {
+      lenInputAttrs += ` min="0.01" max="${maxM}"`;
+    } else {
+      lenInputAttrs += ' min="0" max="0" step="0.001"';
+    }
+  } else {
+    lenInputAttrs += ' min="0.01"';
+  }
+  const maxHintExtra =
+    maxM === 0 ? ' <span class="muted">(không còn mét để xuất)</span>' : '';
   openInvModal('Xuất LOT thủ công — ' + lotId, `
     <div class="form-grid">
-      <div class="field-group"><label>Chiều dài xuất (m) <span class="req">*</span></label><input type="number" id="mil-len" class="field-input" step="0.01" min="0.01"></div>
+      <div class="field-group">
+        <label>Chiều dài xuất (m) <span class="req">*</span></label>
+        <p class="muted" style="font-size:11px;margin:0 0 6px;line-height:1.45">Tối đa có thể xuất: <strong>${maxLabel}</strong> m <span class="muted">(tồn còn lại)</span>${maxHintExtra}</p>
+        <input type="number" ${lenInputAttrs} />
+      </div>
       <div class="field-group full-width"><label>Lý do <span class="req">*</span></label><input id="mil-reason" class="field-input"></div>
-      <div class="field-group"><label>Thực hiện bởi</label><input id="mil-by" class="field-input" value="QL-002"></div>
+      <div class="field-group"><label>Thực hiện bởi</label><input id="mil-by" class="field-input" value="${_esc(window.dycSessionUsername())}"></div>
       <div class="field-group"><label>Admin xác nhận</label><select id="mil-ov" class="field-input"><option value="false">Không</option><option value="true">Có</option></select></div>
       <div class="field-group full-width"><label>Ghi chú</label><input id="mil-note" class="field-input"></div>
     </div>`, `<button type="button" class="btn btn-outline" onclick="closeInvModal()">Hủy</button>
-    <button type="button" class="btn btn-primary" onclick="submitManualIssueLot('${lotId}')">Xuất kho</button>`);
+    <button type="button" class="btn btn-primary" onclick="submitManualIssueLot(${JSON.stringify(lotId)})">Xuất kho</button>`);
 };
 
 window.submitManualIssueLot = async function(lotId) {
@@ -6672,7 +7327,7 @@ window.openManualIssueOffcutModal = function(oid) {
       <div class="field-group"><label>Chiều rộng xuất (m)</label><input type="number" id="mio-w" class="field-input" step="0.01"></div>
       <div class="field-group"><label>Chiều dài xuất (m)</label><input type="number" id="mio-l" class="field-input" step="0.01"></div>
       <div class="field-group full-width"><label>Lý do <span class="req">*</span></label><input id="mio-reason" class="field-input"></div>
-      <div class="field-group"><label>Thực hiện bởi</label><input id="mio-by" class="field-input" value="QL-002"></div>
+      <div class="field-group"><label>Thực hiện bởi</label><input id="mio-by" class="field-input" value="${_esc(window.dycSessionUsername())}"></div>
       <div class="field-group"><label>Admin xác nhận</label><select id="mio-ov" class="field-input"><option value="false">Không</option><option value="true">Có</option></select></div>
       <div class="field-group"><label>Bỏ phần thừa (thành phế liệu)</label><select id="mio-scrap" class="field-input"><option value="false">Không</option><option value="true">Có</option></select></div>
       <div class="field-group full-width"><label>Ghi chú</label><input id="mio-note" class="field-input"></div>
@@ -6713,7 +7368,7 @@ window.openClearLotModal = function(lotId) {
           <option value="LOST_IN_STOCKTAKE">LOST_IN_STOCKTAKE → CLEARED</option>
         </select></div>
       <div class="field-group full-width"><label>Lý do <span class="req">*</span></label><input id="cl-reason" class="field-input"></div>
-      <div class="field-group"><label>Thực hiện bởi</label><input id="cl-by" class="field-input" value="QL-002"></div>
+      <div class="field-group"><label>Thực hiện bởi</label><input id="cl-by" class="field-input" value="${_esc(window.dycSessionUsername())}"></div>
       <div class="field-group"><label>Admin xác nhận</label><select id="cl-ov" class="field-input"><option value="false">Không</option><option value="true">Có</option></select></div>
       <div class="field-group full-width"><label>Ghi chú</label><input id="cl-note" class="field-input"></div>
     </div>`, `<button type="button" class="btn btn-outline" onclick="closeInvModal()">Hủy</button>
@@ -6752,7 +7407,7 @@ window.openClearOffcutModal = function(oid) {
           <option value="TOO_SMALL_TO_USE">Quá nhỏ không thể dùng (TOO_SMALL_TO_USE → SCRAPPED)</option>
         </select></div>
       <div class="field-group full-width"><label>Lý do <span class="req">*</span></label><input id="co-reason" class="field-input"></div>
-      <div class="field-group"><label>Thực hiện bởi</label><input id="co-by" class="field-input" value="QL-002"></div>
+      <div class="field-group"><label>Thực hiện bởi</label><input id="co-by" class="field-input" value="${_esc(window.dycSessionUsername())}"></div>
       <div class="field-group"><label>Admin xác nhận</label><select id="co-ov" class="field-input"><option value="false">Không</option><option value="true">Có</option></select></div>
     </div>`, `<button type="button" class="btn btn-outline" onclick="closeInvModal()">Hủy</button>
     <button type="button" class="btn btn-danger" onclick="submitClearOffcut('${oid}')">Clear</button>`);
@@ -6813,89 +7468,93 @@ window.submitReleaseLock = async function() {
 // KHO LOT & MẢNH DƯ
 // ═══════════════════════════════════════════════════════════════════════════════
 async function taiKhoLot() {
-  const allLots = await fetch('/api/lots').then(r => r.json());
-  
+  const fgEl = document.getElementById('kl-film-group');
   const matEl = document.getElementById('kl-mat');
   const stEl = document.getElementById('kl-status');
+  const filterFg = fgEl ? fgEl.value : '';
   const filterMat = (matEl ? matEl.value : '').toLowerCase().trim();
   const filterSt = stEl ? stEl.value : '';
 
+  const q = new URLSearchParams();
+  if (filterFg) q.set('film_type', filterFg);
+  const allLots = await fetch('/api/lots?' + q.toString()).then(r => r.json());
+
   allLots.forEach(l => {
-    let eff = l.status || 'ACTIVE';
-    if (l.remaining_length_m <= 0 && eff === 'ACTIVE') {
-      eff = 'DEPLETED';
-    }
+    let eff = l.lot_status || l.status || 'ACTIVE';
+    if ((l.remaining_length_m || 0) <= 0 && eff === 'ACTIVE') eff = 'DEPLETED';
     l._eff_status = eff;
   });
 
   const lots = allLots.filter(l => {
     if (filterMat && !(l.material_code || '').toLowerCase().includes(filterMat)) return false;
-    if (filterSt === 'ACTIVE') {
-      if (l._eff_status !== 'ACTIVE') return false;
-    } else if (filterSt === 'DEPLETED') {
-      if (l._eff_status === 'ACTIVE') return false;
-    }
+    if (filterSt === 'ACTIVE') { if (l._eff_status !== 'ACTIVE') return false; }
+    else if (filterSt === 'DEPLETED') { if (l._eff_status === 'ACTIVE') return false; }
     return true;
   });
 
   document.getElementById('table-lots-body').innerHTML = lots.length === 0
-    ? '<tr><td colspan="10" class="text-center muted" style="padding:20px">Không có cuộn LOT nào.</td></tr>'
+    ? '<tr><td colspan="11" class="text-center muted" style="padding:20px">Không có cuộn LOT nào.</td></tr>'
     : lots.map(l => `<tr>
         <td><strong>${l.lot_id}</strong></td>
-        <td>${l.material_code}</td>
-        <td>${l.original_width_m} m</td>
-        <td>${l.original_length_m} m</td>
-        <td><strong style="color:${l.remaining_length_m < 2 ? 'var(--red-light)' : 'var(--green-light)'}">${l.remaining_length_m} m</strong></td>
+        <td>${l.material_code || '—'}</td>
+        <td><small>${_esc(filmTypeLabel(l.film_type))}</small></td>
+        <td>${l.original_width_m ?? '—'} m</td>
+        <td>${l.original_length_m ?? '—'} m</td>
+        <td><strong style="color:${(l.remaining_length_m || 0) < 2 ? 'var(--red-light)' : 'var(--green-light)'}">${l.remaining_length_m ?? '—'} m</strong></td>
         <td>${l.is_opened ? '<span style="color:var(--orange-light)">Đang dùng</span>' : '<span style="color:var(--green-light)">Nguyên</span>'}</td>
         <td>${l.is_locked ? '<span style="color:var(--red-light)"><i class="fa-solid fa-lock"></i> Đang khóa</span>' : '<span style="color:var(--text-muted)">Khả dụng</span>'}</td>
-        <td><small>Admin</small></td>
-        <td>${l.import_date}</td>
+        <td><small>${_esc((l.import_performed_by || '').trim() || '—')}</small></td>
+        <td>${l.import_date || '—'}</td>
         <td>${trangThaiBadge(l._eff_status)}</td>
       </tr>`).join('');
 }
 
 window.resetKhoLot = function() {
+  const fgEl = document.getElementById('kl-film-group');
   const matEl = document.getElementById('kl-mat');
   const stEl = document.getElementById('kl-status');
+  if (fgEl) fgEl.value = '';
   if (matEl) matEl.value = '';
   if (stEl) stEl.value = '';
   taiKhoLot();
 };
 
 async function taiManhDu() {
-  let offcuts = await fetch('/api/offcuts').then(r => r.json());
-  
+  const fgEl = document.getElementById('oc-film-group');
   const statusEl = document.getElementById('oc-status');
+  const filterFg = fgEl ? fgEl.value : '';
   const filterStatus = statusEl ? statusEl.value : '';
+
+  const q = new URLSearchParams();
+  if (filterFg) q.set('film_type', filterFg);
+  let offcuts = await fetch('/api/offcuts?' + q.toString()).then(r => r.json());
 
   offcuts.forEach(o => {
     let eff = (o.offcut_status || o.status || 'AVAILABLE').toUpperCase();
     if (eff === 'ACTIVE') eff = 'AVAILABLE';
-    if ((o.area_m2 <= 0 || o.area_m2 === "0.0") && (eff === 'AVAILABLE' || eff === 'ACTIVE')) {
-      eff = 'USED';
-    }
+    if ((Number(o.area_m2) <= 0 || o.area_m2 === '0.0') && (eff === 'AVAILABLE' || eff === 'ACTIVE')) eff = 'USED';
     o._eff_status = eff;
   });
 
   if (filterStatus === '') {
-    // Mặc định: Đang hoạt động (AVAILABLE, IN_USE, NEW...)
     offcuts = offcuts.filter(o => o._eff_status === 'AVAILABLE' || o._eff_status === 'ACTIVE' || o._eff_status === 'PARTIALLY_USED');
   } else if (filterStatus !== 'ALL') {
     offcuts = offcuts.filter(o => o._eff_status === filterStatus);
   }
 
   const tbody = document.getElementById('table-offcuts-body');
-  if (offcuts.length === 0) { tbody.innerHTML = '<tr><td colspan="11" class="text-center muted" style="padding:20px">Không có mảnh dư nào.</td></tr>'; return; }
+  if (offcuts.length === 0) { tbody.innerHTML = '<tr><td colspan="12" class="text-center muted" style="padding:20px">Không có mảnh dư nào.</td></tr>'; return; }
   tbody.innerHTML = offcuts.map(o => `<tr>
     <td><strong>${o.offcut_id}</strong></td>
     <td>${o.parent_lot_id || '—'}</td>
+    <td><small>${_esc(filmTypeLabel(o.film_type))}</small></td>
     <td>${o.material_code}</td>
     <td>${o.width_m} m</td>
     <td>${o.length_m} m</td>
     <td>${o.area_m2} m²</td>
     <td>${o.is_locked ? '<span style="color:var(--red-light)"><i class="fa-solid fa-lock" style="margin-right:4px;"></i>Khóa</span>' : '<span style="color:var(--text-muted)">—</span>'}</td>
     <td>${o.storage_location || '—'}</td>
-    <td>Admin</td>
+    <td>${_esc((o.import_performed_by || '').trim() || 'Admin')}</td>
     <td>${o.import_date || '—'}</td>
     <td>${trangThaiBadge(o._eff_status)}</td>
   </tr>`).join('');
@@ -6903,14 +7562,349 @@ async function taiManhDu() {
 
 window.resetFilterOffcuts = function() {
   const qEl = document.getElementById('oc-q');
+  const fgEl = document.getElementById('oc-film-group');
   const stEl = document.getElementById('oc-status');
   if (qEl) qEl.value = '';
+  if (fgEl) fgEl.value = '';
   if (stEl) stEl.value = '';
   taiManhDu();
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// BÁO CÁO THÁNG
+// KHO THẢM SÀN
+// ═══════════════════════════════════════════════════════════════════════════════
+let _floorMatsCache = [];
+
+async function loadFloorMats() {
+  try {
+    _floorMatsCache = await fetch('/api/floor-mats').then(r => r.json());
+    renderFloorMatsTable();
+    _populateFmSkuSelect();
+  } catch (e) {
+    console.error('loadFloorMats error', e);
+  }
+}
+
+function renderFloorMatsTable() {
+  const tbody = document.getElementById('table-floormats-body');
+  if (!tbody) return;
+  const q = (document.getElementById('fm-q')?.value || '').trim().toLowerCase();
+  let rows = _floorMatsCache;
+  if (q) rows = rows.filter(r => (r.sku + r.name).toLowerCase().includes(q));
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="10" class="text-center muted" style="padding:20px">Chưa có SKU thảm sàn nào.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = rows.map(r => {
+    const lowBadge = r.low_stock ? '<span style="color:var(--red-light);font-size:11px;font-weight:600"> ⚠ Thấp</span>' : '';
+    return `<tr>
+      <td><strong>${_esc(r.sku)}</strong></td>
+      <td>${_esc(r.name)}</td>
+      <td>${_esc(r.unit)}</td>
+      <td><strong>${r.qty_total}</strong></td>
+      <td>${r.qty_reserved}</td>
+      <td style="color:${r.qty_available <= 0 ? 'var(--red-light)' : ''}"><strong>${r.qty_available}</strong>${lowBadge}</td>
+      <td>${r.min_stock}</td>
+      <td>${_esc(r.supplier)}</td>
+      <td>${_esc(r.note)}</td>
+      <td>
+        <button type="button" class="btn btn-outline btn-xs" onclick="openFmImportInline('${_esc(r.sku)}')">
+          <i class="fa-solid fa-arrow-down-to-line"></i> Nhập
+        </button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function _populateFmSkuSelect() {
+  const sel = document.getElementById('fm-import-sku');
+  if (!sel) return;
+  sel.innerHTML = _floorMatsCache.map(r => `<option value="${_esc(r.sku)}">${_esc(r.sku)} — ${_esc(r.name)}</option>`).join('');
+}
+
+window.openFmImportInline = function(sku) {
+  const selEl = document.getElementById('fm-import-sku');
+  if (selEl) selEl.value = sku;
+  document.getElementById('fm-import-qty')?.focus();
+};
+
+document.getElementById('btn-fm-import')?.addEventListener('click', async () => {
+  const sku = document.getElementById('fm-import-sku')?.value || '';
+  const qty = parseInt(document.getElementById('fm-import-qty')?.value || '0');
+  const note = (document.getElementById('fm-import-note')?.value || '').trim();
+  if (!sku) return showToast('Chọn SKU để nhập kho.', 'warn');
+  if (qty <= 0) return showToast('Số lượng phải lớn hơn 0.', 'warn');
+  try {
+    const r = await fetch(`/api/floor-mats/${encodeURIComponent(sku)}/import`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ quantity: qty, note }),
+    }).then(r => r.json());
+    if (r.status === 'success') {
+      showToast(`Đã nhập ${qty} ${r.sku ? '' : ''}. Tồn: ${r.qty_total}`, 'success');
+      await loadFloorMats();
+    } else {
+      showToast(r.detail || 'Nhập kho thất bại.', 'error');
+    }
+  } catch (e) {
+    showToast('Lỗi kết nối khi nhập kho thảm sàn.', 'error');
+  }
+});
+
+// ── FM SERVICE CARD trong form Tạo đơn ─────────────────────────────────────
+
+async function loadFmSkusForCreate() {
+  try {
+    if (!_floorMatsCache.length) {
+      _floorMatsCache = await fetch('/api/floor-mats').then(r => r.json());
+    }
+    renderFmSkuListForCreate();
+  } catch (e) {
+    const el = document.getElementById('mc-fm-loading');
+    if (el) el.textContent = 'Không tải được danh sách SKU. Thử lại.';
+  }
+}
+
+function renderFmSkuListForCreate() {
+  const wrap = document.getElementById('mc-fm-sku-list');
+  if (!wrap) return;
+  const loading = document.getElementById('mc-fm-loading');
+  if (loading) loading.style.display = 'none';
+  if (!_floorMatsCache.length) {
+    wrap.innerHTML = '<p class="manual-inline-hint">Chưa có SKU thảm sàn trong hệ thống.</p>';
+    return;
+  }
+  wrap.innerHTML = _floorMatsCache.map(r => `
+    <div class="mc-fm-sku-row" style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+      <label style="min-width:220px;font-size:13px">
+        <strong>${_esc(r.sku)}</strong> — ${_esc(r.name)}
+        <span style="color:var(--text-muted);font-size:11px">(KD: ${r.qty_available} ${r.unit})</span>
+      </label>
+      <input type="number" class="mc-fm-qty manual-control" data-sku="${_esc(r.sku)}" min="0" value="0" style="width:80px" />
+    </div>
+  `).join('');
+}
+
+function mcGetFmPlan() {
+  const items = [];
+  document.querySelectorAll('.mc-fm-qty').forEach(inp => {
+    const qty = parseInt(inp.value || '0');
+    if (qty > 0) items.push({ sku: inp.dataset.sku, qty });
+  });
+  return items;
+}
+
+// Listen for mc-svc-fm toggle
+document.getElementById('mc-svc-fm')?.addEventListener('change', function() {
+  if (this.checked) loadFmSkusForCreate();
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// BÁO CÁO THÁNG + BÁO CÁO NGÀY (sub-tab)
+// ═══════════════════════════════════════════════════════════════════════════════
+window.__MONTHLY_SUB__ = window.__MONTHLY_SUB__ || 'monthly';
+
+function dycIsoDateVietnam(d = new Date()) {
+  try {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Ho_Chi_Minh',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(d);
+  } catch (_) {
+    const x = new Date(d);
+    const y = x.getFullYear();
+    const m = String(x.getMonth() + 1).padStart(2, '0');
+    const day = String(x.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+}
+
+/** Hiển thị nhãn ngày dd/mm/yyyy cho hero báo cáo ngày */
+function _dailyFmtLabelDate(iso) {
+  const s = (iso || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return s || '—';
+  const [y, m, d] = s.split('-');
+  return `${d}/${m}/${y}`;
+}
+
+function setMonthlySubtab(which) {
+  window.__MONTHLY_SUB__ = which;
+  document.querySelectorAll('.monthly-subtab').forEach((b) => {
+    const on = b.getAttribute('data-monthly-sub') === which;
+    b.classList.toggle('active', on);
+    b.classList.toggle('btn-primary', on);
+    b.classList.toggle('btn-outline', !on);
+  });
+  const pm = document.getElementById('monthly-pane-monthly');
+  const pd = document.getElementById('monthly-pane-daily');
+  if (pm) pm.style.display = which === 'monthly' ? '' : 'none';
+  if (pd) pd.style.display = which === 'daily' ? '' : 'none';
+  if (which === 'daily') {
+    const inp = document.getElementById('daily-report-date');
+    if (inp && !inp.value) inp.value = dycIsoDateVietnam();
+  }
+}
+
+async function taiBangBaoCaoThangTab() {
+  if (window.__MONTHLY_SUB__ === 'daily') {
+    await loadDailyReport();
+    return;
+  }
+  await taiBaoCaoThang();
+}
+
+function _dailyKpiCard(val, label, cls) {
+  const c = cls ? ` ${cls}` : '';
+  return `<div class="monthly-kpi${c}"><div class="mk-val">${Number(val) || 0}</div><div class="mk-label">${_esc(label)}</div></div>`;
+}
+
+function _dailyUl(items, fmt) {
+  if (!items || !items.length) return '<p class="muted">Không có dữ liệu phát sinh.</p>';
+  const lis = items.map((it) => `<li>${_esc(fmt(it))}</li>`).join('');
+  return `<ul>${lis}</ul>`;
+}
+
+async function loadDailyReport(isoDate) {
+  const inp = document.getElementById('daily-report-date');
+  const errEl = document.getElementById('daily-report-error');
+  const dateStr = (isoDate || (inp && inp.value) || dycIsoDateVietnam()).trim();
+  if (inp && isoDate) inp.value = isoDate;
+  if (errEl) {
+    errEl.style.display = 'none';
+    errEl.textContent = '';
+  }
+  const dateLabel = document.getElementById('daily-dash-date-label');
+  if (dateLabel) dateLabel.textContent = _dailyFmtLabelDate(dateStr);
+  let data;
+  try {
+    data = await fetchJSON(`/api/reports/daily?date=${encodeURIComponent(dateStr)}`);
+  } catch (e) {
+    if (errEl) {
+      errEl.textContent = e.message || String(e);
+      errEl.style.display = 'block';
+    }
+    toast('error', 'Báo cáo ngày', e.message || String(e));
+    return null;
+  }
+  const k = data.kpis || {};
+  const mgrBody = document.getElementById('daily-manager-body');
+  if (mgrBody) {
+    const mgr = data.manager_daily_rows || [];
+    if (!mgr.length) {
+      mgrBody.innerHTML =
+        '<tr><td colspan="13" class="muted text-center" style="padding:28px">Không có đơn trong tầm nhìn ngày này (không có hạn giao D và không có luồng đang mở).</td></tr>';
+    } else {
+      const mk = (on) =>
+        on
+          ? '<span class="daily-cell-tick" aria-label="Có">✓</span>'
+          : '<span class="daily-cell-empty">—</span>';
+      mgrBody.innerHTML = mgr
+        .map((row, idx) => {
+          const dueChip = row.due_in_day
+            ? `<span class="daily-chip daily-chip-due">${_esc(row.due_bucket || 'Trong ngày')}</span>`
+            : '<span class="muted">—</span>';
+          const link = row.detail_link
+            ? `<a class="daily-dash-link" href="${_esc(row.detail_link)}">Mở</a>`
+            : '';
+          return `<tr class="${row.due_in_day ? 'daily-row-due' : ''}">
+          <td class="daily-col-stt"><strong>${idx + 1}</strong></td>
+          <td class="daily-col-stt2"><small>${_esc(row.stt_thang || '')}</small></td>
+          <td class="daily-col-time"><small>${_esc(row.ngay_thuc_hien || '')}</small></td>
+          <td><strong>${_esc(row.request_code || '')}</strong></td>
+          <td>${_esc(row.sales_consultant || '—')}</td>
+          <td><code class="daily-vin">${_esc(row.vin_last6 || '')}</code></td>
+          <td>${_esc(row.vehicle_model || '')}</td>
+          <td class="daily-col-check">${mk(row.ppf)}</td>
+          <td class="daily-col-check">${mk(row.pcn)}</td>
+          <td class="daily-col-check">${mk(row.hoan_thanh)}</td>
+          <td>${dueChip}</td>
+          <td class="daily-col-note"><small>${_esc(row.ghi_chu || '')}</small></td>
+          <td class="daily-col-link">${link}</td>
+        </tr>`;
+        })
+        .join('');
+    }
+  }
+  const kpiEl = document.getElementById('daily-report-kpis');
+  if (kpiEl) {
+    kpiEl.innerHTML = [
+      _dailyKpiCard(k.open_total, 'Việc đang mở', ''),
+      _dailyKpiCard(k.due_today_total, 'Hạn giao xe (ngày D)', 'warn'),
+      _dailyKpiCard(k.completed_yesterday_requests, 'Đơn hoàn tất (D−1)', 'good'),
+      _dailyKpiCard(k.in_progress, 'Đang thi công', ''),
+      _dailyKpiCard(k.pending_tech_allocation, 'Chờ KTV xác nhận phân bổ', ''),
+      _dailyKpiCard(k.waiting_inventory_commit, 'Chờ commit kho', 'warn'),
+      _dailyKpiCard(k.extra_cut_open, 'Yêu cầu cắt bổ sung', 'warn'),
+      _dailyKpiCard(k.overdue_or_risk, 'Trễ hạn / quá hạn (luồng mở)', 'danger'),
+    ].join('');
+  }
+  const summaryLines = [];
+  if (k.pending_approval) summaryLines.push(`Chờ Quản lý duyệt: ${k.pending_approval}`);
+  if (k.pending_tech_allocation) summaryLines.push(`Chờ KTV xác nhận phân bổ: ${k.pending_tech_allocation}`);
+  if (k.in_progress) summaryLines.push(`Đang thi công: ${k.in_progress}`);
+  if (k.pending_actual_confirmation) summaryLines.push(`Chờ nhập xác nhận thực tế: ${k.pending_actual_confirmation}`);
+  if (k.waiting_inventory_commit) summaryLines.push(`Chờ commit kho: ${k.waiting_inventory_commit}`);
+  const openBody = document.getElementById('daily-sec-open');
+  if (openBody) {
+    const head = summaryLines.length ? `<p><strong>Tổng hợp:</strong> ${summaryLines.map(_esc).join(' · ')}</p>` : '';
+    const list = _dailyUl(data.open_work || [], (x) =>
+      `${x.request_code || x.request_id || ''} — ${x.workstream_label || ''} — ${x.category || ''} (${x.status || ''})`,
+    );
+    openBody.innerHTML = head + list;
+  }
+  const dueEl = document.getElementById('daily-sec-due');
+  if (dueEl) {
+    dueEl.innerHTML = _dailyUl(data.due_today || [], (x) => {
+      const parts = [x.request_code, x.bucket, x.vehicle].filter(Boolean);
+      if (x.vin_last6) parts.push(`VIN ${x.vin_last6}`);
+      return parts.join(' — ');
+    });
+  }
+  const doneEl = document.getElementById('daily-sec-done');
+  if (doneEl) {
+    const counts = `<p><strong>Luồng PPF (đã đóng, D−1):</strong> ${k.completed_yesterday_ppf || 0} · <strong>Luồng cách nhiệt (đã đóng, D−1):</strong> ${k.completed_yesterday_wf || 0}</p>`;
+    doneEl.innerHTML = counts + _dailyUl(data.completed_yesterday || [], (x) =>
+      `${x.request_code || ''} — ${x.label || ''} — ${x.workstream_id || ''}`,
+    );
+  }
+  const warnEl = document.getElementById('daily-sec-warn');
+  if (warnEl) {
+    warnEl.innerHTML = _dailyUl(data.warnings || [], (w) => w.message || '');
+  }
+  const tbody = document.getElementById('daily-detail-body');
+  if (tbody) {
+    const rows = data.detail_rows || [];
+    if (!rows.length) {
+      tbody.innerHTML = '<tr><td colspan="14" class="muted text-center" style="padding:20px">Chưa có luồng nào.</td></tr>';
+    } else {
+      tbody.innerHTML = rows.map((r) => {
+        const link = r.detail_link ? `<a href="${_esc(r.detail_link)}">Mở</a>` : '';
+        return `<tr>
+          <td>${_esc(r.request_code || '')}</td>
+          <td><small>${_esc(r.workstream_id || '')}</small></td>
+          <td>${_esc(r.workstream_type || '')}</td>
+          <td>${_esc(r.vehicle || '')}</td>
+          <td>${_esc(r.vin_last6 || '')}</td>
+          <td><small>${_esc(r.dealer_customer || '')}</small></td>
+          <td><small>${_esc(r.technician_team || '')}</small></td>
+          <td>${_esc(r.status || '')}</td>
+          <td><small>${_esc(r.requested_delivery_time || '')}</small></td>
+          <td><small>${_esc(r.started_at || '')}</small></td>
+          <td><small>${_esc(r.completed_at || '')}</small></td>
+          <td>${_esc(r.sla || '')}</td>
+          <td><small>${_esc(r.warnings || '')}</small></td>
+          <td>${link}</td>
+        </tr>`;
+      }).join('');
+    }
+  }
+  return data;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// BÁO CÁO THÁNG (charts)
 // ═══════════════════════════════════════════════════════════════════════════════
 async function taiBaoCaoThang() {
   try {
@@ -6942,7 +7936,7 @@ async function taiBaoCaoThang() {
 
     document.getElementById('table-monthly-body').innerHTML = data.map(d => {
       const [yr, mo] = d.month.split('-');
-      return `<tr>
+      return `<tr data-month="${String(d.month).replace(/"/g, '')}">
         <td><strong>Tháng ${mo}/${yr}</strong></td>
         <td>${d.total_requests}</td>
         <td><span style="color:var(--green-light)">${d.closed}</span></td>
@@ -6954,7 +7948,7 @@ async function taiBaoCaoThang() {
         <td>${d.scrap_m2} m²</td>
       </tr>`;}).join('');
 
-    const chartDefs = { responsive: true, plugins: { legend: { labels: { color: '#8b92a5', font: { family: 'Inter', size: 11 } } } }, scales: { x: { ticks: { color: '#8b92a5' }, grid: { color: 'rgba(255,255,255,0.04)' } }, y: { ticks: { color: '#8b92a5' }, grid: { color: 'rgba(255,255,255,0.06)' } } } };
+    const chartDefs = { responsive: true, plugins: { legend: { labels: { color: '#555555', font: { family: 'Inter', size: 11 } } } }, scales: { x: { ticks: { color: '#555555' }, grid: { color: 'rgba(0,0,0,0.06)' } }, y: { ticks: { color: '#555555' }, grid: { color: 'rgba(0,0,0,0.06)' } } } };
     destroyChart('chart-requests');
     charts['chart-requests'] = new Chart(document.getElementById('chart-requests'), { type: 'bar', data: { labels, datasets: [
       { label: 'Tổng đơn', data: data.map(d => d.total_requests), backgroundColor: 'rgba(229,57,53,0.4)', borderColor: '#e53935', borderWidth: 2, borderRadius: 6 },
@@ -6974,6 +7968,16 @@ async function taiBaoCaoThang() {
       { label: 'RT40 (Kính lái)', data: data.map(d => d.rt40_jobs), backgroundColor: 'rgba(0,191,165,0.5)', borderColor: '#00bfa5', borderWidth: 2, borderRadius: 6 },
       { label: 'JB20 (Cách nhiệt)', data: data.map(d => d.jb20_jobs), backgroundColor: 'rgba(66,165,245,0.5)', borderColor: '#42a5f5', borderWidth: 2, borderRadius: 6 },
     ]}, options: chartDefs });
+    const focusMonth = window.__DYC_MONTHLY_URL_MONTH__;
+    if (focusMonth) {
+      const safeM = String(focusMonth).replace(/[^0-9-]/g, '');
+      const tr = document.querySelector(`#table-monthly-body tr[data-month="${safeM}"]`);
+      if (tr) {
+        tr.style.outline = '2px solid var(--orange-light)';
+        tr.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+      window.__DYC_MONTHLY_URL_MONTH__ = null;
+    }
   } catch(e) { toast('error', 'Lỗi tải báo cáo', e.message); }
 }
 
@@ -7016,11 +8020,55 @@ async function taiNhatKy() {
 
 // ─── KHỞI TẠO ─────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('login-form')?.addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const u = (document.getElementById('login-username')?.value || '').trim();
+    const p = document.getElementById('login-password')?.value || '';
+    const msg = document.getElementById('login-error');
+    if (msg) { msg.textContent = ''; msg.style.display = 'none'; }
+    try {
+      const data = await fetchJSON('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: u, password: p }),
+      });
+      if (data && data.user) {
+        window.__DYC_AUTH__ = { user: data.user, permissions: data.permissions || {} };
+        applyDycUserChrome();
+        const ov = document.getElementById('login-overlay');
+        if (ov) ov.style.display = 'none';
+        try {
+          await taiTongQuan();
+          taiThongBao();
+          if (!window.__DYC_NOTIF_INTERVAL__) {
+            window.__DYC_NOTIF_INTERVAL__ = setInterval(taiThongBao, 30000);
+          }
+          await dycApplyDeepLinkFromUrl();
+        } catch (e) {
+          console.error(e);
+        }
+      }
+    } catch (e) {
+      if (msg) {
+        msg.textContent = e.message || 'Đăng nhập thất bại.';
+        msg.style.display = 'block';
+      }
+    }
+  });
+  document.getElementById('btn-logout')?.addEventListener('click', async () => {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' });
+    } catch (_) { /* ignore */ }
+    window.__DYC_AUTH__ = { user: null, permissions: {} };
+    const ov = document.getElementById('login-overlay');
+    if (ov) ov.style.display = 'flex';
+    applyDycUserChrome();
+  });
   document.getElementById('tab-manual')?.addEventListener('change', (ev) => {
     const t = ev.target;
     if (t && t.classList && t.classList.contains('mc-wf-item')) mcPreviewNorm();
     if (t && t.classList && t.classList.contains('mc-ppf-item')) mcPreviewNorm();
-    if (t && (t.id === 'mc-svc-wf' || t.id === 'mc-svc-ppf')) mcPreviewNorm();
+    if (t && (t.id === 'mc-svc-wf' || t.id === 'mc-svc-ppf' || t.id === 'mc-svc-gl')) mcPreviewNorm();
   });
   document.querySelectorAll('#inv-subtabs .inv-subtab').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -7035,9 +8083,16 @@ document.addEventListener('DOMContentLoaded', () => {
       taiKhachHang();
     });
   });
-  taiTongQuan();
-  taiThongBao();
-  setInterval(taiThongBao, 30000);
+  void (async () => {
+    const ok = await window.ensureDycLoggedIn();
+    if (!ok) return;
+    taiTongQuan();
+    taiThongBao();
+    if (!window.__DYC_NOTIF_INTERVAL__) {
+      window.__DYC_NOTIF_INTERVAL__ = setInterval(taiThongBao, 30000);
+    }
+    await dycApplyDeepLinkFromUrl();
+  })();
   document.getElementById('tab-norms')?.addEventListener('click', (ev) => {
     const subBtn = ev.target.closest('[data-norms-sub]');
     if (subBtn) {
@@ -7102,7 +8157,7 @@ async function taiDinhMucPhim() {
   }
   _ensureModelDatalist();
   await refreshModelDatalistFromApi();
-  await refreshMcNormModelDatalistFromApi();
+  await refreshMcVehicleModelSelectFromApi();
   const fn = window._custF.norms;
   const isPpf = window._normsSubtab === 'ppf';
   const qParams = { ...fn, with_meta: '1' };

@@ -33,6 +33,24 @@ from location_api import register_location_routes
 from material_preference_api import register_material_preference_routes
 from vehicle_norm_logic import normalize_vehicle_model_code, resolve_vehicle_norm_with_year_fallback
 from hr_api import router as hr_router
+from telegram_integrations_routes import integrations_router, reports_router as telegram_reports_router
+from daily_report_routes import router as daily_reports_router
+from telegram_notification_service import (
+    maybe_notify_request_completion,
+    notify_extra_cut,
+    notify_job_completed,
+    notify_job_started,
+    notify_manager_approved,
+    notify_tech_allocation_confirmed,
+)
+from auth_api import (
+    DycAuthMiddleware,
+    router as auth_router,
+    rbac_admin_reset,
+    rbac_request_approve,
+    rbac_workstream_approve,
+    session_username,
+)
 from workstream_material_scope import approved_allocation_material_codes
 from ocr_lexus_test_data import (
     confirm_lexus_test_ocr,
@@ -82,6 +100,18 @@ async def lifespan(app: FastAPI):
         finally:
             db.close()
         try_location_master_import_warn_only()
+        # Tài khoản demo đăng nhập (bảng app_users) — luôn thử bổ sung nếu thiếu
+        db_users = SessionLocal()
+        try:
+            from standard_seed_data import seed_demo_app_users
+
+            seed_demo_app_users(db_users)
+            db_users.commit()
+        except Exception:
+            _log.exception("DYC seed_demo_app_users skipped or failed.")
+            db_users.rollback()
+        finally:
+            db_users.close()
     except Exception:
         _log.exception("DYC init_db() failed — một số API có thể lỗi cho đến khi sửa DB.")
     yield
@@ -94,6 +124,7 @@ app = FastAPI(
 
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True,
                    allow_methods=["*"], allow_headers=["*"])
+app.add_middleware(DycAuthMiddleware)
 
 @app.middleware("http")
 async def no_cache(request, call_next):
@@ -111,22 +142,42 @@ def get_db():
 
 
 @app.post("/api/admin/reset-database-standard-seed")
-def admin_reset_database_standard_seed(request: Request):
-    """
-    Reset DB + seed chuẩn (demo). Bắt buộc ALLOW_DB_RESET=true và header X-Admin-Reset-Token.
-    Không bật trên production thật.
-    """
-    import secrets
+def admin_reset_database_standard_seed(request: Request, db: Session = Depends(get_db)):
+    """L3 — Full reset + re-seed demo. Hỗ trợ cả SQLite và PostgreSQL.
+    Bắt buộc ALLOW_DB_RESET=true và header X-Admin-Reset-Token."""
+    _check_reset_auth(request)
     from pathlib import Path
+    from database import (
+        DbDealer, DbCustomer, DbVehicleProfile, DbLotInventory, DbOffcutInventory,
+        DbRequest, DbVehicleFilmNorm, DbMaterialPreference, DbWorkstream, DbJobCard,
+        DbAuditLog, DbOcrDraft, DbInventoryTransaction, DbNotification, DbAppUser,
+        DbTelegramMessageLog, DbFloorMatInventory, DbFloorMatTransaction,
+        DbCuttingGroupMatrix,
+    )
+    # Xóa tất cả theo thứ tự FK-safe
+    for model in [
+        DbFloorMatTransaction, DbInventoryTransaction, DbJobCard, DbWorkstream,
+        DbOcrDraft, DbRequest, DbOffcutInventory, DbFloorMatInventory, DbLotInventory,
+        DbMaterialPreference, DbVehicleFilmNorm, DbCuttingGroupMatrix,
+        DbTelegramMessageLog, DbNotification, DbAuditLog,
+        DbVehicleProfile, DbCustomer, DbDealer, DbAppUser,
+    ]:
+        db.query(model).delete(synchronize_session=False)
+    db.commit()
+    # Re-seed
+    from standard_seed_data import seed_all_demo_data
+    seed_all_demo_data(db)
+    db.commit()
+    return {
+        "status": "success",
+        "level": "L3",
+        "message": "Full reset + demo seed hoàn tất. Tất cả dữ liệu đã được làm mới.",
+    }
 
-    if not database_is_sqlite():
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "error": "RESET_SQLITE_ONLY",
-                "message": "Reset + seed chuẩn chỉ hỗ trợ SQLite. Với PostgreSQL (DATABASE_URL) hãy dùng backup/restore hoặc công cụ quản trị DB.",
-            },
-        )
+def _check_reset_auth(request: Request):
+    """Kiểm tra quyền reset: ALLOW_DB_RESET=true + header X-Admin-Reset-Token đúng."""
+    import secrets
+    rbac_admin_reset(request)
     if os.getenv("ALLOW_DB_RESET", "").lower() != "true":
         raise HTTPException(status_code=403, detail="ALLOW_DB_RESET is not enabled")
     expected = (os.getenv("ADMIN_RESET_TOKEN") or "").strip()
@@ -135,16 +186,62 @@ def admin_reset_database_standard_seed(request: Request):
     got = (request.headers.get("X-Admin-Reset-Token") or "").strip()
     if not secrets.compare_digest(got, expected):
         raise HTTPException(status_code=403, detail="Invalid or missing X-Admin-Reset-Token")
-    from reset_database_full_seed import run_full_reset_sequence
 
-    here = Path(__file__).resolve().parent
-    out = run_full_reset_sequence(here)
+
+@app.post("/api/admin/clear-logs")
+def admin_clear_logs(request: Request, db: Session = Depends(get_db)):
+    """L1 — Xóa audit logs và thông báo. Giữ nguyên toàn bộ dữ liệu nghiệp vụ."""
+    _check_reset_auth(request)
+    from database import DbAuditLog, DbNotification, DbTelegramMessageLog
+    c_audit = db.query(DbAuditLog).delete(synchronize_session=False)
+    c_notif = db.query(DbNotification).delete(synchronize_session=False)
+    c_tg = db.query(DbTelegramMessageLog).delete(synchronize_session=False)
+    db.commit()
     return {
         "status": "success",
-        "message": "Database reset + standard seed completed (demo only).",
-        "backup_path": out.get("backup_path"),
-        "counts": out.get("counts"),
+        "level": "L1",
+        "message": "Đã xóa logs và thông báo.",
+        "deleted": {"audit_logs": c_audit, "notifications": c_notif, "telegram_logs": c_tg},
     }
+
+
+@app.post("/api/admin/clear-operational-data")
+def admin_clear_operational(request: Request, db: Session = Depends(get_db)):
+    """L2 — Xóa dữ liệu vận hành (đơn, luồng, lệnh, giao dịch kho, OCR draft).
+    Giữ nguyên master data: đại lý, khách hàng, xe, LOT kho, định mức, material preference, users."""
+    _check_reset_auth(request)
+    from database import (
+        DbRequest, DbWorkstream, DbJobCard, DbAuditLog, DbNotification,
+        DbTelegramMessageLog, DbOcrDraft, DbInventoryTransaction,
+        DbOffcutInventory, DbFloorMatTransaction,
+    )
+    # Mở khóa LOT trước khi xóa đơn
+    from database import DbLotInventory
+    db.query(DbLotInventory).update({"is_locked": False, "locked_by_request_id": None}, synchronize_session=False)
+    # Xóa offcuts (sinh ra từ quá trình thi công)
+    c_offcut = db.query(DbOffcutInventory).delete(synchronize_session=False)
+    c_txn = db.query(DbInventoryTransaction).delete(synchronize_session=False)
+    c_fm_txn = db.query(DbFloorMatTransaction).delete(synchronize_session=False)
+    c_job = db.query(DbJobCard).delete(synchronize_session=False)
+    c_ws = db.query(DbWorkstream).delete(synchronize_session=False)
+    c_ocr = db.query(DbOcrDraft).delete(synchronize_session=False)
+    c_req = db.query(DbRequest).delete(synchronize_session=False)
+    c_audit = db.query(DbAuditLog).delete(synchronize_session=False)
+    c_notif = db.query(DbNotification).delete(synchronize_session=False)
+    c_tg = db.query(DbTelegramMessageLog).delete(synchronize_session=False)
+    db.commit()
+    return {
+        "status": "success",
+        "level": "L2",
+        "message": "Đã xóa dữ liệu vận hành. Master data (đại lý, kho LOT, định mức, users) được giữ nguyên.",
+        "deleted": {
+            "requests": c_req, "workstreams": c_ws, "job_cards": c_job,
+            "ocr_drafts": c_ocr, "offcuts": c_offcut,
+            "inventory_transactions": c_txn, "floor_mat_transactions": c_fm_txn,
+            "audit_logs": c_audit, "notifications": c_notif, "telegram_logs": c_tg,
+        },
+    }
+
 
 register_inventory_routes(app, get_db)
 register_customer_routes(app, get_db)
@@ -152,12 +249,38 @@ register_vehicle_norm_routes(app, get_db)
 register_material_preference_routes(app, get_db)
 register_location_routes(app)
 app.include_router(hr_router)
+app.include_router(auth_router)
+app.include_router(integrations_router)
+app.include_router(telegram_reports_router)
+app.include_router(daily_reports_router)
+
+from floor_mat_api import router as floor_mat_router
+app.include_router(floor_mat_router)
 
 def _now():
     return datetime.datetime.utcnow().isoformat() + "Z"
 
 def _uid(prefix=""):
     return f"{prefix}{uuid.uuid4().hex[:8].upper()}"
+
+def _dealer_req_code(dealer_id: str, db=None) -> str:
+    """Short code của dealer dùng trong mã đơn.
+    Ưu tiên dealer.dealer_code nếu có, nếu không thì rút gọn từ dealer_id."""
+    if db and dealer_id:
+        try:
+            from database import DbDealer as _DbDealer
+            d = db.query(_DbDealer).filter(_DbDealer.dealer_id == dealer_id).first()
+            if d and getattr(d, "dealer_code", None):
+                return d.dealer_code.strip()
+        except Exception:
+            pass
+    raw = (dealer_id or "UNK").strip()
+    if raw.upper().startswith("DEALER_"):
+        raw = raw[7:]
+    parts = raw.upper().split("_")
+    if len(parts) >= 2:
+        return f"{parts[0][:3]}-{parts[-1][:3]}"
+    return raw[:8].upper()
 
 def _add_audit_log(db, action, draft_id, req_id, workstream_id, extra_id=""):
     from database import DbAuditLog
@@ -472,7 +595,8 @@ def _commit_workstream_inventory(db: Session, ws: DbWorkstream, tech_id: str = "
             DbOffcutInventory.offcut_id.like(f"{base}-%")).count()
         new_offcut_id = f"{base}-{str(cnt+1).zfill(3)}"
         pl, po = _parent_links_for_ws_offcut(db, source_type, source_id)
-        ft = "PPF" if ws.workstream_type == "PPF_INSTALLATION" else "WINDOW_FILM"
+        _ft_map = {"PPF_INSTALLATION": "PPF", "GLASS_FILM_INSTALLATION": "GLASS_FILM"}
+        ft = _ft_map.get(ws.workstream_type, "WINDOW_FILM")
         create_offcut_from_workstream_return(
             db,
             offcut_id=new_offcut_id,
@@ -643,6 +767,41 @@ def get_dashboard(db: Session = Depends(get_db)):
             media_type="application/json",
         )
 
+@app.get("/api/dashboard/dealer-monthly")
+def get_dealer_monthly_breakdown(
+    db: Session = Depends(get_db),
+    month: Optional[str] = Query(None, description="YYYY-MM, mặc định tháng hiện tại"),
+):
+    """Tỉ lệ số xe thực hiện theo từng đại lý trong tháng.
+    Trả về: [{dealer_id, dealer_name, count}], total, month."""
+    import datetime as _dt
+    target = month or _dt.date.today().strftime("%Y-%m")
+    rows = (
+        db.query(DbRequest.dealer_id, DbRequest.dealer_name)
+        .filter(DbRequest.created_at.like(f"{target}%"))
+        .all()
+    )
+    from collections import Counter
+    dealer_count: Counter = Counter()
+    dealer_names: dict = {}
+    for r in rows:
+        did = r.dealer_id or "—"
+        dealer_count[did] += 1
+        if r.dealer_name and did not in dealer_names:
+            dealer_names[did] = r.dealer_name
+    total = sum(dealer_count.values())
+    breakdown = [
+        {
+            "dealer_id": did,
+            "dealer_name": dealer_names.get(did) or did,
+            "count": cnt,
+            "pct": round(cnt / total * 100, 1) if total else 0,
+        }
+        for did, cnt in sorted(dealer_count.items(), key=lambda x: -x[1])
+    ]
+    return {"month": target, "total": total, "breakdown": breakdown}
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # MONTHLY DASHBOARD
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -766,7 +925,7 @@ def get_request(request_id: str, db: Session = Depends(get_db)):
 
 
 @app.put("/api/requests/{request_id}/norm-override")
-def override_request_norm(request_id: str, data: dict, db: Session = Depends(get_db)):
+def override_request_norm(request: Request, request_id: str, data: dict, db: Session = Depends(get_db)):
     reason = (data.get("reason") or "").strip()
     if not reason:
         raise HTTPException(400, "reason bắt buộc")
@@ -776,7 +935,7 @@ def override_request_norm(request_id: str, data: dict, db: Session = Depends(get
     allowed = {"DRAFT", "STANDARDIZED", "NORM_ASSIGNED", "ALLOCATED", "NEEDS_REVIEW", "EXCEPTION_HOLD"}
     if req.status not in allowed and not data.get("admin_override"):
         raise HTTPException(400, "Chỉ ghi đè định mức khi đơn chưa phê duyệt (hoặc admin_override).")
-    actor = data.get("updated_by") or "WEB"
+    actor = session_username(request)
     prev = {}
     try:
         prev = json.loads(req.norm_application_json) if req.norm_application_json else {}
@@ -832,12 +991,27 @@ def get_workstreams(request_id: str, db: Session = Depends(get_db)):
     return [_serialize_workstream(ws, db) for ws in wss]
 
 @app.get("/api/lots")
-def get_lots(db: Session = Depends(get_db)):
-    return db.query(DbLotInventory).all()
+def get_lots(
+    db: Session = Depends(get_db),
+    film_type: Optional[str] = Query(None, description="Lọc theo loại phim: WINDOW_FILM | PPF | GLASS_FILM | OTHER"),
+):
+    from inventory_api import lots_to_api_dicts
+
+    qry = db.query(DbLotInventory)
+    if film_type:
+        qry = qry.filter(DbLotInventory.film_type == film_type)
+    rows = qry.all()
+    return lots_to_api_dicts(db, rows)
 
 @app.get("/api/offcuts")
-def get_offcuts(db: Session = Depends(get_db)):
-    return db.query(DbOffcutInventory).all()
+def get_offcuts(
+    db: Session = Depends(get_db),
+    film_type: Optional[str] = Query(None, description="Lọc theo loại phim: WINDOW_FILM | PPF | GLASS_FILM | OTHER"),
+):
+    qry = db.query(DbOffcutInventory)
+    if film_type:
+        qry = qry.filter(DbOffcutInventory.film_type == film_type)
+    return qry.all()
 
 @app.get("/api/audit-logs")
 def get_audit_logs(
@@ -920,9 +1094,7 @@ def run_request_step(request_id: str, db: Session = Depends(get_db)):
             DbOffcutInventory.length_m >= length_needed
         ).order_by(DbOffcutInventory.length_m.asc()).first()
 
-        if req.request_id in ("REQ-20260603-001", "REQ-20260604-001"):
-            req.allocated_source_type = "LOT"; req.allocated_source_id = "LOT-JB20-001"
-        elif best_offcut:
+        if best_offcut:
             req.allocated_source_type = "OFFCUT"; req.allocated_source_id = best_offcut.offcut_id
         else:
             best_lot = db.query(DbLotInventory).filter(
@@ -964,7 +1136,7 @@ def _build_extra_cut_history_api(ws: DbWorkstream, db: Optional[Session] = None)
 
     rows = list(load_extra_cut_history(ws))
     if not rows and bool(getattr(ws, "extra_cut_requested", False)):
-        if getattr(ws, "workstream_type", None) == "WINDOW_FILM_INSTALLATION":
+        if getattr(ws, "workstream_type", None) in ("WINDOW_FILM_INSTALLATION", "GLASS_FILM_INSTALLATION"):
             ex_raw = getattr(ws, "extra_cut_wf_allocation_json", None) or ""
             if ex_raw.strip():
                 try:
@@ -998,7 +1170,7 @@ def _build_extra_cut_history_api(ws: DbWorkstream, db: Optional[Session] = None)
             continue
         e = copy.deepcopy(ent)
         wa = e.get("wf_allocation")
-        if isinstance(wa, dict) and getattr(ws, "workstream_type", None) == "WINDOW_FILM_INSTALLATION":
+        if isinstance(wa, dict) and getattr(ws, "workstream_type", None) in ("WINDOW_FILM_INSTALLATION", "GLASS_FILM_INSTALLATION"):
             if not wa.get("roll_cut_summary"):
                 wa["roll_cut_summary"] = compute_wf_roll_cut_summary(wa)
             e["wf_allocation"] = wa
@@ -1024,7 +1196,7 @@ def _serialize_workstream(ws: DbWorkstream, db: Optional[Session] = None) -> dic
                 d["ppf_allocation"] = build_default_ppf_allocation(ws)
         else:
             d["ppf_allocation"] = build_default_ppf_allocation(ws)
-    if ws.workstream_type == "WINDOW_FILM_INSTALLATION":
+    if ws.workstream_type in ("WINDOW_FILM_INSTALLATION", "GLASS_FILM_INSTALLATION"):
         from wf_allocation_service import build_default_wf_allocation, compute_wf_roll_cut_summary
 
         if getattr(ws, "wf_allocation_json", None):
@@ -1051,10 +1223,17 @@ def _serialize_workstream(ws: DbWorkstream, db: Optional[Session] = None) -> dic
         d["extra_cut_history"] = _build_extra_cut_history_api(ws, db)
     else:
         d["extra_cut_history"] = _build_extra_cut_history_api(ws, db)
+    if ws.workstream_type == "FLOOR_MAT_INSTALLATION":
+        raw_fm = getattr(ws, "floor_mat_plan_json", None) or ""
+        try:
+            d["floor_mat_plan"] = json.loads(raw_fm) if raw_fm else []
+        except json.JSONDecodeError:
+            d["floor_mat_plan"] = []
     d.pop("ppf_allocation_json", None)
     d.pop("wf_allocation_json", None)
     d.pop("extra_cut_wf_allocation_json", None)
     d.pop("extra_cut_history_json", None)
+    d.pop("floor_mat_plan_json", None)
     if db and getattr(ws, "request_id", None):
         try:
             req = db.query(DbRequest).filter(DbRequest.request_id == ws.request_id).first()
@@ -1103,7 +1282,7 @@ def get_workstream_allocation_material_codes(ws_id: str, db: Session = Depends(g
 
 
 @app.put("/api/workstreams/{ws_id}/ppf-allocation")
-def put_ppf_allocation_route(ws_id: str, data: dict = Body(...), db: Session = Depends(get_db)):
+def put_ppf_allocation_route(request: Request, ws_id: str, data: dict = Body(...), db: Session = Depends(get_db)):
     """Lưu proposal phân bổ PPF nhiều nguồn (trước duyệt). Không trừ kho."""
     from ppf_allocation_service import (
         put_ppf_allocation,
@@ -1111,6 +1290,7 @@ def put_ppf_allocation_route(ws_id: str, data: dict = Body(...), db: Session = D
         build_default_ppf_allocation,
     )
 
+    act = session_username(request)
     ws = db.query(DbWorkstream).filter(DbWorkstream.workstream_id == ws_id).first()
     if not ws:
         raise HTTPException(404, "Workstream not found")
@@ -1125,7 +1305,7 @@ def put_ppf_allocation_route(ws_id: str, data: dict = Body(...), db: Session = D
         prev_snap = build_default_ppf_allocation(ws)
     prev_type = ws.selected_material_code or prev_snap.get("ppf_type")
 
-    out = put_ppf_allocation(db, ws_id, data, actor=data.get("actor", "QL-002"))
+    out = put_ppf_allocation(db, ws_id, data, actor=act)
     for fld in ("technician_team", "assigned_technician_id", "assigned_technician_name"):
         if fld in data and data.get(fld) is not None:
             setattr(ws, fld, data.get(fld))
@@ -1147,7 +1327,7 @@ def put_ppf_allocation_route(ws_id: str, data: dict = Body(...), db: Session = D
             old_type,
             new_type,
             data.get("change_reason") or "PUT ppf-allocation",
-            data.get("actor", "QL-002"),
+            act,
             ws_id,
             ws.workstream_type,
         )
@@ -1168,7 +1348,7 @@ def put_ppf_allocation_route(ws_id: str, data: dict = Body(...), db: Session = D
             json.dumps({"block": fp.get("planned_cut_block"), "req_m": fp.get("required_length_m")}, ensure_ascii=False),
             json.dumps({"block": fn.get("planned_cut_block"), "req_m": fn.get("required_length_m")}, ensure_ascii=False),
             data.get("change_reason") or "Chỉnh kích thước / chiều dài PPF",
-            data.get("actor", "QL-002"),
+            act,
             ws_id,
             ws.workstream_type,
         )
@@ -1186,7 +1366,7 @@ def put_ppf_allocation_route(ws_id: str, data: dict = Body(...), db: Session = D
                 "not_selected",
                 code,
                 data.get("change_reason") or "Thêm hạng mục PPF",
-                data.get("actor", "QL-002"),
+                act,
                 ws_id,
                 ws.workstream_type,
             )
@@ -1203,7 +1383,7 @@ def put_ppf_allocation_route(ws_id: str, data: dict = Body(...), db: Session = D
             str(prev_ns),
             str(new_ns),
             data.get("change_reason") or "Chia thêm nguồn PPF",
-            data.get("actor", "QL-002"),
+            act,
             ws_id,
             ws.workstream_type,
         )
@@ -1214,19 +1394,21 @@ def put_ppf_allocation_route(ws_id: str, data: dict = Body(...), db: Session = D
         prev_raw,
         new_raw,
         data.get("change_reason") or "",
-        data.get("actor", "QL-002"),
+        act,
         lambda rid, tt, st, sid, bv, av, r, act, ws_id_a, ws_type_a: _audit(
             db, rid, tt, st, sid, bv, av, r, act, ws_id_a, ws_type_a
         ),
     )
     db.commit()
+    notify_tech_allocation_confirmed(ws_id)
     return out
 
 
-def _put_wf_allocation_route(ws_id: str, data: dict, db: Session):
+def _put_wf_allocation_route(request: Request, ws_id: str, data: dict, db: Session):
     """Lưu proposal phân bổ Window Film (nhiều hạng mục + nguồn). Không trừ kho."""
     from wf_allocation_service import put_wf_allocation, build_default_wf_allocation
 
+    act = session_username(request)
     ws = db.query(DbWorkstream).filter(DbWorkstream.workstream_id == ws_id).first()
     if not ws:
         raise HTTPException(404, "Workstream not found")
@@ -1240,7 +1422,7 @@ def _put_wf_allocation_route(ws_id: str, data: dict, db: Session):
     if not prev_snap:
         prev_snap = build_default_wf_allocation(db, ws)
 
-    out = put_wf_allocation(db, ws_id, data, actor=data.get("actor", "QL-002"))
+    out = put_wf_allocation(db, ws_id, data, actor=act)
     for fld in ("technician_team", "assigned_technician_id", "assigned_technician_name"):
         if fld in data and data.get(fld) is not None:
             setattr(ws, fld, data.get(fld))
@@ -1264,7 +1446,7 @@ def _put_wf_allocation_route(ws_id: str, data: dict, db: Session):
                 str(o.get("material_code") or ""),
                 str(it.get("material_code") or ""),
                 data.get("change_reason") or "PUT allocation WF",
-                data.get("actor", "QL-002"),
+                act,
                 ws_id,
                 ws.workstream_type,
             )
@@ -1281,7 +1463,7 @@ def _put_wf_allocation_route(ws_id: str, data: dict, db: Session):
             str(prev_ns),
             str(new_ns),
             data.get("change_reason") or "Chia thêm nguồn WF",
-            data.get("actor", "QL-002"),
+            act,
             ws_id,
             ws.workstream_type,
         )
@@ -1295,16 +1477,17 @@ def _put_wf_allocation_route(ws_id: str, data: dict, db: Session):
         (prev_raw or "")[:2000],
         (new_raw or "")[:2000],
         data.get("change_reason") or "Cập nhật phân bổ WF trước duyệt",
-        data.get("actor", "QL-002"),
+        act,
         ws_id,
         ws.workstream_type,
     )
     db.commit()
+    notify_tech_allocation_confirmed(ws_id)
     return out
 
 
 @app.put("/api/workstreams/{ws_id}/allocation")
-def put_workstream_allocation_unified(ws_id: str, data: dict = Body(...), db: Session = Depends(get_db)):
+def put_workstream_allocation_unified(request: Request, ws_id: str, data: dict = Body(...), db: Session = Depends(get_db)):
     """API chung PPF + Phim cách nhiệt — UI ưu tiên endpoint này."""
     ws = db.query(DbWorkstream).filter(DbWorkstream.workstream_id == ws_id).first()
     if not ws:
@@ -1320,12 +1503,12 @@ def put_workstream_allocation_unified(ws_id: str, data: dict = Body(...), db: Se
         if not body.get("ppf_type"):
             full = next((x for x in (body.get("items") or []) if x.get("item_code") == "FULL_VEHICLE_PPF"), {})
             body["ppf_type"] = (full.get("material_code") or ws.selected_material_code or "T-TYPE").strip()
-        return put_ppf_allocation_route(ws_id, body, db)
-    return _put_wf_allocation_route(ws_id, data, db)
+        return put_ppf_allocation_route(request, ws_id, body, db)
+    return _put_wf_allocation_route(request, ws_id, data, db)
 
 
 @app.post("/api/workstreams/{ws_id}/approve-wf-materials")
-def approve_wf_materials_only(ws_id: str, data: dict = Body(default_factory=dict), db: Session = Depends(get_db)):
+def approve_wf_materials_only(request: Request, ws_id: str, data: dict = Body(default_factory=dict), db: Session = Depends(get_db)):
     """
     Bước 1 (Phim cách nhiệt): Quản lý xác nhận mã phim từng hạng mục.
     → PENDING_TECH_PREFLIGHT, rebuild wf_allocation từ định mức + material_plan (chưa khóa LOT, chưa tạo Job Card).
@@ -1333,8 +1516,8 @@ def approve_wf_materials_only(ws_id: str, data: dict = Body(default_factory=dict
     ws = db.query(DbWorkstream).filter(DbWorkstream.workstream_id == ws_id).first()
     if not ws:
         raise HTTPException(404, "Workstream not found")
-    if ws.workstream_type != "WINDOW_FILM_INSTALLATION":
-        raise HTTPException(400, {"error": "INVALID", "message": "Chỉ áp dụng cho WINDOW_FILM_INSTALLATION."})
+    if ws.workstream_type not in ("WINDOW_FILM_INSTALLATION", "GLASS_FILM_INSTALLATION"):
+        raise HTTPException(400, {"error": "INVALID", "message": "Chỉ áp dụng cho WINDOW_FILM_INSTALLATION / GLASS_FILM_INSTALLATION."})
     if ws.status != "PENDING_APPROVAL":
         raise HTTPException(
             400,
@@ -1343,7 +1526,7 @@ def approve_wf_materials_only(ws_id: str, data: dict = Body(default_factory=dict
     reason = (data.get("reason") or data.get("change_reason") or "").strip()
     if not reason:
         raise HTTPException(400, {"error": "REASON_REQUIRED", "message": "Bắt buộc nhập reason (xác nhận lựa chọn mã phim thi công)."})
-    actor = (data.get("approved_by") or data.get("updated_by") or "QL-002").strip()
+    actor = session_username(request)
 
     plan_in = data.get("material_plan")
     if plan_in is not None:
@@ -1397,18 +1580,19 @@ def approve_wf_materials_only(ws_id: str, data: dict = Body(default_factory=dict
 
 
 @app.post("/api/workstreams/{ws_id}/approve")
-def approve_workstream(ws_id: str, data: dict = None, db: Session = Depends(get_db)):
+def approve_workstream(request: Request, ws_id: str, data: dict = None, db: Session = Depends(get_db)):
     """Manager approves a single workstream → Soft Lock + Job Card created."""
     ws = db.query(DbWorkstream).filter(DbWorkstream.workstream_id == ws_id).first()
     if not ws: raise HTTPException(404, "Workstream not found")
-    if ws.workstream_type == "WINDOW_FILM_INSTALLATION":
+    rbac_workstream_approve(request, ws.status, ws.workstream_type)
+    if ws.workstream_type in ("WINDOW_FILM_INSTALLATION", "GLASS_FILM_INSTALLATION"):
         if ws.status not in ("PENDING_TECH_PREFLIGHT",):
             raise HTTPException(
                 400,
                 detail={
                     "error": "WF_APPROVAL_WRONG_STEP",
                     "message": (
-                        f"Phim cách nhiệt: trước hết duyệt mã phim (POST /api/workstreams/{ws_id}/approve-wf-materials). "
+                        f"Phim cách nhiệt/Cường lực: trước hết duyệt mã phim (POST /api/workstreams/{ws_id}/approve-wf-materials). "
                         f"Trạng thái hiện: {ws.status}"
                     ),
                 },
@@ -1417,6 +1601,7 @@ def approve_workstream(ws_id: str, data: dict = None, db: Session = Depends(get_
         raise HTTPException(400, f"Workstream in wrong status: {ws.status}")
 
     data = data or {}
+    act = session_username(request)
     # Đổi mã vật tư / loại PPF trước khi duyệt — bắt buộc change_reason
     new_mat = data.get("selected_material_code")
     if new_mat and str(new_mat).strip() != str(ws.selected_material_code or "").strip():
@@ -1429,13 +1614,13 @@ def approve_workstream(ws_id: str, data: dict = None, db: Session = Depends(get_
         old_m = ws.selected_material_code
         if ws.workstream_type == "PPF_INSTALLATION":
             _audit(db, ws.request_id, "PPF_TYPE_CHANGED", "WORKSTREAM", ws_id,
-                   old_m, new_mat, reason, "QL-002",
+                   old_m, new_mat, reason, act,
                    ws_id, ws.workstream_type)
             ws.ppf_type_changed = True
             ws.ppf_type_change_reason = reason
-        elif ws.workstream_type == "WINDOW_FILM_INSTALLATION":
+        elif ws.workstream_type in ("WINDOW_FILM_INSTALLATION", "GLASS_FILM_INSTALLATION"):
             _audit(db, ws.request_id, "REQUEST_MATERIAL_OVERRIDDEN", "WORKSTREAM", ws_id,
-                   old_m, new_mat, reason, "QL-002",
+                   old_m, new_mat, reason, act,
                    ws_id, ws.workstream_type)
         ws.selected_material_code = new_mat
 
@@ -1446,11 +1631,28 @@ def approve_workstream(ws_id: str, data: dict = None, db: Session = Depends(get_
         reason = data.get("change_reason", "")
         if not reason: raise HTTPException(400, "Bắt buộc nhập reason khi đổi LOT/OFFCUT.")
         _audit(db, ws.request_id, "WORKSTREAM_SOURCE_CHANGED", new_source_type or "LOT", new_source_id,
-               ws.allocated_source_id or "None", new_source_id, reason, "QL-002",
+               ws.allocated_source_id or "None", new_source_id, reason, act,
                ws_id, ws.workstream_type)
         ws.allocated_source_type = new_source_type or ws.allocated_source_type
         ws.allocated_source_id = new_source_id
         ws.source_changed = True; ws.source_change_reason = reason
+
+    # FLOOR_MAT: reserve stock immediately on approve
+    if ws.workstream_type == "FLOOR_MAT_INSTALLATION":
+        from wf_allocation_service import reserve_floor_mat
+
+        reserve_floor_mat(db, ws)
+        ws.is_locked = True
+        ws.status = "APPROVED"
+        ws.approved_by = act
+        ws.approved_at = _now()
+        _audit(db, ws.request_id, "WORKSTREAM_APPROVED",
+               "FLOOR_MAT", ws.workstream_id,
+               "PENDING_APPROVAL", "APPROVED",
+               f"Quản lý {act} duyệt thảm sàn, đã giữ kho",
+               act, ws_id, ws.workstream_type)
+        db.commit()
+        return {"status": "APPROVED", "workstream_id": ws_id, "floor_mat_reserved": True}
 
     # Determine source for this workstream if not set
     if not ws.allocated_source_id:
@@ -1467,13 +1669,13 @@ def approve_workstream(ws_id: str, data: dict = None, db: Session = Depends(get_
             ws.allocated_source_type = "LOT"
             ws.allocated_source_id = f"LOT-{mat}-001"
 
-    approver = data.get("approved_by", "QL-002")
+    approver = act
 
     from ppf_allocation_service import validate_ppf_allocation_at_approve
 
     if ws.workstream_type == "PPF_INSTALLATION":
         validate_ppf_allocation_at_approve(db, ws)
-    elif ws.workstream_type == "WINDOW_FILM_INSTALLATION":
+    elif ws.workstream_type in ("WINDOW_FILM_INSTALLATION", "GLASS_FILM_INSTALLATION"):
         from wf_allocation_service import validate_wf_allocation_at_approve
 
         validate_wf_allocation_at_approve(db, ws)
@@ -1494,7 +1696,7 @@ def approve_workstream(ws_id: str, data: dict = None, db: Session = Depends(get_
 
     used_wf_multi_lock = False
     wf_json = getattr(ws, "wf_allocation_json", None)
-    if ws.workstream_type == "WINDOW_FILM_INSTALLATION" and wf_json:
+    if ws.workstream_type in ("WINDOW_FILM_INSTALLATION", "GLASS_FILM_INSTALLATION") and wf_json:
         try:
             _wf_chk = json.loads(wf_json)
         except json.JSONDecodeError:
@@ -1576,12 +1778,13 @@ def approve_workstream(ws_id: str, data: dict = None, db: Session = Depends(get_
                jc_id, "JOB_CARD", "TECHNICIAN",
                ws_id, ws.workstream_type, ws.team_type)
     db.commit()
+    notify_manager_approved(ws_id)
     return {"status":"success",
             "detail":f"✅ Phê duyệt {ws.workstream_type} thành công. Job Card {jc_id} đã tạo.",
             "job_card_id": jc_id}
 
 @app.post("/api/workstreams/{ws_id}/edit")
-def edit_workstream(ws_id: str, data: dict, db: Session = Depends(get_db)):
+def edit_workstream(request: Request, ws_id: str, data: dict, db: Session = Depends(get_db)):
     """Edit workstream fields — all changes require reason + audit log."""
     ws = db.query(DbWorkstream).filter(DbWorkstream.workstream_id == ws_id).first()
     if not ws: raise HTTPException(404, "Workstream not found")
@@ -1589,7 +1792,7 @@ def edit_workstream(ws_id: str, data: dict, db: Session = Depends(get_db)):
         raise HTTPException(400, "Cannot edit CLOSED workstream (use Admin Override).")
     reason = data.get("reason", "")
     if not reason: raise HTTPException(400, "Bắt buộc nhập reason cho mọi chỉnh sửa.")
-    actor = data.get("actor", "QL-002")
+    actor = session_username(request)
 
     editable = ["selected_material_code","planned_cut_block","planned_deduction_length_m",
                 "allocated_source_id","allocated_source_type","technician_team",
@@ -1631,6 +1834,7 @@ def start_workstream(ws_id: str, db: Session = Depends(get_db)):
                ws_id, "JOB_CARD", "MANAGER",
                ws_id, ws.workstream_type, ws.team_type)
     db.commit()
+    notify_job_started(ws_id)
     return {"status":"success","detail":f"✅ Bắt đầu thi công {ws.workstream_type} lúc {ws.started_at[:16]}Z."}
 
 @app.post("/api/workstreams/{ws_id}/submit-actual")
@@ -1705,14 +1909,14 @@ def post_extra_cut_request(ws_id: str, data: dict, db: Session = Depends(get_db)
     )
 
     extra_norm = None
-    if ws.workstream_type == "WINDOW_FILM_INSTALLATION":
+    if ws.workstream_type in ("WINDOW_FILM_INSTALLATION", "GLASS_FILM_INSTALLATION"):
         body_wf = data.get("wf_extra_allocation") or data.get("wf_allocation")
         if not isinstance(body_wf, dict) or not isinstance(body_wf.get("items"), list):
             raise HTTPException(
                 400,
                 {
                     "error": "INVALID",
-                    "message": "Phim cách nhiệt: gửi kèm wf_extra_allocation (items giống phân bổ LOT).",
+                    "message": "Phim cách nhiệt/Cường lực: gửi kèm wf_extra_allocation (items giống phân bổ LOT).",
                 },
             )
         body_wf = dict(body_wf)
@@ -1774,12 +1978,13 @@ def post_extra_cut_request(ws_id: str, data: dict, db: Session = Depends(get_db)
         "extra_cut_requested": True,
         "extra_cut_reason": reason,
     }
-    if ws.workstream_type == "WINDOW_FILM_INSTALLATION" and ws.extra_cut_wf_allocation_json:
+    if ws.workstream_type in ("WINDOW_FILM_INSTALLATION", "GLASS_FILM_INSTALLATION") and ws.extra_cut_wf_allocation_json:
         try:
             out["extra_cut_wf_allocation"] = json.loads(ws.extra_cut_wf_allocation_json)
         except json.JSONDecodeError:
             out["extra_cut_wf_allocation"] = None
     out["extra_cut_history"] = _build_extra_cut_history_api(ws, db)
+    notify_extra_cut(ws_id, proposal_id)
     return out
 
 
@@ -1871,7 +2076,7 @@ def delete_extra_cut_proposal(
         "extra_cut_reason": ws.extra_cut_reason,
         "extra_cut_history": _build_extra_cut_history_api(ws, db),
     }
-    if ws.workstream_type == "WINDOW_FILM_INSTALLATION" and getattr(ws, "extra_cut_wf_allocation_json", None):
+    if ws.workstream_type in ("WINDOW_FILM_INSTALLATION", "GLASS_FILM_INSTALLATION") and getattr(ws, "extra_cut_wf_allocation_json", None):
         try:
             out["extra_cut_wf_allocation"] = json.loads(ws.extra_cut_wf_allocation_json)
         except json.JSONDecodeError:
@@ -1882,14 +2087,14 @@ def delete_extra_cut_proposal(
 
 
 @app.post("/api/workstreams/{ws_id}/cancel")
-def cancel_workstream(ws_id: str, data: dict = None, db: Session = Depends(get_db)):
+def cancel_workstream(request: Request, ws_id: str, data: dict = None, db: Session = Depends(get_db)):
     ws = db.query(DbWorkstream).filter(DbWorkstream.workstream_id == ws_id).first()
     if not ws: raise HTTPException(404, "Workstream not found")
     if ws.status in ("CLOSED", "COMPLETED", "CANCELLED"):
         raise HTTPException(400, f"Không thể hủy luồng ở trạng thái: {ws.status}")
 
     reason = (data or {}).get("reason", "Hủy theo yêu cầu")
-    actor = (data or {}).get("actor", "QL-002")
+    actor = session_username(request)
 
     _audit(db, ws.request_id, "WORKSTREAM_CANCELLED", "WORKSTREAM", ws_id,
            ws.status, "CANCELLED", reason, actor, ws_id, getattr(ws, "workstream_type", ""))
@@ -1929,23 +2134,43 @@ def complete_workstream(ws_id: str, data: dict = None, db: Session = Depends(get
     """KTV completes workstream → commit inventory → close workstream → check request closure."""
     ws = db.query(DbWorkstream).filter(DbWorkstream.workstream_id == ws_id).first()
     if not ws: raise HTTPException(404, "Workstream not found")
-    if ws.status not in ("IN_PROGRESS","ACTUAL_CONFIRMATION_REQUIRED"):
-        raise HTTPException(400, f"Workstream phải ở IN_PROGRESS. Hiện: {ws.status}")
-    if ws.actual_confirmation_status != "COMPLETED":
-        ws.status = "ACTUAL_CONFIRMATION_REQUIRED"
-        db.commit()
-        return {"status":"info",
-                "detail":"⚠️ KTV chưa nhập xác nhận kích thước thực tế. Hệ thống giữ ACTUAL_CONFIRMATION_REQUIRED."}
-
-    if ws.job_card_id:
-        jc = db.query(DbJobCard).filter(DbJobCard.job_card_id == ws.job_card_id).first()
-        if jc and len(_job_completion_photos_list(jc)) < 1:
-            return {
-                "status": "info",
-                "detail": "⚠️ Cần ít nhất 1 ảnh hoàn thành (nút «Hình ảnh hoàn thành» trên lệnh thi công) trước khi hệ thống trừ kho ảo và đóng luồng.",
-            }
+    if ws.workstream_type != "FLOOR_MAT_INSTALLATION":
+        if ws.status not in ("IN_PROGRESS","ACTUAL_CONFIRMATION_REQUIRED"):
+            raise HTTPException(400, f"Workstream phải ở IN_PROGRESS. Hiện: {ws.status}")
+        if ws.actual_confirmation_status != "COMPLETED":
+            ws.status = "ACTUAL_CONFIRMATION_REQUIRED"
+            db.commit()
+            return {"status":"info",
+                    "detail":"⚠️ KTV chưa nhập xác nhận kích thước thực tế. Hệ thống giữ ACTUAL_CONFIRMATION_REQUIRED."}
+        if ws.job_card_id:
+            jc = db.query(DbJobCard).filter(DbJobCard.job_card_id == ws.job_card_id).first()
+            if jc and len(_job_completion_photos_list(jc)) < 1:
+                return {
+                    "status": "info",
+                    "detail": "⚠️ Cần ít nhất 1 ảnh hoàn thành (nút «Hình ảnh hoàn thành» trên lệnh thi công) trước khi hệ thống trừ kho ảo và đóng luồng.",
+                }
+    else:
+        if ws.status not in ("IN_PROGRESS",):
+            raise HTTPException(400, f"Workstream phải ở IN_PROGRESS. Hiện: {ws.status}")
 
     tech_id = (data or {}).get("technician_id", ws.assigned_technician_id or "KTV-003")
+
+    if ws.workstream_type == "FLOOR_MAT_INSTALLATION":
+        from wf_allocation_service import confirm_floor_mat_deduct
+
+        confirm_floor_mat_deduct(db, ws)
+        ws.status = "CLOSED"
+        ws.actual_confirmation_status = "COMPLETED"
+        req = db.query(DbRequest).filter(DbRequest.request_id == ws.request_id).first()
+        if req:
+            _update_request_status_from_workstreams(db, req)
+        _audit(db, ws.request_id, "FLOOR_MAT_COMMITTED",
+               "FLOOR_MAT", ws.workstream_id,
+               "IN_PROGRESS", "CLOSED",
+               f"KTV hoàn tất lắp thảm sàn, kho đã trừ",
+               tech_id, ws_id, ws.workstream_type)
+        db.commit()
+        return {"status": "CLOSED", "workstream_id": ws_id, "detail": "✅ Thảm sàn hoàn tất. Kho đã trừ."}
 
     assert_source_valid_for_wf6_commit(db, ws)
 
@@ -1992,6 +2217,8 @@ def complete_workstream(ws_id: str, data: dict = None, db: Session = Depends(get
                    "VEHICLE_PARTIALLY_COMPLETED", ws.request_id, "REQUEST", "MANAGER")
 
     db.commit()
+    notify_job_completed(ws_id)
+    maybe_notify_request_completion(db, ws.request_id)
     return {"status":"success",
             "detail":f"✅ {ws.workstream_type} CLOSED. Tồn kho ảo đã commit. Request: {req.status if req else '—'}."}
 
@@ -1999,7 +2226,8 @@ def complete_workstream(ws_id: str, data: dict = None, db: Session = Depends(get
 # LEGACY MANAGER APPROVAL (backward compat — approves ALL workstreams at once)
 # ═══════════════════════════════════════════════════════════════════════════════
 @app.post("/api/requests/{request_id}/approve")
-def approve_request_legacy(request_id: str, db: Session = Depends(get_db)):
+def approve_request_legacy(request: Request, request_id: str, db: Session = Depends(get_db)):
+    rbac_request_approve(request)
     req = db.query(DbRequest).filter(DbRequest.request_id == request_id).first()
     if not req: raise HTTPException(404, "Not found")
     if req.status not in ("ALLOCATED", "NEEDS_REVIEW"):
@@ -2010,10 +2238,11 @@ def approve_request_legacy(request_id: str, db: Session = Depends(get_db)):
     if wss:
         for ws in wss:
             if ws.status == "PENDING_APPROVAL":
-                result = approve_workstream(ws.workstream_id, {}, db)
+                result = approve_workstream(request, ws.workstream_id, {}, db)
                 jc_ids.append(result.get("job_card_id",""))
     else:
         # Legacy single workstream (no workstreams table)
+        act = session_username(request)
         source_type = req.allocated_source_type
         source_id = req.allocated_source_id
         if source_type == "LOT":
@@ -2022,7 +2251,7 @@ def approve_request_legacy(request_id: str, db: Session = Depends(get_db)):
         elif source_type == "OFFCUT":
             oc = db.query(DbOffcutInventory).filter(DbOffcutInventory.offcut_id == source_id).first()
             if oc: oc.is_locked = True
-        req.status = "APPROVED"; req.approved_by = "QL-002"
+        req.status = "APPROVED"; req.approved_by = act
         today = datetime.date.today().strftime("%Y%m%d")
         jc_id = f"JOB-{today}-{request_id[-3:]}"
         if not db.query(DbJobCard).filter(DbJobCard.job_card_id == jc_id).first():
@@ -2041,7 +2270,7 @@ def approve_request_legacy(request_id: str, db: Session = Depends(get_db)):
             jc_ids.append(jc_id)
         _audit(db, request_id, "SOFT_LOCK_RECORDED", source_type, source_id,
                "is_locked=false", "is_locked=true",
-               "QL-002 phê duyệt, kích hoạt Soft Lock.", "QL-002")
+               f"{act} phê duyệt, kích hoạt Soft Lock.", act)
 
     _update_request_status_from_workstreams(db, req)
     db.commit()
@@ -2162,6 +2391,23 @@ def get_job_cards(db: Session = Depends(get_db)):
     return db.query(DbJobCard).order_by(DbJobCard.created_at.desc()).all()
 
 
+@app.get("/api/job-cards/{jc_id}")
+def get_job_card(jc_id: str, db: Session = Depends(get_db)):
+    jc = db.query(DbJobCard).filter(DbJobCard.job_card_id == jc_id).first()
+    if not jc:
+        raise HTTPException(404, "Job card not found")
+    return {
+        "job_card_id": jc.job_card_id,
+        "request_id": jc.request_id,
+        "workstream_id": jc.workstream_id,
+        "workstream_type": jc.workstream_type,
+        "status": jc.status,
+        "technician_name": jc.technician_name,
+        "started_at": jc.started_at,
+        "completed_at": jc.completed_at,
+    }
+
+
 @app.post("/api/job-cards/{jc_id}/completion-photos")
 async def upload_job_completion_photo(jc_id: str, file: UploadFile = File(...), db: Session = Depends(get_db)):
     """KTV tải ảnh chứng minh hoàn thành thi công (chụp / chọn file)."""
@@ -2233,6 +2479,8 @@ def start_job(jc_id: str, db: Session = Depends(get_db)):
                "JOB_STARTED", jc_id, "JOB_CARD", "MANAGER",
                jc.workstream_id, jc.workstream_type)
     db.commit()
+    if jc.workstream_id:
+        notify_job_started(jc.workstream_id)
     return {"status":"success","detail":f"✅ Bắt đầu lúc {jc.started_at[:16]}Z."}
 
 @app.post("/api/job-cards/{jc_id}/request-complete")
@@ -2295,32 +2543,35 @@ def _serialize_ocr_draft_row(r: DbOcrDraft) -> dict:
     return out
 
 
-def _next_ocr_tracking_counters(db: Session) -> dict:
-    """Gợi ý STT năm / STT tháng dựa trên các đơn (requests) đã tạo."""
+def _next_ocr_tracking_counters(db: Session, dealer_id: str = None) -> dict:
+    """Số thứ tự tiếp theo = tổng đơn đã tạo trong năm/tháng của đại lý + 1.
+    Đếm tất cả đơn (kể cả đơn cũ không có sequence_no), không dùng max(sequence_no).
+    Nếu dealer_id được cung cấp, đếm riêng cho từng đại lý."""
     utc = datetime.datetime.utcnow()
-    y = utc.year
-    ym_prefix = f"{y}-{utc.month:02d}"
-    max_y = 0
-    max_m = 0
-    for row in db.query(DbRequest).all():
-        cat = getattr(row, "created_at", None) or ""
-        cat_s = str(cat)
-        if len(cat_s) < 4 or not cat_s.startswith(str(y)):
-            continue
-        sn = getattr(row, "sequence_no", None)
-        if sn is not None and str(sn).strip().isdigit():
-            max_y = max(max_y, int(str(sn).strip()))
-        if len(cat_s) >= 7 and cat_s[:7] == ym_prefix:
-            snm = getattr(row, "sequence_no_month", None)
-            if snm is not None and str(snm).strip().isdigit():
-                max_m = max(max_m, int(str(snm).strip()))
-    return {"sequence_year_next": max_y + 1, "sequence_month_next": max_m + 1}
+    y_prefix = str(utc.year)
+    ym_prefix = f"{utc.year}-{utc.month:02d}"
+    qry = db.query(DbRequest)
+    if dealer_id:
+        qry = qry.filter(DbRequest.dealer_id == dealer_id)
+    count_year = 0
+    count_month = 0
+    for row in qry.all():
+        cat_s = str(getattr(row, "created_at", "") or "")
+        if cat_s.startswith(y_prefix):
+            count_year += 1
+        if cat_s.startswith(ym_prefix):
+            count_month += 1
+    return {"sequence_year_next": count_year + 1, "sequence_month_next": count_month + 1}
 
 
 @app.get("/api/ocr/tracking-counters")
-def get_ocr_tracking_counters(db: Session = Depends(get_db)):
-    """STT theo dõi xe thi công: năm (từ 1/1) và tháng hiện tại (từ đầu tháng)."""
-    return _next_ocr_tracking_counters(db)
+def get_ocr_tracking_counters(
+    dealer_id: Optional[str] = Query(None, description="Lọc STT theo đại lý cụ thể"),
+    db: Session = Depends(get_db)
+):
+    """STT theo dõi xe thi công: năm (từ 1/1) và tháng hiện tại (từ đầu tháng).
+    Nếu truyền dealer_id, trả về STT riêng cho đại lý đó."""
+    return _next_ocr_tracking_counters(db, dealer_id=dealer_id)
 
 
 @app.get("/api/ocr-drafts")
@@ -2583,14 +2834,15 @@ def confirm_ocr(draft_id: str, data: dict, db: Session = Depends(get_db)):
         if not val or val == "UNKNOWN" or val == "Chưa đọc được - Cần rà soát":
             raise HTTPException(400, f"Thiếu thông tin bắt buộc: {req}")
 
-    # Dynamic Request ID generation: DYC-YYMMDD-{6 cuối số khung}
+    # Mã đơn: {Mã đại lý}-{ddmmyy}-{6 cuối số khung}
     vin_val = data.get("vin").strip().upper()
     vin_val = re.sub(r'[^A-Z0-9]', '', vin_val)
     if len(vin_val) < 6:
         raise HTTPException(400, "VIN phải có ít nhất 6 ký tự.")
     vin_last_6 = vin_val[-6:]
-    yymmdd = datetime.datetime.now().strftime("%y%m%d")
-    base_req_id = f"DYC-{yymmdd}-{vin_last_6}"
+    ddmmyy = datetime.datetime.now().strftime("%d%m%y")
+    dealer_code = _dealer_req_code(data.get("dealer_id") or "", db)
+    base_req_id = f"{dealer_code}-{ddmmyy}-{vin_last_6}"
     
     new_req_id = base_req_id
     existing_req = db.query(DbRequest).filter(DbRequest.request_id == new_req_id).first()
@@ -2832,7 +3084,7 @@ def mark_all_read(db: Session = Depends(get_db)):
 # DEMO RUN ALL — Multi-Workstream E2E
 # ═══════════════════════════════════════════════════════════════════════════════
 @app.post("/api/demo/run-all/{request_id}")
-def demo_run_all(request_id: str, db: Session = Depends(get_db)):
+def demo_run_all(request: Request, request_id: str, db: Session = Depends(get_db)):
     req = db.query(DbRequest).filter(DbRequest.request_id == request_id).first()
     if not req: raise HTTPException(404, "Not found")
     steps = []
@@ -2850,7 +3102,7 @@ def demo_run_all(request_id: str, db: Session = Depends(get_db)):
             r = run_request_step(request_id, db); db.refresh(req)
             steps.append({"step":"WF4_ALLOCATE","result":r.get("detail","")})
         elif req.status in ("ALLOCATED", "NEEDS_REVIEW"):
-            r = approve_request_legacy(request_id, db); db.refresh(req)
+            r = approve_request_legacy(request, request_id, db); db.refresh(req)
             steps.append({"step":"WF5_APPROVE_ALL","result":r.get("detail","")})
         elif req.status in ("APPROVED","IN_PROGRESS","PARTIALLY_COMPLETED"):
             # Complete all pending workstreams

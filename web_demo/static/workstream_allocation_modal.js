@@ -1004,10 +1004,13 @@
   async function saveAllocation() {
     const ctx = window.__waEditorCtx;
     if (!ctx) return;
+    if (typeof window.dycPerm === 'function' && !window.dycPerm('can_write_allocation')) {
+      if (typeof toast === 'function') toast('warning', 'Quyền', 'Quản lý không được lưu phân bổ LOT.');
+      return;
+    }
     const payload = readAllocFromDom(ctx);
     payload.workstream_type = ctx.ws.workstream_type;
     payload.change_reason = document.getElementById('wa-alloc-reason')?.value?.trim() || '';
-    payload.actor = 'QL-002';
     payload.technician_team = document.getElementById('wa-edit-team')?.value;
     payload.assigned_technician_name = document.getElementById('wa-edit-tech')?.value;
     if (isPpfCtx(ctx)) {
